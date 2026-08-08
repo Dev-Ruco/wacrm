@@ -68,7 +68,11 @@ async function testSupabase(input: Record<string, unknown>) {
   ])
   if (result.error) throw new Error(result.error.message)
 
-  const products = (result.data ?? []).map((item: Record<string, unknown>, index: number) => ({
+  const rows = Array.isArray(result.data)
+    ? result.data.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+    : []
+
+  const products = rows.map((item, index) => ({
     id: String(item[idColumn] ?? index),
     name: String(item[nameColumn] ?? ''),
     price: Number(item[priceColumn]),
@@ -76,7 +80,7 @@ async function testSupabase(input: Record<string, unknown>) {
     imageUrl: imageColumn ? item[imageColumn] ?? null : null,
   })).filter((item) => item.name && Number.isFinite(item.price))
 
-  return { ok: true, source_type: 'external_supabase', schema, table, products, raw_item_count: result.data?.length ?? 0 }
+  return { ok: true, source_type: 'external_supabase', schema, table, products, raw_item_count: rows.length }
 }
 
 async function testRest(input: Record<string, unknown>) {
