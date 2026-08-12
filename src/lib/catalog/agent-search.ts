@@ -168,7 +168,6 @@ function relevanceScore(product: CatalogProduct, input: AgentCatalogSearchInput)
 
   const sizeMatch = productSizeMatch(product, input.size)
   if (sizeMatch === 'match') score += 50
-  if (sizeMatch === 'mismatch') score -= 30
   return score
 }
 
@@ -194,7 +193,9 @@ function retrievalQueries(input: AgentCatalogSearchInput): string[] {
  * The legacy search layer is intentionally kept as a broad source adapter.
  * This layer fetches a wider candidate pool, applies explicit category/colour
  * constraints as AND conditions, removes products already shown by the live
- * conversation state, then ranks and limits. It never sends WhatsApp media.
+ * conversation state, then ranks and limits. A known size mismatch is also
+ * excluded; products with no size data stay eligible but are marked unknown
+ * so the agent can be honest. It never sends WhatsApp media.
  */
 export async function searchCatalogForAgent(
   db: WacrmSupabaseClient,
@@ -224,11 +225,13 @@ export async function searchCatalogForAgent(
     .filter((product) => !excluded.has(catalogProductKey(product)))
     .filter((product) => categoryMatches(product, input.category))
     .filter((product) => colorMatches(product, input.color))
-    .map((product) => ({
+    .map((product) => ({ product, sizeMatch: productSizeMatch(product, input.size) }))
+    .filter(({ sizeMatch }) => sizeMatch !== 'mismatch')
+    .map(({ product, sizeMatch }) => ({
       product,
       productKey: catalogProductKey(product),
       score: relevanceScore(product, input),
-      sizeMatch: productSizeMatch(product, input.size),
+      sizeMatch,
     }))
     .sort((a, b) => b.score - a.score || a.product.name.localeCompare(b.product.name, 'pt'))
     .slice(0, input.limit)
