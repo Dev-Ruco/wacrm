@@ -106,4 +106,42 @@ describe('searchCatalogForAgent', () => {
     expect(byId.get('legging-black')).toBe('match')
     expect(byId.get('legging-blue')).toBe('unknown')
   })
+
+  it('keeps a compound category such as saia-calção more specific than calção', async () => {
+    vi.mocked(searchCatalogues).mockResolvedValue([
+      {
+        id: 'skort-1',
+        name: 'Saia-Calção com Pregas',
+        description: 'Cor: preta.',
+        price: 2300,
+        currency: 'MZN',
+        imageUrl: 'https://cdn.example.com/skort.jpg',
+        productUrl: null,
+        category: 'saia-calção',
+        stockQuantity: 3,
+        sourceName: 'LC Fitness',
+      },
+      {
+        id: 'short-1',
+        name: 'Calção de Treino',
+        description: 'Cor: preta.',
+        price: 1800,
+        currency: 'MZN',
+        imageUrl: 'https://cdn.example.com/short.jpg',
+        productUrl: null,
+        category: 'calção',
+        stockQuantity: 4,
+        sourceName: 'LC Fitness',
+      },
+    ])
+
+    const result = await searchCatalogForAgent({} as WacrmSupabaseClient, 'account-1', {
+      query: 'saia-calção',
+      category: 'saia-calção',
+      mode: 'browse',
+      limit: 8,
+    })
+
+    expect(result.map(({ product }) => product.id)).toEqual(['skort-1'])
+  })
 })
