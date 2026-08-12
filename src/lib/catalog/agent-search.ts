@@ -28,8 +28,8 @@ const CATEGORY_ALIASES = [
   ['legging', 'leggings', 'colante', 'colantes', 'calca de treino', 'calcas de treino', 'calca fitness', 'calcas fitness', 'tights'],
   ['camisola', 'camisolas', 'camiseta', 'camisetas', 't shirt', 't shirts', 'tshirt', 'tshirts'],
   ['top', 'tops'],
-  ['calcao', 'calcoes', 'short', 'shorts'],
   ['saia calcao', 'saia calcoes', 'skort'],
+  ['calcao', 'calcoes', 'short', 'shorts'],
   ['macacao', 'macacoes', 'jumpsuit'],
   ['conjunto', 'conjuntos', 'set'],
   ['sapatilha', 'sapatilhas', 'tenis', 'calcado desportivo', 'sapato desportivo'],
@@ -77,6 +77,28 @@ function textIncludesAll(haystack: string, needles: string[]): boolean {
   return needles.length === 0 || needles.every((needle) => haystack.includes(needle))
 }
 
+function bestAliasGroup(
+  requested: string,
+  groups: readonly (readonly string[])[],
+): string[] | null {
+  const candidates = groups
+    .map((group) => group.map(normalize))
+    .map((group) => ({
+      group,
+      score: Math.max(
+        0,
+        ...group.map((alias) => {
+          if (requested === alias) return 10_000 + alias.length
+          if (requested.includes(alias) || alias.includes(requested)) return alias.length
+          return 0
+        }),
+      ),
+    }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score)
+  return candidates[0]?.group ?? null
+}
+
 function matchesAliases(
   haystack: string,
   requested: string | null | undefined,
@@ -84,15 +106,7 @@ function matchesAliases(
 ): boolean {
   const normalizedRequested = normalize(requested)
   if (!normalizedRequested) return true
-  const normalizedGroups = groups.map((group) => group.map(normalize))
-  const matchingGroup = normalizedGroups.find((group) =>
-    group.some(
-      (alias) =>
-        normalizedRequested === alias ||
-        normalizedRequested.includes(alias) ||
-        alias.includes(normalizedRequested),
-    ),
-  )
+  const matchingGroup = bestAliasGroup(normalizedRequested, groups)
   if (matchingGroup) return matchingGroup.some((alias) => haystack.includes(alias))
   return textIncludesAll(haystack, tokens(normalizedRequested))
 }
