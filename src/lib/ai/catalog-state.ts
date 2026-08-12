@@ -42,6 +42,53 @@ function mergeUnique(current: string[], additions: string[]): string[] {
   return Array.from(new Set([...current, ...additions])).slice(-500)
 }
 
+function safeFilterText(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed ? trimmed.slice(0, 120) : null
+}
+
+/**
+ * Small operational context block for the model. Product keys and media keys
+ * stay server-side; the model only needs the human-readable selected product
+ * and last structured search constraints to resolve "mais", "esta", "M?",
+ * etc. This is current-conversation state, not durable customer memory.
+ */
+export function conversationCatalogStatePrompt(
+  state: ConversationCatalogState,
+): string | null {
+  const category = safeFilterText(state.lastFilters.category)
+  const color = safeFilterText(state.lastFilters.color)
+  const size = safeFilterText(state.lastFilters.size)
+  const hasContext = Boolean(
+    state.selectedProductName || state.lastQuery || category || color || size,
+  )
+  if (!hasContext) return null
+
+  const lines = [
+    'Current catalogue conversation state — operational context from this WhatsApp conversation, not long-term customer memory.',
+  ]
+  if (state.selectedProductName) {
+    lines.push(`Selected/current product: ${JSON.stringify(state.selectedProductName)}.`)
+  }
+  if (state.lastQuery) lines.push(`Last catalogue query: ${JSON.stringify(state.lastQuery)}.`)
+  const filters = [
+    category ? `category=${JSON.stringify(category)}` : null,
+    color ? `color=${JSON.stringify(color)}` : null,
+    size ? `size=${JSON.stringify(size)}` : null,
+  ].filter(Boolean)
+  if (filters.length > 0) lines.push(`Last explicit filters: ${filters.join(', ')}.`)
+  if (state.shownProductKeys.length > 0) {
+    lines.push(
+      `${state.shownProductKeys.length} product(s) have already been shown in this conversation; browse-mode catalogue search excludes them server-side.`,
+    )
+  }
+  lines.push(
+    'Use this only to preserve continuity. For "more/other" keep relevant previous constraints and browse for unseen products; for questions about the selected/current product use lookup mode. Do not mention this internal state to the customer.',
+  )
+  return lines.join('\n')
+}
+
 export async function loadConversationCatalogState(args: {
   db: WacrmSupabaseClient
   accountId: string
