@@ -24,6 +24,35 @@ export interface RankedAgentCatalogProduct {
 const MAX_CANDIDATES = 60
 const CANDIDATE_MULTIPLIER = 8
 
+const CATEGORY_ALIASES = [
+  ['legging', 'leggings', 'colante', 'colantes', 'calca de treino', 'calcas de treino', 'calca fitness', 'calcas fitness', 'tights'],
+  ['camisola', 'camisolas', 'camiseta', 'camisetas', 't shirt', 't shirts', 'tshirt', 'tshirts'],
+  ['top', 'tops'],
+  ['calcao', 'calcoes', 'short', 'shorts'],
+  ['saia calcao', 'saia calcoes', 'skort'],
+  ['macacao', 'macacoes', 'jumpsuit'],
+  ['conjunto', 'conjuntos', 'set'],
+  ['sapatilha', 'sapatilhas', 'tenis', 'calcado desportivo', 'sapato desportivo'],
+  ['saia', 'saias'],
+  ['acessorio', 'acessorios'],
+] as const
+
+const COLOR_ALIASES = [
+  ['preto', 'preta', 'pretos', 'pretas', 'negro', 'negra'],
+  ['branco', 'branca', 'brancos', 'brancas'],
+  ['azul', 'azuis'],
+  ['vermelho', 'vermelha', 'vermelhos', 'vermelhas'],
+  ['verde', 'verdes'],
+  ['amarelo', 'amarela', 'amarelos', 'amarelas'],
+  ['roxo', 'roxa', 'roxos', 'roxas', 'lilas'],
+  ['rosa', 'rosas', 'cor de rosa'],
+  ['cinza', 'cinzento', 'cinzenta', 'cinzentos', 'cinzentas'],
+  ['bege', 'beges'],
+  ['laranja', 'laranjas'],
+  ['dourado', 'dourada', 'dourados', 'douradas'],
+  ['prateado', 'prateada', 'prateados', 'prateadas'],
+] as const
+
 function normalize(value: string | null | undefined): string {
   return (value ?? '')
     .normalize('NFD')
@@ -48,23 +77,43 @@ function textIncludesAll(haystack: string, needles: string[]): boolean {
   return needles.length === 0 || needles.every((needle) => haystack.includes(needle))
 }
 
+function matchesAliases(
+  haystack: string,
+  requested: string | null | undefined,
+  groups: readonly (readonly string[])[],
+): boolean {
+  const normalizedRequested = normalize(requested)
+  if (!normalizedRequested) return true
+  const normalizedGroups = groups.map((group) => group.map(normalize))
+  const matchingGroup = normalizedGroups.find((group) =>
+    group.some(
+      (alias) =>
+        normalizedRequested === alias ||
+        normalizedRequested.includes(alias) ||
+        alias.includes(normalizedRequested),
+    ),
+  )
+  if (matchingGroup) return matchingGroup.some((alias) => haystack.includes(alias))
+  return textIncludesAll(haystack, tokens(normalizedRequested))
+}
+
 function categoryMatches(product: CatalogProduct, category: string | null | undefined): boolean {
-  const required = tokens(category)
-  if (required.length === 0) return true
+  if (!normalize(category)) return true
   const explicitCategory = normalize(product.category)
   const fallback = normalize(`${product.name} ${product.description ?? ''}`)
-  return textIncludesAll(explicitCategory, required) || textIncludesAll(fallback, required)
+  return (
+    matchesAliases(explicitCategory, category, CATEGORY_ALIASES) ||
+    matchesAliases(fallback, category, CATEGORY_ALIASES)
+  )
 }
 
 function colorMatches(product: CatalogProduct, color: string | null | undefined): boolean {
-  const required = tokens(color)
-  if (required.length === 0) return true
+  if (!normalize(color)) return true
   const values = [
     product.description ?? '',
     ...(product.variants ?? []).map((variant) => variant.color ?? ''),
   ]
-  const haystack = normalize(values.join(' '))
-  return textIncludesAll(haystack, required)
+  return matchesAliases(normalize(values.join(' ')), color, COLOR_ALIASES)
 }
 
 function productSizeMatch(
@@ -86,7 +135,6 @@ function relevanceScore(product: CatalogProduct, input: AgentCatalogSearchInput)
   const description = normalize(product.description)
   const query = normalize(input.query)
   const wantedCategory = normalize(input.category)
-  const wantedColor = normalize(input.color)
   let score = 0
 
   if (query) {
@@ -98,10 +146,9 @@ function relevanceScore(product: CatalogProduct, input: AgentCatalogSearchInput)
   }
   if (wantedCategory) {
     if (category === wantedCategory) score += 120
-    else if (category.includes(wantedCategory)) score += 80
-    else if (name.includes(wantedCategory)) score += 55
+    else if (categoryMatches(product, input.category)) score += 80
   }
-  if (wantedColor && normalize(product.description).includes(wantedColor)) score += 45
+  if (input.color && colorMatches(product, input.color)) score += 45
   if (product.imageUrl || product.variants?.some((variant) => variant.imageUrl)) score += 20
   if (product.stockQuantity !== null && product.stockQuantity > 0) score += 10
 
