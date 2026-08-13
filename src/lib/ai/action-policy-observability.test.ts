@@ -89,7 +89,10 @@ describe('tool observability', () => {
     const toolFinish = updates
       .filter((row) => row.table === 'agent_trace_steps')
       .map((row) => row.payload)
-      .find((row) => row.status === 'completed' && row.metadata)
+      .find((row) => {
+        const metadata = row.metadata as Record<string, unknown> | undefined
+        return row.status === 'completed' && metadata?.action_class === 'read'
+      })
     expect(toolFinish).toMatchObject({
       status: 'completed',
       metadata: {
