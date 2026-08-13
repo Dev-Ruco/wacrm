@@ -28,6 +28,15 @@ describe('live observability schema', () => {
     expect(migration).not.toContain('create table if not exists wacrm.agent_runs')
   })
 
+  it('backfills historical traces before running becomes the default', () => {
+    const backfill = migration.indexOf('where status is null')
+    const runningDefault = migration.indexOf("alter column status set default 'running'")
+    expect(backfill).toBeGreaterThan(-1)
+    expect(runningDefault).toBeGreaterThan(backfill)
+    expect(migration).toContain("when final_action = 'handoff' then 'handoff'")
+    expect(migration).toContain("else 'completed'")
+  })
+
   it('publishes only the real run and step tables needed by Realtime', () => {
     expect(migration).toContain("tablename = 'agent_traces'")
     expect(migration).toContain("tablename = 'agent_trace_steps'")
