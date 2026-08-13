@@ -5,6 +5,7 @@ import { loadWorkingConversationState, type WorkingConversationState } from './w
 import { chatContentText, type ChatMessage } from './types'
 
 interface WorkingStateMeta {
+  available: boolean
   sourceMessageId: string | null
   contextResetAt: string | null
 }
@@ -72,13 +73,19 @@ async function loadMeta(args: {
       .eq('account_id', args.accountId)
       .eq('conversation_id', args.conversationId)
       .maybeSingle()
-    if (error || !data) return { sourceMessageId: null, contextResetAt: null }
+    if (error) {
+      return { available: false, sourceMessageId: null, contextResetAt: null }
+    }
+    if (!data) {
+      return { available: true, sourceMessageId: null, contextResetAt: null }
+    }
     return {
+      available: true,
       sourceMessageId: cleanText(data.source_message_id, 180),
       contextResetAt: normalizeTimestamp(data.context_reset_at),
     }
   } catch {
-    return { sourceMessageId: null, contextResetAt: null }
+    return { available: false, sourceMessageId: null, contextResetAt: null }
   }
 }
 
@@ -87,16 +94,27 @@ export async function loadWorkingStateForContext(args: {
   accountId: string
   conversationId: string
   contextResetAt: string | null
-}): Promise<{ state: WorkingConversationState; sourceMessageId: string | null }> {
+}): Promise<{
+  available: boolean
+  state: WorkingConversationState
+  sourceMessageId: string | null
+}> {
   const [state, meta] = await Promise.all([
     loadWorkingConversationState(args),
     loadMeta(args),
   ])
+  if (!meta.available) {
+    return { available: false, state: { ...EMPTY_STATE }, sourceMessageId: null }
+  }
   const resetAt = normalizeTimestamp(args.contextResetAt)
   if (meta.contextResetAt !== resetAt) {
-    return { state: { ...EMPTY_STATE, revision: state.revision }, sourceMessageId: null }
+    return {
+      available: true,
+      state: { ...EMPTY_STATE, revision: state.revision },
+      sourceMessageId: null,
+    }
   }
-  return { state, sourceMessageId: meta.sourceMessageId }
+  return { available: true, state, sourceMessageId: meta.sourceMessageId }
 }
 
 function parseObject(raw: string): Record<string, unknown> | null {
@@ -139,6 +157,7 @@ export async function refreshWorkingConversationState(args: {
   messages: ChatMessage[]
 }): Promise<WorkingConversationState> {
   const current = await loadWorkingStateForContext(args)
+  if (!current.available) return current.state
   if (!args.sourceMessageId || current.sourceMessageId === args.sourceMessageId) {
     return current.state
   }
