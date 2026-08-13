@@ -1,5 +1,8 @@
 import { REPLY_SPLIT_MARKER } from './chunk-reply'
-import { HISTORY_ANNOTATION_MARKERS } from './history-annotations'
+import {
+  HISTORY_ANNOTATION_MARKERS,
+  stripHistoryAnnotationMarkers,
+} from './history-annotations'
 
 export type GuardrailViolation =
   | 'control_marker'
@@ -95,15 +98,23 @@ export function evaluateAgentOutput(args: {
   if (!text) return { safe: true, violations: [] }
   const violations = new Set<GuardrailViolation>()
   const withoutSplits = text.split(REPLY_SPLIT_MARKER).join('')
+  const hasHistoryAnnotation = HISTORY_ANNOTATION_MARKERS.some((marker) =>
+    withoutSplits.includes(marker),
+  )
+  const withoutHistoryAnnotations = hasHistoryAnnotation
+    ? stripHistoryAnnotationMarkers(withoutSplits)
+    : withoutSplits
 
   if (/\[\[[A-Z][A-Z0-9_:-]{1,40}\]\]/.test(withoutSplits)) {
     violations.add('control_marker')
   }
   // buildConversationContext annotates past media/interactive messages with
   // bracketed markers like "[Opção interactiva no WhatsApp]" so the model
-  // can read its own history — a real leak observed in production is the
-  // model echoing that annotation back as if it were reply content.
-  if (HISTORY_ANNOTATION_MARKERS.some((marker) => withoutSplits.includes(marker))) {
+  // can read its own history. An isolated echo of one of these exact,
+  // server-owned markers is recoverable at the final send boundary: it is
+  // recorded here but only blocks the turn when no useful reply remains or
+  // another (real) guardrail violation is also present.
+  if (hasHistoryAnnotation) {
     violations.add('history_annotation_leak')
   }
   if (
@@ -150,8 +161,18 @@ export function evaluateAgentOutput(args: {
     violations.add('unsafe_promise')
   }
 
+  const violationList = Array.from(violations)
+  const blockingViolations = violationList.filter(
+    (violation) => violation !== 'history_annotation_leak',
+  )
+  const usefulTextRemains = /[\p{L}\p{N}]/u.test(withoutHistoryAnnotations)
+  const recoverableHistoryLeak =
+    hasHistoryAnnotation && blockingViolations.length === 0 && usefulTextRemains
+
   return {
-    safe: violations.size === 0,
-    violations: Array.from(violations),
+    safe:
+      blockingViolations.length === 0 &&
+      (!hasHistoryAnnotation || recoverableHistoryLeak),
+    violations: violationList,
   }
 }
