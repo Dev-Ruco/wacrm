@@ -138,7 +138,8 @@ function pickToolOutput(name: string, output: Record<string, unknown> | null) {
   if (!output) return {}
   const common = {
     ok: bool(output.ok),
-    error: text(output.error, 240),
+    has_error: Boolean(text(output.error, 20)),
+    error_code: text(output.code, 80),
   }
   switch (name) {
     case 'search_catalog': {
@@ -230,11 +231,11 @@ export function toolTraceFinishedMetadata(args: {
   rawResult?: string | null
   error?: unknown
 }) {
-  const errorText = args.error instanceof Error ? args.error.message : args.error ? String(args.error) : null
   return sanitizeTraceMetadata({
     action_class: TOOL_ACTION_CLASS[args.name] ?? null,
     input: pickToolInput(args.name, jsonObject(args.rawArguments)),
     output: pickToolOutput(args.name, jsonObject(args.rawResult)),
-    error: errorText ? cleanString(errorText, 240) : null,
+    execution_error: Boolean(args.error),
+    error_name: args.error instanceof Error ? args.error.name.slice(0, 80) : null,
   })
 }
