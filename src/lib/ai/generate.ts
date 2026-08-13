@@ -12,6 +12,7 @@ import { HANDOFF_SENTINEL, aiRequestTimeoutMs } from './defaults'
 import { generateOpenAi } from './providers/openai'
 import { generateAnthropic } from './providers/anthropic'
 import { executorWithTenantPolicy, toolsAllowedForTurn } from './action-policy'
+import { getAgentTraceContext } from './trace-context'
 
 export interface GenerateArgs {
   config: Pick<AiConfig, 'provider' | 'model' | 'apiKey' | 'temperature'> & {
@@ -83,22 +84,55 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
     temperature: config.temperature,
   }
 
-  let result: { text: string; usage: AiUsage | null }
-  switch (config.provider) {
-    case 'openai':
-      result = await generateOpenAi(providerArgs)
-      break
-    case 'anthropic':
-      result = await generateAnthropic(providerArgs)
-      break
-    default:
-      throw new AiError(`Unsupported AI provider: ${config.provider}`, {
-        code: 'unsupported_provider',
-        status: 400,
-      })
-  }
+  const trace = getAgentTraceContext()
+  trace?.setRuntime(config.provider, config.model)
+  const generationStep = trace?.startStep('llm_generation', 'Modelo de IA', {
+    provider: config.provider,
+    model: config.model,
+    available_tool_count: effectiveTools?.length ?? 0,
+  })
 
-  return parseGeneration(result.text, result.usage)
+  try {
+    let result: { text: string; usage: AiUsage | null }
+    switch (config.provider) {
+      case 'openai':
+        result = await generateOpenAi(providerArgs)
+        break
+      case 'anthropic':
+        result = await generateAnthropic(providerArgs)
+        break
+      default:
+        throw new AiError(`Unsupported AI provider: ${config.provider}`, {
+          code: 'unsupported_provider',
+          status: 400,
+        })
+    }
+
+    if (generationStep) {
+      trace?.finishStep(generationStep, 'completed', {
+        provider: config.provider,
+        model: config.model,
+        available_tool_count: effectiveTools?.length ?? 0,
+        usage: result.usage
+          ? {
+              prompt_tokens: result.usage.promptTokens,
+              completion_tokens: result.usage.completionTokens,
+              total_tokens: result.usage.totalTokens,
+            }
+          : null,
+      })
+    }
+    return parseGeneration(result.text, result.usage)
+  } catch (error) {
+    if (generationStep) {
+      trace?.finishStep(generationStep, 'failed', {
+        provider: config.provider,
+        model: config.model,
+        error_code: error instanceof AiError ? error.code : 'generation_failed',
+      })
+    }
+    throw error
+  }
 }
 
 export function parseGeneration(
