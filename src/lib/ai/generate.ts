@@ -30,16 +30,31 @@ export interface GenerateArgs {
   executeTool?: AgentToolExecutor
 }
 
+function serverInternalContext(messages: ChatMessage[]): string | null {
+  const contexts = messages
+    .map((message) =>
+      (message as ChatMessage & { internalContext?: string }).internalContext?.trim(),
+    )
+    .filter((value): value is string => Boolean(value))
+  const unique = Array.from(new Set(contexts))
+  if (unique.length === 0) return null
+  return unique.map((value) => value.slice(0, 8_000)).join('\n\n')
+}
+
 /**
  * Generate the next reply from the account's configured provider.
  * Before the provider sees or executes tools, generic tenant policy is applied
- * at the runtime boundary. This is deliberately not a domain/intent router:
- * Skills and account tool permissions still decide capability, while the
- * policy controls initiative/presentation behaviour selected by this tenant.
+ * at the runtime boundary. Server-maintained internal context attached by the
+ * conversation builder is promoted into the system prompt and never sent as
+ * a fake customer/business history message.
  */
 export async function generateReply(args: GenerateArgs): Promise<GenerateResult> {
   const { config, systemPrompt, messages, tools, executeTool } = args
   const timeoutMs = aiRequestTimeoutMs()
+  const internalContext = serverInternalContext(messages)
+  const effectiveSystemPrompt = internalContext
+    ? `${systemPrompt}\n\n${internalContext}`
+    : systemPrompt
   const effectiveTools = toolsAllowedForTurn({
     tools,
     messages,
@@ -52,7 +67,7 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
   const providerArgs = {
     apiKey: config.apiKey,
     model: config.model,
-    systemPrompt,
+    systemPrompt: effectiveSystemPrompt,
     messages,
     timeoutMs,
     tools: effectiveTools,
