@@ -79,19 +79,28 @@ export function toolsAllowedForTurn(args: {
   strategy?: CommercialStrategy
 }): AgentToolDefinition[] | undefined {
   const { tools, messages, strategy } = args
-  if (!tools || tools.length === 0 || !strategy) return tools
+  if (!tools || tools.length === 0) return tools
 
-  const decorated = tools.map((tool) => withTenantPolicy(tool, strategy))
-  if (strategy.preferVisual) return decorated
-  if (customerExplicitlyRequestedPresentation(messages)) return decorated
-  return decorated.filter((tool) => tool.name !== 'send_product')
+  let effective = tools
+  let presentationWithheld = false
+  if (strategy) {
+    const decorated = tools.map((tool) => withTenantPolicy(tool, strategy))
+    if (strategy.preferVisual || customerExplicitlyRequestedPresentation(messages)) {
+      effective = decorated
+    } else {
+      effective = decorated.filter((tool) => tool.name !== 'send_product')
+      presentationWithheld = decorated.some((tool) => tool.name === 'send_product')
+    }
+  }
+
+  getAgentTraceContext()?.recordEvent('tools_resolved', 'Ferramentas disponíveis neste turno', {
+    count: effective.length,
+    names: effective.map((tool) => tool.name).slice(0, 30),
+    presentation_withheld_by_account_policy: presentationWithheld,
+  })
+  return effective
 }
 
-/**
- * Runtime action policy plus provider-agnostic tool observability. Tool
- * metadata is privacy-reduced before it reaches the trace store. A trace
- * failure cannot affect execution because the collector itself is best-effort.
- */
 export function executorWithTenantPolicy(args: {
   executeTool?: AgentToolExecutor
   strategy?: CommercialStrategy
