@@ -95,9 +95,8 @@ function initiativeRule(mode: AgentInitiativeMode): string {
 }
 
 /**
- * SaaS-wide conversational policy. Safe to inject for every tenant because it
- * contains no catalogue, product, fashion, vehicle, clinic or other domain
- * assumptions. Each account controls the mode through commercial_strategy.
+ * SaaS-wide conversational policy. Safe for every tenant because it contains
+ * no catalogue, product, fashion, vehicle, clinic or other domain assumption.
  */
 export function conversationPolicyPrompt(strategy: CommercialStrategy): string {
   return [
@@ -109,13 +108,16 @@ export function conversationPolicyPrompt(strategy: CommercialStrategy): string {
 }
 
 /**
- * Catalogue-specific policy. Today loadAiConfig still injects this block for
- * backwards compatibility with existing accounts. The generic initiative
- * policy is prepended here so the new behaviour applies immediately; a later
- * capability-scoping cleanup can move the catalogue-only lines behind the
- * existing catalogue capability check without changing tenant data.
+ * Backwards-compatible name used by loadAiConfig. It intentionally returns
+ * ONLY the generic conversation policy. Catalogue rules are injected later by
+ * buildSystemPrompt only for accounts that actually have catalogue tools.
  */
-export function commercialStrategyPrompt(
+export function commercialStrategyPrompt(strategy: CommercialStrategy): string {
+  return conversationPolicyPrompt(strategy)
+}
+
+/** Catalogue-only account policy. Never inject for a non-catalogue tenant. */
+export function catalogueCommercialStrategyPrompt(
   strategy: CommercialStrategy,
 ): string {
   const qualification = strategy.qualificationOrder === 'color_then_size'
@@ -139,10 +141,7 @@ export function commercialStrategyPrompt(
     `When product qualification requires both attributes and they are not already known, ask about ${qualification}. Ask only one useful follow-up question at a time.`,
   ]
 
-  return [
-    conversationPolicyPrompt(strategy),
-    `Catalogue strategy — account-level rules for this tenant:\n${rules
-      .map((rule) => `- ${rule}`)
-      .join('\n')}`,
-  ].join('\n\n')
+  return `Catalogue strategy — account-level rules for this tenant:\n${rules
+    .map((rule) => `- ${rule}`)
+    .join('\n')}`
 }
