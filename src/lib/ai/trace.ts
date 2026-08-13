@@ -42,7 +42,7 @@ export async function recordTrace(db: WacrmSupabaseClient, trace: AgentTrace): P
       intent: trace.intent,
       model_tier: trace.modelTier,
       final_action: trace.finalAction,
-      status: finalStatus(trace.finalAction),
+      status: trace.guardrailViolations.length > 0 ? 'blocked' : finalStatus(trace.finalAction),
       total_ms: Math.max(0, Math.round(trace.totalMs)),
       memory_match_count: Math.max(0, Math.round(trace.memoryMatchCount)),
       guardrail_violations: trace.guardrailViolations,
@@ -94,6 +94,7 @@ export function createAgentTraceCollector(args: {
   let modelTier: AgentModelTier = 'smart'
   let memoryMatchCount = 0
   let finished = false
+  let guardrailObserved = false
   let sequence = 0
   const toolCalls: AgentTraceToolCall[] = []
   const guardrailViolations = new Set<GuardrailViolation>()
@@ -199,20 +200,32 @@ export function createAgentTraceCollector(args: {
     },
     recordGuardrailViolations(violations) {
       if (finished) return
+      guardrailObserved = true
       for (const violation of violations) guardrailViolations.add(violation)
-      if (violations.length > 0) recordEvent('guardrail_checked', 'Guardrail bloqueou a resposta', { safe: false, violations }, 'blocked')
+      if (violations.length > 0) {
+        recordEvent(
+          'guardrail_checked',
+          'Guardrail bloqueou a resposta',
+          { safe: false, violations },
+          'blocked',
+        )
+      }
     },
     recordEvent,
     startStep,
     finishStep,
     finish(finalAction, requestedStatus) {
       if (finished) return
+      if (finalAction === 'reply' && !guardrailObserved) {
+        guardrailObserved = true
+        recordEvent('guardrail_checked', 'Guardrails concluídos', { safe: true, violations: [] })
+      }
       if (finalAction === 'reply') recordEvent('response_sent', 'Resposta enviada', { final_action: finalAction })
       else if (finalAction === 'handoff') recordEvent('handoff_triggered', 'Encaminhado para atendimento humano', { final_action: finalAction })
       else recordEvent('no_reply', 'Sem resposta automática', { final_action: finalAction })
       finished = true
       const finishedAt = now()
-      const status = requestedStatus ?? finalStatus(finalAction)
+      const status = requestedStatus ?? (guardrailViolations.size > 0 ? 'blocked' : finalStatus(finalAction))
       enqueue('run finish', async () => {
         const { error } = await args.db.from('agent_traces').update({
           intent,
