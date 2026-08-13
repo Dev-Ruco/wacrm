@@ -1,5 +1,6 @@
 import type { WacrmSupabaseClient } from '@/lib/supabase/types'
 import type { GuardrailViolation } from './guardrails'
+import { TOOL_ACTION_CLASS } from './action-policy'
 import { sanitizeTraceMetadata } from './trace-sanitize'
 
 export type ConversationIntent = 'faq' | 'sales' | 'complaint' | 'account' | 'smalltalk'
@@ -149,59 +150,64 @@ export function createAgentTraceCollector(args: {
     const finishedAt = now()
     const clean = sanitizeTraceMetadata(metadata)
     enqueue(`step ${handle.sequence} finish`, async () => {
-      const { error } = await args.db
-        .from('agent_trace_steps')
-        .update({
-          status,
-          finished_at: new Date(finishedAt).toISOString(),
-          duration_ms: Math.max(0, Math.round(finishedAt - handle.startedAt)),
-          metadata: clean,
-          updated_at: new Date(finishedAt).toISOString(),
-        })
-        .eq('trace_id', traceId)
-        .eq('account_id', args.accountId)
-        .eq('sequence', handle.sequence)
+      const { error } = await args.db.from('agent_trace_steps').update({ status, finished_at: new Date(finishedAt).toISOString(), duration_ms: Math.max(0, Math.round(finishedAt - handle.startedAt)), metadata: clean, updated_at: new Date(finishedAt).toISOString() }).eq('trace_id', traceId).eq('account_id', args.accountId).eq('sequence', handle.sequence)
       if (error) throw error
     })
   }
 
+  const recordEvent: AgentTraceCollector['recordEvent'] = (type, label, metadata = {}, status = 'completed') => {
+    if (finished) return
+    const handle = startStep(type, label, metadata)
+    finishStep(handle, status, metadata)
+  }
+
+  recordEvent('message_received', 'Mensagem entregue ao agente', { inbound_message_id: args.inboundMessageId ?? null })
+
   return {
     traceId,
-    setIntent(nextIntent, nextModelTier) { intent = nextIntent; modelTier = nextModelTier },
-    setMemoryMatchCount(count) { memoryMatchCount = Math.max(0, Math.round(count)) },
-    recordToolCall(call) { if (!finished && toolCalls.length < 50) toolCalls.push({ ...call }) },
+    setIntent(nextIntent, nextModelTier) {
+      intent = nextIntent
+      modelTier = nextModelTier
+      recordEvent('intent_classified', 'Intenção classificada', { intent: nextIntent, model_tier: nextModelTier })
+    },
+    setMemoryMatchCount(count) {
+      memoryMatchCount = Math.max(0, Math.round(count))
+      recordEvent('memory_retrieved', 'Memória consultada', { match_count: memoryMatchCount })
+    },
+    recordToolCall(call) {
+      if (finished || toolCalls.length >= 50) return
+      toolCalls.push({ ...call })
+      recordEvent('tool_finished', call.name, { tool: call.name, action_class: TOOL_ACTION_CLASS[call.name] ?? null, duration_ms: Math.max(0, Math.round(call.ms)), succeeded: call.succeeded }, call.succeeded ? 'completed' : 'failed')
+    },
     recordGuardrailViolations(violations) {
-      if (!finished) for (const violation of violations) guardrailViolations.add(violation)
-    },
-    recordEvent(type, label, metadata = {}, status = 'completed') {
       if (finished) return
-      const handle = startStep(type, label, metadata)
-      finishStep(handle, status, metadata)
+      for (const violation of violations) guardrailViolations.add(violation)
+      if (violations.length > 0) recordEvent('guardrail_checked', 'Guardrail bloqueou a resposta', { safe: false, violations }, 'blocked')
     },
+    recordEvent,
     startStep,
     finishStep,
     finish(finalAction, requestedStatus) {
       if (finished) return
+      if (finalAction === 'reply') recordEvent('response_sent', 'Resposta enviada', { final_action: finalAction })
+      else if (finalAction === 'handoff') recordEvent('handoff_triggered', 'Encaminhado para atendimento humano', { final_action: finalAction })
+      else recordEvent('no_reply', 'Sem resposta automática', { final_action: finalAction })
       finished = true
       const finishedAt = now()
       const status = requestedStatus ?? finalStatus(finalAction)
       enqueue('run finish', async () => {
-        const { error } = await args.db
-          .from('agent_traces')
-          .update({
-            intent,
-            model_tier: modelTier,
-            final_action: finalAction,
-            status,
-            total_ms: Math.max(0, Math.round(finishedAt - startedAt)),
-            memory_match_count: memoryMatchCount,
-            guardrail_violations: Array.from(guardrailViolations),
-            tool_calls: toolCalls.slice(0, 50).map((call, index) => ({ sequence: index, name: call.name, ms: Math.max(0, Math.round(call.ms)), succeeded: call.succeeded })),
-            finished_at: new Date(finishedAt).toISOString(),
-            updated_at: new Date(finishedAt).toISOString(),
-          })
-          .eq('id', traceId)
-          .eq('account_id', args.accountId)
+        const { error } = await args.db.from('agent_traces').update({
+          intent,
+          model_tier: modelTier,
+          final_action: finalAction,
+          status,
+          total_ms: Math.max(0, Math.round(finishedAt - startedAt)),
+          memory_match_count: memoryMatchCount,
+          guardrail_violations: Array.from(guardrailViolations),
+          tool_calls: toolCalls.slice(0, 50).map((call, index) => ({ sequence: index, name: call.name, ms: Math.max(0, Math.round(call.ms)), succeeded: call.succeeded })),
+          finished_at: new Date(finishedAt).toISOString(),
+          updated_at: new Date(finishedAt).toISOString(),
+        }).eq('id', traceId).eq('account_id', args.accountId)
         if (error) throw error
       })
     },
