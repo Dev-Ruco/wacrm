@@ -13,6 +13,7 @@ import { generateOpenAi } from './providers/openai'
 import { generateAnthropic } from './providers/anthropic'
 import { executorWithTenantPolicy, toolsAllowedForTurn } from './action-policy'
 import { getAgentTraceContext } from './trace-context'
+import type { ProviderLifecycleEvent } from './providers/shared'
 
 export interface GenerateArgs {
   config: Pick<AiConfig, 'provider' | 'model' | 'apiKey' | 'temperature'> & {
@@ -22,6 +23,8 @@ export interface GenerateArgs {
   messages: ChatMessage[]
   tools?: AgentToolDefinition[]
   executeTool?: AgentToolExecutor
+  /** Internal observability label only; never sent to the customer. */
+  observabilityLabel?: string
 }
 
 function passiveInternalContext(value: string): string {
@@ -51,14 +54,15 @@ function serverInternalContext(messages: ChatMessage[]): string | null {
   return unique.map((value) => value.slice(0, 8_000)).join('\n\n')
 }
 
-/**
- * Generate the next reply from the account's configured provider.
- * Generic tenant policy is enforced at the runtime boundary. Internal context
- * attached by the conversation builder is promoted into the system prompt,
- * never emitted as a fake customer/business history message.
- */
 export async function generateReply(args: GenerateArgs): Promise<GenerateResult> {
-  const { config, systemPrompt, messages, tools, executeTool } = args
+  const {
+    config,
+    systemPrompt,
+    messages,
+    tools,
+    executeTool,
+    observabilityLabel = 'LLM',
+  } = args
   const timeoutMs = aiRequestTimeoutMs()
   const internalContext = serverInternalContext(messages)
   const effectiveSystemPrompt = internalContext
@@ -73,6 +77,56 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
     executeTool,
     strategy: config.commercialStrategy,
   })
+
+  const trace = getAgentTraceContext()
+  trace?.setRuntime(config.provider, config.model)
+  const roundSteps = new Map<number, ReturnType<NonNullable<typeof trace>['startStep']>>()
+  const onLifecycleEvent = trace
+    ? (event: ProviderLifecycleEvent) => {
+        if (event.type === 'round_started') {
+          const handle = trace.startStep(
+            'llm_round',
+            `${observabilityLabel} · Round ${event.round}`,
+            {
+              provider: event.provider,
+              model: event.model,
+              round: event.round,
+            },
+          )
+          roundSteps.set(event.round, handle)
+          return
+        }
+
+        const handle = roundSteps.get(event.round)
+        if (!handle) return
+        roundSteps.delete(event.round)
+        if (event.type === 'round_finished') {
+          trace.finishStep(handle, 'completed', {
+            provider: event.provider,
+            model: event.model,
+            round: event.round,
+            duration_ms: event.durationMs,
+            tool_call_count: event.toolCallCount,
+            usage: event.usage
+              ? {
+                  prompt_tokens: event.usage.promptTokens,
+                  completion_tokens: event.usage.completionTokens,
+                  total_tokens: event.usage.totalTokens,
+                }
+              : null,
+          })
+        } else {
+          trace.finishStep(handle, 'failed', {
+            provider: event.provider,
+            model: event.model,
+            round: event.round,
+            duration_ms: event.durationMs,
+            error_code: event.errorCode,
+          })
+        }
+      }
+    : undefined
+
   const providerArgs = {
     apiKey: config.apiKey,
     model: config.model,
@@ -82,15 +136,8 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
     tools: effectiveTools,
     executeTool: effectiveExecutor,
     temperature: config.temperature,
+    onLifecycleEvent,
   }
-
-  const trace = getAgentTraceContext()
-  trace?.setRuntime(config.provider, config.model)
-  const generationStep = trace?.startStep('llm_generation', 'Modelo de IA', {
-    provider: config.provider,
-    model: config.model,
-    available_tool_count: effectiveTools?.length ?? 0,
-  })
 
   try {
     let result: { text: string; usage: AiUsage | null }
@@ -107,30 +154,18 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
           status: 400,
         })
     }
-
-    if (generationStep) {
-      trace?.finishStep(generationStep, 'completed', {
-        provider: config.provider,
-        model: config.model,
-        available_tool_count: effectiveTools?.length ?? 0,
-        usage: result.usage
-          ? {
-              prompt_tokens: result.usage.promptTokens,
-              completion_tokens: result.usage.completionTokens,
-              total_tokens: result.usage.totalTokens,
-            }
-          : null,
-      })
-    }
     return parseGeneration(result.text, result.usage)
   } catch (error) {
-    if (generationStep) {
-      trace?.finishStep(generationStep, 'failed', {
+    trace?.recordEvent(
+      'llm_generation_failed',
+      `${observabilityLabel} falhou`,
+      {
         provider: config.provider,
         model: config.model,
         error_code: error instanceof AiError ? error.code : 'generation_failed',
-      })
-    }
+      },
+      'failed',
+    )
     throw error
   }
 }
