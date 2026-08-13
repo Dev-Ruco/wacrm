@@ -107,8 +107,11 @@ export function conversationPolicyPrompt(strategy: CommercialStrategy): string {
 }
 
 /**
- * Catalogue-specific policy. Callers should inject this only when the tenant
- * actually has catalogue/presentation capability enabled.
+ * Catalogue-specific policy. Today loadAiConfig still injects this block for
+ * backwards compatibility with existing accounts. The generic initiative
+ * policy is prepended here so the new behaviour applies immediately; a later
+ * capability-scoping cleanup can move the catalogue-only lines behind the
+ * existing catalogue capability check without changing tenant data.
  */
 export function commercialStrategyPrompt(
   strategy: CommercialStrategy,
@@ -134,7 +137,10 @@ export function commercialStrategyPrompt(
     `When product qualification requires both attributes and they are not already known, ask about ${qualification}. Ask only one useful follow-up question at a time.`,
   ]
 
-  return `Catalogue strategy — account-level rules for this tenant:\n${rules
-    .map((rule) => `- ${rule}`)
-    .join('\n')}`
+  return [
+    conversationPolicyPrompt(strategy),
+    `Catalogue strategy — account-level rules for this tenant:\n${rules
+      .map((rule) => `- ${rule}`)
+      .join('\n')}`,
+  ].join('\n\n')
 }
