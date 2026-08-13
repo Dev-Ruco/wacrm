@@ -1,4 +1,4 @@
-import { TOOL_ACTION_CLASS } from './action-policy'
+import { TOOL_ACTION_CLASS } from './tool-action-class'
 
 const MAX_STRING = 500
 const MAX_ARRAY = 20
@@ -15,11 +15,6 @@ function cleanString(value: string, max = MAX_STRING): string {
   return SENSITIVE_VALUE_RE.test(compact) ? '[REDACTED]' : compact
 }
 
-/**
- * Defence-in-depth for live observability metadata. Callers should still pass
- * summaries rather than raw business payloads; this prevents an accidental
- * credential-like field/value from turning the trace store into a secret log.
- */
 export function sanitizeTraceMetadata(
   value: unknown,
   depth = 0,
