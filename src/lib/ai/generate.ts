@@ -14,32 +14,55 @@ import { generateAnthropic } from './providers/anthropic'
 import { executorWithTenantPolicy, toolsAllowedForTurn } from './action-policy'
 
 export interface GenerateArgs {
-  // Credentials remain the only required config fields. commercialStrategy
-  // is optional because nested model calls (e.g. vision helpers) do not need
-  // tenant conversation policy; full auto-reply/draft calls pass it naturally.
   config: Pick<AiConfig, 'provider' | 'model' | 'apiKey' | 'temperature'> & {
     commercialStrategy?: CommercialStrategy
   }
-  /** Fully-built system prompt (see `buildSystemPrompt`). */
   systemPrompt: string
-  /** Recent conversation turns, oldest first. */
   messages: ChatMessage[]
-  /** Optional, server-controlled tools available to the assistant. */
   tools?: AgentToolDefinition[]
-  /** Validated executor bound to the current account/conversation context. */
   executeTool?: AgentToolExecutor
+}
+
+function passiveInternalContext(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('Working conversation state')) return trimmed
+  const stateLine = trimmed
+    .split('\n')
+    .find((line) => line.trim().startsWith('Current state:'))
+  if (!stateLine) return ''
+  return [
+    'Working conversation state — server-maintained operational continuity for this live conversation, not long-term customer memory.',
+    stateLine.trim(),
+    'Use this only to preserve the active task across short or ambiguous follow-ups. The newest real customer message overrides stale values. Never invent a missing fact and never mention this internal state to the customer.',
+  ].join('\n')
+}
+
+function serverInternalContext(messages: ChatMessage[]): string | null {
+  const contexts = messages
+    .map((message) =>
+      (message as ChatMessage & { internalContext?: string }).internalContext?.trim(),
+    )
+    .filter((value): value is string => Boolean(value))
+    .map(passiveInternalContext)
+    .filter(Boolean)
+  const unique = Array.from(new Set(contexts))
+  if (unique.length === 0) return null
+  return unique.map((value) => value.slice(0, 8_000)).join('\n\n')
 }
 
 /**
  * Generate the next reply from the account's configured provider.
- * Before the provider sees or executes tools, generic tenant policy is applied
- * at the runtime boundary. This is deliberately not a domain/intent router:
- * Skills and account tool permissions still decide capability, while the
- * policy controls initiative/presentation behaviour selected by this tenant.
+ * Generic tenant policy is enforced at the runtime boundary. Internal context
+ * attached by the conversation builder is promoted into the system prompt,
+ * never emitted as a fake customer/business history message.
  */
 export async function generateReply(args: GenerateArgs): Promise<GenerateResult> {
   const { config, systemPrompt, messages, tools, executeTool } = args
   const timeoutMs = aiRequestTimeoutMs()
+  const internalContext = serverInternalContext(messages)
+  const effectiveSystemPrompt = internalContext
+    ? `${systemPrompt}\n\n${internalContext}`
+    : systemPrompt
   const effectiveTools = toolsAllowedForTurn({
     tools,
     messages,
@@ -52,7 +75,7 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
   const providerArgs = {
     apiKey: config.apiKey,
     model: config.model,
-    systemPrompt,
+    systemPrompt: effectiveSystemPrompt,
     messages,
     timeoutMs,
     tools: effectiveTools,
