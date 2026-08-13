@@ -68,4 +68,29 @@ describe('trace metadata sanitization', () => {
     })
     expect(JSON.stringify(result)).not.toContain('conteúdo privado')
   })
+
+  it('records only error presence/name rather than raw error messages', () => {
+    const result = toolTraceFinishedMetadata({
+      name: 'search_catalog',
+      rawArguments: JSON.stringify({ query: 'produto' }),
+      rawResult: JSON.stringify({
+        ok: false,
+        code: 'upstream_error',
+        error: 'customer-private-value should never be copied',
+      }),
+      error: new TypeError('another private runtime detail'),
+    })
+
+    expect(result).toMatchObject({
+      execution_error: true,
+      error_name: 'TypeError',
+      output: {
+        ok: false,
+        has_error: true,
+        error_code: 'upstream_error',
+      },
+    })
+    expect(JSON.stringify(result)).not.toContain('customer-private-value')
+    expect(JSON.stringify(result)).not.toContain('another private runtime detail')
+  })
 })
