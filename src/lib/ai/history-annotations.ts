@@ -31,3 +31,18 @@ export const HISTORY_ANNOTATION_MARKERS: readonly string[] = [
   IMAGE_NO_CAPTION_PLACEHOLDER,
   ...Object.values(MEDIA_PLACEHOLDER),
 ]
+
+/**
+ * Removes only the exact, server-owned history annotations above.
+ * Arbitrary bracketed customer/model text is deliberately left untouched.
+ */
+export function stripHistoryAnnotationMarkers(text: string): string {
+  let cleaned = text
+  for (const marker of HISTORY_ANNOTATION_MARKERS) {
+    cleaned = cleaned.split(marker).join('')
+  }
+  return cleaned
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
