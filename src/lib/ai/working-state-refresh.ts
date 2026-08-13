@@ -73,12 +73,8 @@ async function loadMeta(args: {
       .eq('account_id', args.accountId)
       .eq('conversation_id', args.conversationId)
       .maybeSingle()
-    if (error) {
-      return { available: false, sourceMessageId: null, contextResetAt: null }
-    }
-    if (!data) {
-      return { available: true, sourceMessageId: null, contextResetAt: null }
-    }
+    if (error) return { available: false, sourceMessageId: null, contextResetAt: null }
+    if (!data) return { available: true, sourceMessageId: null, contextResetAt: null }
     return {
       available: true,
       sourceMessageId: cleanText(data.source_message_id, 180),
@@ -170,6 +166,7 @@ export async function refreshWorkingConversationState(args: {
     generated = await generateReply({
       config: { ...config, temperature: 0 },
       systemPrompt: EXTRACTOR_PROMPT,
+      observabilityLabel: 'Working State Extractor',
       messages: [
         {
           role: 'user',
