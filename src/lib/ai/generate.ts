@@ -11,7 +11,7 @@ import {
 import { HANDOFF_SENTINEL, aiRequestTimeoutMs } from './defaults'
 import { generateOpenAi } from './providers/openai'
 import { generateAnthropic } from './providers/anthropic'
-import { toolsAllowedForTurn } from './action-policy'
+import { executorWithTenantPolicy, toolsAllowedForTurn } from './action-policy'
 
 export interface GenerateArgs {
   // Credentials remain the only required config fields. commercialStrategy
@@ -32,14 +32,10 @@ export interface GenerateArgs {
 
 /**
  * Generate the next reply from the account's configured provider.
- * Dispatches to the right adapter, then parses the handoff sentinel out
- * of the raw text. Throws `AiError` on any provider/network failure.
- *
- * Before the provider sees the tools, the generic per-tenant action policy
- * may narrow presentation capabilities for THIS turn. This is intentionally
- * not intent routing: read/write capabilities remain governed by the account
- * and Skills; the policy only enforces explicit tenant choices such as
- * text-first product presentation.
+ * Before the provider sees or executes tools, generic tenant policy is applied
+ * at the runtime boundary. This is deliberately not a domain/intent router:
+ * Skills and account tool permissions still decide capability, while the
+ * policy controls initiative/presentation behaviour selected by this tenant.
  */
 export async function generateReply(args: GenerateArgs): Promise<GenerateResult> {
   const { config, systemPrompt, messages, tools, executeTool } = args
@@ -49,6 +45,10 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
     messages,
     strategy: config.commercialStrategy,
   })
+  const effectiveExecutor = executorWithTenantPolicy({
+    executeTool,
+    strategy: config.commercialStrategy,
+  })
   const providerArgs = {
     apiKey: config.apiKey,
     model: config.model,
@@ -56,7 +56,7 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
     messages,
     timeoutMs,
     tools: effectiveTools,
-    executeTool,
+    executeTool: effectiveExecutor,
     temperature: config.temperature,
   }
 
@@ -78,13 +78,6 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
   return parseGeneration(result.text, result.usage)
 }
 
-/**
- * Split the raw model output into `{ text, handoff, usage }`. The
- * sentinel can appear alone or trailing a partial reply; either way we
- * treat the turn as a handoff and strip the marker from any remaining
- * text. `usage` is passed straight through (null when the provider
- * didn't report it).
- */
 export function parseGeneration(
   raw: string,
   usage: AiUsage | null = null,
