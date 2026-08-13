@@ -2,9 +2,11 @@ import type { AgentInitiativeMode, CommercialStrategy } from './types'
 
 export const DEFAULT_COMMERCIAL_STRATEGY: CommercialStrategy = {
   maxProducts: 3,
-  // New accounts start text-first. Existing accounts that already persisted
-  // prefer_visual keep their own value through normalizeCommercialStrategy.
-  preferVisual: false,
+  // Keep the runtime fallback backwards-compatible for legacy/test callers.
+  // The no-code Agent Builder explicitly starts a brand-new account with
+  // prefer_visual=false, so newly configured tenants are text-first without
+  // silently changing old accounts that never persisted this field.
+  preferVisual: true,
   autoRecommend: true,
   checkStock: true,
   keepSelectedProduct: true,
