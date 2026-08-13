@@ -7,6 +7,7 @@ import {
 } from '../types'
 import { MAX_OUTPUT_TOKENS } from '../defaults'
 import {
+  emitProviderLifecycle,
   hasImageContent,
   mergeConsecutive,
   normalizeUsage,
@@ -65,9 +66,6 @@ function toAnthropicMessage(message: ChatMessage): AnthropicMessage {
   if (typeof message.content === 'string') {
     return { role: message.role, content: message.content }
   }
-
-  // Anthropic accepts image blocks on user turns. CRM assistant turns are
-  // textual today, but flatten defensively if an old/imported row says else.
   if (message.role === 'assistant') {
     return { role: 'assistant', content: chatContentText(message.content) }
   }
@@ -87,18 +85,9 @@ function toAnthropicMessage(message: ChatMessage): AnthropicMessage {
   return { role: 'user', content: blocks }
 }
 
-/**
- * Anthropic's Messages API requires strictly alternating roles that
- * begin with `user`. Merge consecutive turns, then drop any leading
- * assistant turns (an agent greeting before the customer said anything)
- * so the transcript always starts on the customer. Guarantees a valid,
- * non-empty payload.
- */
 function normalizeForAnthropic(messages: ChatMessage[]): ChatMessage[] {
   const merged = mergeConsecutive(messages)
-  while (merged.length > 0 && merged[0].role === 'assistant') {
-    merged.shift()
-  }
+  while (merged.length > 0 && merged[0].role === 'assistant') merged.shift()
   if (merged.length === 0) {
     return [{ role: 'user', content: '(The customer has not sent a message yet.)' }]
   }
@@ -115,11 +104,6 @@ function addUsage(total: AiUsage | null, next: AiUsage | null): AiUsage | null {
   }
 }
 
-/**
- * Call Anthropic's Messages endpoint with the caller's own key.
- * Returns the raw assistant text + token usage (handoff parsing happens
- * in `generateReply`).
- */
 export async function generateAnthropic(args: ProviderArgs): Promise<ProviderResult> {
   const {
     apiKey,
@@ -130,10 +114,8 @@ export async function generateAnthropic(args: ProviderArgs): Promise<ProviderRes
     tools = [],
     executeTool,
     temperature,
+    onLifecycleEvent,
   } = args
-  // Anthropic's range is 0-1, narrower than the 0-2 stored on ai_configs
-  // (sized for OpenAI); clamp rather than adding a second provider-specific
-  // column for one dial.
   const anthropicTemperature =
     typeof temperature === 'number' ? Math.min(1, Math.max(0, temperature)) : undefined
 
@@ -176,6 +158,15 @@ export async function generateAnthropic(args: ProviderArgs): Promise<ProviderRes
   let accumulatedUsage: AiUsage | null = null
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
+    const roundNumber = round + 1
+    const roundStartedAt = Date.now()
+    emitProviderLifecycle(onLifecycleEvent, {
+      type: 'round_started',
+      round: roundNumber,
+      provider: 'anthropic',
+      model,
+    })
+
     let res: Response
     try {
       res = await request(providerMessages)
@@ -184,26 +175,53 @@ export async function generateAnthropic(args: ProviderArgs): Promise<ProviderRes
         res = await request(providerMessages)
       }
     } catch (err) {
-      throw toNetworkError(err)
+      const failure = toNetworkError(err)
+      emitProviderLifecycle(onLifecycleEvent, {
+        type: 'round_failed',
+        round: roundNumber,
+        provider: 'anthropic',
+        model,
+        durationMs: Math.max(0, Date.now() - roundStartedAt),
+        errorCode: failure.code,
+      })
+      throw failure
     }
 
     if (!res.ok) {
-      throw await providerHttpError('Anthropic', res)
+      const failure = await providerHttpError('Anthropic', res)
+      emitProviderLifecycle(onLifecycleEvent, {
+        type: 'round_failed',
+        round: roundNumber,
+        provider: 'anthropic',
+        model,
+        durationMs: Math.max(0, Date.now() - roundStartedAt),
+        errorCode: failure.code,
+      })
+      throw failure
     }
 
     const data = (await res.json().catch(() => null)) as AnthropicResponse | null
-    accumulatedUsage = addUsage(
-      accumulatedUsage,
-      normalizeUsage({
-        prompt: data?.usage?.input_tokens,
-        completion: data?.usage?.output_tokens,
-      }),
-    )
+    const roundUsage = normalizeUsage({
+      prompt: data?.usage?.input_tokens,
+      completion: data?.usage?.output_tokens,
+    })
+    accumulatedUsage = addUsage(accumulatedUsage, roundUsage)
 
     const content = data?.content ?? []
     const toolUses = content.filter(
       (block): block is AnthropicToolUseBlock => block.type === 'tool_use',
     )
+
+    emitProviderLifecycle(onLifecycleEvent, {
+      type: 'round_finished',
+      round: roundNumber,
+      provider: 'anthropic',
+      model,
+      durationMs: Math.max(0, Date.now() - roundStartedAt),
+      usage: roundUsage,
+      toolCallCount: toolUses.length,
+    })
+
     if (toolUses.length === 0) {
       const text = content
         .filter((block): block is AnthropicTextBlock => block.type === 'text')
