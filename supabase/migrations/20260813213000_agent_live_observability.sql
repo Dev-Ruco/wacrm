@@ -1,18 +1,39 @@
 -- Real execution observability for the existing agent trace/run.
--- agent_traces remains the canonical one-row-per-turn/run record; this
--- migration adds lifecycle fields and a child step stream instead of creating
--- a parallel agent_runs model.
+-- agent_traces remains the canonical one-row-per-turn/run record.
 
 alter table wacrm.agent_traces
-  add column if not exists status text not null default 'running',
+  add column if not exists status text,
   add column if not exists provider text,
   add column if not exists model text,
   add column if not exists inbound_message_id text,
-  add column if not exists started_at timestamptz not null default now(),
+  add column if not exists started_at timestamptz,
   add column if not exists finished_at timestamptz,
-  add column if not exists updated_at timestamptz not null default now();
+  add column if not exists updated_at timestamptz;
+
+-- Historical rows were persisted only after the turn finished. Backfill only
+-- rows that have never received the new lifecycle status, so a manual re-run
+-- cannot turn a current live run into a historical one.
+update wacrm.agent_traces
+set
+  status = case
+    when cardinality(coalesce(guardrail_violations, '{}'::text[])) > 0 then 'blocked'
+    when final_action = 'handoff' then 'handoff'
+    else 'completed'
+  end,
+  started_at = created_at - make_interval(
+    secs => greatest(coalesce(total_ms, 0), 0)::double precision / 1000.0
+  ),
+  finished_at = created_at,
+  updated_at = created_at
+where status is null;
 
 alter table wacrm.agent_traces
+  alter column status set default 'running',
+  alter column status set not null,
+  alter column started_at set default now(),
+  alter column started_at set not null,
+  alter column updated_at set default now(),
+  alter column updated_at set not null,
   alter column final_action set default 'no_reply';
 
 alter table wacrm.agent_traces
@@ -58,8 +79,6 @@ for select
 to authenticated
 using (wacrm.is_account_member(account_id));
 
--- The parent table already has equivalent tenant-scoped SELECT RLS. Realtime
--- emits only rows the authenticated subscriber is allowed to read.
 do $$
 begin
   if not exists (
