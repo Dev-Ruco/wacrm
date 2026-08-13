@@ -95,7 +95,7 @@ export async function loadWorkingStateForContext(args: {
   conversationId: string
   contextResetAt: string | null
 }): Promise<{
-  available: boolean
+  available?: boolean
   state: WorkingConversationState
   sourceMessageId: string | null
 }> {
