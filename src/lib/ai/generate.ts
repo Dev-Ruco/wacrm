@@ -5,18 +5,21 @@ import {
   type AiConfig,
   type AiUsage,
   type ChatMessage,
+  type CommercialStrategy,
   type GenerateResult,
 } from './types'
 import { HANDOFF_SENTINEL, aiRequestTimeoutMs } from './defaults'
 import { generateOpenAi } from './providers/openai'
 import { generateAnthropic } from './providers/anthropic'
+import { toolsAllowedForTurn } from './action-policy'
 
 export interface GenerateArgs {
-  // Only the credentials are actually used here — a narrow Pick so a
-  // caller that only has provider/model/apiKey (e.g. a tool executor
-  // making its own nested vision call) doesn't need to fabricate a full
-  // AiConfig just to satisfy the type.
-  config: Pick<AiConfig, 'provider' | 'model' | 'apiKey' | 'temperature'>
+  // Credentials remain the only required config fields. commercialStrategy
+  // is optional because nested model calls (e.g. vision helpers) do not need
+  // tenant conversation policy; full auto-reply/draft calls pass it naturally.
+  config: Pick<AiConfig, 'provider' | 'model' | 'apiKey' | 'temperature'> & {
+    commercialStrategy?: CommercialStrategy
+  }
   /** Fully-built system prompt (see `buildSystemPrompt`). */
   systemPrompt: string
   /** Recent conversation turns, oldest first. */
@@ -31,17 +34,28 @@ export interface GenerateArgs {
  * Generate the next reply from the account's configured provider.
  * Dispatches to the right adapter, then parses the handoff sentinel out
  * of the raw text. Throws `AiError` on any provider/network failure.
+ *
+ * Before the provider sees the tools, the generic per-tenant action policy
+ * may narrow presentation capabilities for THIS turn. This is intentionally
+ * not intent routing: read/write capabilities remain governed by the account
+ * and Skills; the policy only enforces explicit tenant choices such as
+ * text-first product presentation.
  */
 export async function generateReply(args: GenerateArgs): Promise<GenerateResult> {
   const { config, systemPrompt, messages, tools, executeTool } = args
   const timeoutMs = aiRequestTimeoutMs()
+  const effectiveTools = toolsAllowedForTurn({
+    tools,
+    messages,
+    strategy: config.commercialStrategy,
+  })
   const providerArgs = {
     apiKey: config.apiKey,
     model: config.model,
     systemPrompt,
     messages,
     timeoutMs,
-    tools,
+    tools: effectiveTools,
     executeTool,
     temperature: config.temperature,
   }
