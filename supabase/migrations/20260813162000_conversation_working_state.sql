@@ -14,6 +14,8 @@ create table if not exists wacrm.conversation_working_state (
   status text not null default 'active'
     check (status in ('active', 'waiting_customer', 'resolved')),
   revision integer not null default 0,
+  source_message_id text,
+  context_reset_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (account_id, conversation_id)
