@@ -10,13 +10,28 @@ export type AiProvider = 'openai' | 'anthropic'
 
 export type ProductQualificationOrder = 'size_then_color' | 'color_then_size'
 
+/**
+ * Account-level initiative policy. This is deliberately business-agnostic:
+ * each tenant decides how quickly its agent should move from conversation
+ * into tools/actions without changing the shared Agent Runtime.
+ */
+export type AgentInitiativeMode = 'conversation_first' | 'balanced' | 'action_first'
+
 export interface CommercialStrategy {
   maxProducts: number
+  /**
+   * Backwards-compatible field name. Operational meaning is now explicit:
+   * true lets the agent send product media proactively when relevant; false
+   * keeps catalogue presentation text-first until the customer asks to see
+   * something. The persisted key remains `prefer_visual` so existing tenant
+   * configuration keeps working without a migration.
+   */
   preferVisual: boolean
   autoRecommend: boolean
   checkStock: boolean
   keepSelectedProduct: boolean
   qualificationOrder: ProductQualificationOrder
+  initiativeMode: AgentInitiativeMode
 }
 
 /**

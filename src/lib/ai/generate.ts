@@ -5,18 +5,21 @@ import {
   type AiConfig,
   type AiUsage,
   type ChatMessage,
+  type CommercialStrategy,
   type GenerateResult,
 } from './types'
 import { HANDOFF_SENTINEL, aiRequestTimeoutMs } from './defaults'
 import { generateOpenAi } from './providers/openai'
 import { generateAnthropic } from './providers/anthropic'
+import { executorWithTenantPolicy, toolsAllowedForTurn } from './action-policy'
 
 export interface GenerateArgs {
-  // Only the credentials are actually used here — a narrow Pick so a
-  // caller that only has provider/model/apiKey (e.g. a tool executor
-  // making its own nested vision call) doesn't need to fabricate a full
-  // AiConfig just to satisfy the type.
-  config: Pick<AiConfig, 'provider' | 'model' | 'apiKey' | 'temperature'>
+  // Credentials remain the only required config fields. commercialStrategy
+  // is optional because nested model calls (e.g. vision helpers) do not need
+  // tenant conversation policy; full auto-reply/draft calls pass it naturally.
+  config: Pick<AiConfig, 'provider' | 'model' | 'apiKey' | 'temperature'> & {
+    commercialStrategy?: CommercialStrategy
+  }
   /** Fully-built system prompt (see `buildSystemPrompt`). */
   systemPrompt: string
   /** Recent conversation turns, oldest first. */
@@ -29,20 +32,31 @@ export interface GenerateArgs {
 
 /**
  * Generate the next reply from the account's configured provider.
- * Dispatches to the right adapter, then parses the handoff sentinel out
- * of the raw text. Throws `AiError` on any provider/network failure.
+ * Before the provider sees or executes tools, generic tenant policy is applied
+ * at the runtime boundary. This is deliberately not a domain/intent router:
+ * Skills and account tool permissions still decide capability, while the
+ * policy controls initiative/presentation behaviour selected by this tenant.
  */
 export async function generateReply(args: GenerateArgs): Promise<GenerateResult> {
   const { config, systemPrompt, messages, tools, executeTool } = args
   const timeoutMs = aiRequestTimeoutMs()
+  const effectiveTools = toolsAllowedForTurn({
+    tools,
+    messages,
+    strategy: config.commercialStrategy,
+  })
+  const effectiveExecutor = executorWithTenantPolicy({
+    executeTool,
+    strategy: config.commercialStrategy,
+  })
   const providerArgs = {
     apiKey: config.apiKey,
     model: config.model,
     systemPrompt,
     messages,
     timeoutMs,
-    tools,
-    executeTool,
+    tools: effectiveTools,
+    executeTool: effectiveExecutor,
     temperature: config.temperature,
   }
 
@@ -64,13 +78,6 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
   return parseGeneration(result.text, result.usage)
 }
 
-/**
- * Split the raw model output into `{ text, handoff, usage }`. The
- * sentinel can appear alone or trailing a partial reply; either way we
- * treat the turn as a handoff and strip the marker from any remaining
- * text. `usage` is passed straight through (null when the provider
- * didn't report it).
- */
 export function parseGeneration(
   raw: string,
   usage: AiUsage | null = null,
