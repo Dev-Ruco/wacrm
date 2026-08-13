@@ -5,28 +5,19 @@ import type {
   CommercialStrategy,
 } from './types'
 import { chatContentText } from './types'
+import {
+  TOOL_ACTION_CLASS,
+  type AgentActionClass,
+} from './tool-action-class'
+import { getAgentTraceContext } from './trace-context'
+import {
+  toolTraceFinishedMetadata,
+  toolTraceStartedMetadata,
+} from './trace-sanitize'
 
-/**
- * Runtime action classes are platform semantics, not tenant vocabulary.
- * They describe the side-effect level of a tool and can be reused by any
- * business capability without teaching the core what that business sells.
- */
-export type AgentActionClass = 'read' | 'present' | 'write' | 'escalate'
+export { TOOL_ACTION_CLASS }
+export type { AgentActionClass }
 
-export const TOOL_ACTION_CLASS: Readonly<Record<string, AgentActionClass>> = {
-  search_catalog: 'read',
-  search_knowledge: 'read',
-  get_style_opinion: 'read',
-  send_product: 'present',
-  add_tag: 'write',
-  create_deal: 'write',
-  schedule_visit: 'write',
-  handoff_human: 'escalate',
-}
-
-// Cross-business presentation language only. No product/category vocabulary:
-// the shared runtime asks whether the customer explicitly wants to SEE/SEND
-// media, not what a particular tenant sells.
 const EXPLICIT_PRESENTATION_RE =
   /\b(foto(?:s|grafia|grafias)?|imagem|imagens|visual|ver|vejo|mostra(?:r|-me|-nos)?|mostrar|manda(?:r)?|envia(?:r)?|photo(?:s)?|picture(?:s)?|image(?:s)?|show|see|send|muestra(?:me)?|mostrar|verlo|verla|imagen(?:es)?)\b/i
 
@@ -82,13 +73,6 @@ function withTenantPolicy(
   }
 }
 
-/**
- * Enforce presentation policy before the model sees its tool list. Text-first
- * tenants retain search/read capabilities but do not see send_product until
- * the customer explicitly asks for a visual presentation. Definitions are
- * also decorated with that tenant's catalogue policy, so account settings
- * travel with the capability instead of leaking into non-catalogue tenants.
- */
 export function toolsAllowedForTurn(args: {
   tools?: AgentToolDefinition[]
   messages: ChatMessage[]
@@ -104,10 +88,9 @@ export function toolsAllowedForTurn(args: {
 }
 
 /**
- * Hard boundary for PRESENT actions. The model gets guidance in the tool
- * schema, but the server also enforces maxProducts so a tenant setting is not
- * merely a prompt suggestion. This wrapper is provider-agnostic and leaves
- * every non-presentation tool untouched.
+ * Runtime action policy plus provider-agnostic tool observability. Tool
+ * metadata is privacy-reduced before it reaches the trace store. A trace
+ * failure cannot affect execution because the collector itself is best-effort.
  */
 export function executorWithTenantPolicy(args: {
   executeTool?: AgentToolExecutor
@@ -118,17 +101,64 @@ export function executorWithTenantPolicy(args: {
 
   let presentations = 0
   return async (call) => {
-    if (call.name === 'send_product') {
-      if (presentations >= strategy.maxProducts) {
-        return JSON.stringify({
-          ok: false,
-          policy_blocked: true,
-          reason: `This account allows at most ${strategy.maxProducts} presented option(s) per turn.`,
-          instruction: 'Do not queue another product in this turn. Continue naturally with the options already presented.',
-        })
+    const trace = getAgentTraceContext()
+    const step = trace?.startStep(
+      'tool_called',
+      call.name,
+      toolTraceStartedMetadata(call.name, call.arguments),
+    )
+
+    try {
+      if (call.name === 'send_product') {
+        if (presentations >= strategy.maxProducts) {
+          const blocked = JSON.stringify({
+            ok: false,
+            policy_blocked: true,
+            reason: `This account allows at most ${strategy.maxProducts} presented option(s) per turn.`,
+            instruction: 'Do not queue another product in this turn. Continue naturally with the options already presented.',
+          })
+          if (step) {
+            trace?.finishStep(
+              step,
+              'blocked',
+              toolTraceFinishedMetadata({
+                name: call.name,
+                rawArguments: call.arguments,
+                rawResult: blocked,
+              }),
+            )
+          }
+          return blocked
+        }
+        presentations += 1
       }
-      presentations += 1
+
+      const result = await executeTool(call)
+      if (step) {
+        trace?.finishStep(
+          step,
+          'completed',
+          toolTraceFinishedMetadata({
+            name: call.name,
+            rawArguments: call.arguments,
+            rawResult: result,
+          }),
+        )
+      }
+      return result
+    } catch (error) {
+      if (step) {
+        trace?.finishStep(
+          step,
+          'failed',
+          toolTraceFinishedMetadata({
+            name: call.name,
+            rawArguments: call.arguments,
+            error,
+          }),
+        )
+      }
+      throw error
     }
-    return executeTool(call)
   }
 }
