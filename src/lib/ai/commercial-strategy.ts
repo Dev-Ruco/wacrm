@@ -88,10 +88,28 @@ function initiativeRule(mode: AgentInitiativeMode): string {
   return (
     'Initiative mode is conversation-first: understand the conversational move before acting. A greeting, acknowledgement, correction, rejection, change of mind, vague continuation or topic change is not itself a reason to use a tool. ' +
     'If the customer rejects the previous option or says they want something else but has not yet said what the replacement should be, acknowledge the change and ask one short useful question. ' +
-    'Use a tool only when its result is necessary to answer a sufficiently defined request or execute a clear customer intention. This account-level rule refines the generic tool-use guidance: not using a tool is correct when the turn is primarily conversational or clarifying.'
+    'Use a tool only when its result is necessary to answer a sufficiently defined request or execute a clear customer intention. This account-level rule refines generic tool-use guidance: not using a tool is correct when the turn is primarily conversational or clarifying.'
   )
 }
 
+/**
+ * SaaS-wide conversational policy. Safe to inject for every tenant because it
+ * contains no catalogue, product, fashion, vehicle, clinic or other domain
+ * assumptions. Each account controls the mode through commercial_strategy.
+ */
+export function conversationPolicyPrompt(strategy: CommercialStrategy): string {
+  return [
+    'Conversation initiative policy — account-level behaviour for this tenant:',
+    `- ${initiativeRule(strategy.initiativeMode)}`,
+    '- Treat corrections, negative preferences and changes of mind as first-class information. Do not immediately repeat what the customer just rejected, and do not silently keep an old constraint after the customer withdraws it.',
+    '- Prefer one useful question over a checklist when clarification is genuinely needed. If the current message can be answered naturally without a tool, do that.',
+  ].join('\n')
+}
+
+/**
+ * Catalogue-specific policy. Callers should inject this only when the tenant
+ * actually has catalogue/presentation capability enabled.
+ */
 export function commercialStrategyPrompt(
   strategy: CommercialStrategy,
 ): string {
@@ -100,7 +118,6 @@ export function commercialStrategyPrompt(
     : 'size first, then colour'
 
   const rules = [
-    initiativeRule(strategy.initiativeMode),
     `Present at most ${strategy.maxProducts} product options at a time unless the customer explicitly asks for more.`,
     strategy.preferVisual
       ? 'Automatic media presentation is enabled for this account: once you have deliberately chosen relevant catalogue products, you may use send_product without waiting for the customer to ask for a photograph.'
@@ -115,10 +132,9 @@ export function commercialStrategyPrompt(
       ? 'Once the customer selects or clearly refers to a product, keep that product as the active product context until the customer changes it. A clear rejection or change of subject ends that assumption immediately.'
       : 'Do not assume a previously selected product remains active when the customer changes topic or the reference becomes ambiguous.',
     `When product qualification requires both attributes and they are not already known, ask about ${qualification}. Ask only one useful follow-up question at a time.`,
-    'Treat negative preferences and corrections as first-class conversational information: do not immediately re-offer what the customer just rejected, and do not silently carry an old constraint into a new goal when the customer has withdrawn it.',
   ]
 
-  return `Conversation and commercial policy — account-level rules for this tenant:\n${rules
+  return `Catalogue strategy — account-level rules for this tenant:\n${rules
     .map((rule) => `- ${rule}`)
     .join('\n')}`
 }
