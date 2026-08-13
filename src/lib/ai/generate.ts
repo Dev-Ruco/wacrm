@@ -13,6 +13,7 @@ import { generateOpenAi } from './providers/openai'
 import { generateAnthropic } from './providers/anthropic'
 import { executorWithTenantPolicy, toolsAllowedForTurn } from './action-policy'
 import { getAgentTraceContext } from './trace-context'
+import type { AgentTraceStepHandle } from './trace'
 import type { ProviderLifecycleEvent } from './providers/shared'
 
 export interface GenerateArgs {
@@ -23,7 +24,6 @@ export interface GenerateArgs {
   messages: ChatMessage[]
   tools?: AgentToolDefinition[]
   executeTool?: AgentToolExecutor
-  /** Internal observability label only; never sent to the customer. */
   observabilityLabel?: string
 }
 
@@ -80,7 +80,7 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
 
   const trace = getAgentTraceContext()
   trace?.setRuntime(config.provider, config.model)
-  const roundSteps = new Map<number, ReturnType<NonNullable<typeof trace>['startStep']>>()
+  const roundSteps = new Map<number, AgentTraceStepHandle>()
   const onLifecycleEvent = trace
     ? (event: ProviderLifecycleEvent) => {
         if (event.type === 'round_started') {
