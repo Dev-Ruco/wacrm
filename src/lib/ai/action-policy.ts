@@ -1,4 +1,9 @@
-import type { AgentToolDefinition, ChatMessage, CommercialStrategy } from './types'
+import type {
+  AgentToolDefinition,
+  AgentToolExecutor,
+  ChatMessage,
+  CommercialStrategy,
+} from './types'
 import { chatContentText } from './types'
 
 /**
@@ -19,9 +24,9 @@ export const TOOL_ACTION_CLASS: Readonly<Record<string, AgentActionClass>> = {
   handoff_human: 'escalate',
 }
 
-// Cross-business, cross-language presentation verbs only. There is no
-// product/category vocabulary here: the policy asks whether the customer is
-// explicitly asking to SEE/SEND media, not what the business sells.
+// Cross-business presentation language only. No product/category vocabulary:
+// the shared runtime asks whether the customer explicitly wants to SEE/SEND
+// media, not what a particular tenant sells.
 const EXPLICIT_PRESENTATION_RE =
   /\b(foto(?:s|grafia|grafias)?|imagem|imagens|visual|ver|vejo|mostra(?:r|-me|-nos)?|mostrar|manda(?:r)?|envia(?:r)?|photo(?:s)?|picture(?:s)?|image(?:s)?|show|see|send|muestra(?:me)?|mostrar|verlo|verla|imagen(?:es)?)\b/i
 
@@ -35,11 +40,6 @@ function latestUserIndex(messages: ChatMessage[]): number {
   return -1
 }
 
-/**
- * True only when this turn explicitly asks to see/send something, or when a
- * short affirmation directly answers the assistant's immediately preceding
- * offer to show/send media. This is deliberately business-agnostic.
- */
 export function customerExplicitlyRequestedPresentation(
   messages: ChatMessage[],
 ): boolean {
@@ -57,12 +57,37 @@ export function customerExplicitlyRequestedPresentation(
   return false
 }
 
+function cataloguePolicyDescription(strategy: CommercialStrategy): string {
+  const recommendation = strategy.autoRecommend
+    ? 'You may recommend when the customer has given enough need or preference to make a useful recommendation; do not turn greetings, vague rejections or unrelated remarks into unsolicited catalogue pushes.'
+    : 'Do not proactively recommend catalogue items unless the customer explicitly asks for suggestions or states a sufficiently specific item need.'
+  const stock = strategy.checkStock
+    ? 'Before confirming availability or encouraging a purchase, rely on current stock returned by the catalogue.'
+    : 'Never make a stock claim unless trusted result data already supports it.'
+  const continuity = strategy.keepSelectedProduct
+    ? 'Keep a clearly selected item as the active referent until the customer rejects it, selects another item or changes topic.'
+    : 'Do not assume a previously selected item remains active after ambiguity or a topic change.'
+
+  return `Account policy: present at most ${strategy.maxProducts} option(s) in one turn. ${recommendation} ${stock} ${continuity}`
+}
+
+function withTenantPolicy(
+  tool: AgentToolDefinition,
+  strategy: CommercialStrategy,
+): AgentToolDefinition {
+  if (tool.name !== 'search_catalog' && tool.name !== 'send_product') return tool
+  return {
+    ...tool,
+    description: `${tool.description} ${cataloguePolicyDescription(strategy)}`,
+  }
+}
+
 /**
- * Enforce the account's media policy at the provider boundary. A tenant with
- * automatic visual presentation disabled still gets search_catalog and all
- * other tools; only send_product is hidden until the customer asks to see or
- * receive media. This turns the setting into a real runtime rule instead of
- * a prompt suggestion while keeping the shared Agent Runtime generic.
+ * Enforce presentation policy before the model sees its tool list. Text-first
+ * tenants retain search/read capabilities but do not see send_product until
+ * the customer explicitly asks for a visual presentation. Definitions are
+ * also decorated with that tenant's catalogue policy, so account settings
+ * travel with the capability instead of leaking into non-catalogue tenants.
  */
 export function toolsAllowedForTurn(args: {
   tools?: AgentToolDefinition[]
@@ -71,7 +96,39 @@ export function toolsAllowedForTurn(args: {
 }): AgentToolDefinition[] | undefined {
   const { tools, messages, strategy } = args
   if (!tools || tools.length === 0 || !strategy) return tools
-  if (strategy.preferVisual) return tools
-  if (customerExplicitlyRequestedPresentation(messages)) return tools
-  return tools.filter((tool) => tool.name !== 'send_product')
+
+  const decorated = tools.map((tool) => withTenantPolicy(tool, strategy))
+  if (strategy.preferVisual) return decorated
+  if (customerExplicitlyRequestedPresentation(messages)) return decorated
+  return decorated.filter((tool) => tool.name !== 'send_product')
+}
+
+/**
+ * Hard boundary for PRESENT actions. The model gets guidance in the tool
+ * schema, but the server also enforces maxProducts so a tenant setting is not
+ * merely a prompt suggestion. This wrapper is provider-agnostic and leaves
+ * every non-presentation tool untouched.
+ */
+export function executorWithTenantPolicy(args: {
+  executeTool?: AgentToolExecutor
+  strategy?: CommercialStrategy
+}): AgentToolExecutor | undefined {
+  const { executeTool, strategy } = args
+  if (!executeTool || !strategy) return executeTool
+
+  let presentations = 0
+  return async (call) => {
+    if (call.name === 'send_product') {
+      if (presentations >= strategy.maxProducts) {
+        return JSON.stringify({
+          ok: false,
+          policy_blocked: true,
+          reason: `This account allows at most ${strategy.maxProducts} presented option(s) per turn.`,
+          instruction: 'Do not queue another product in this turn. Continue naturally with the options already presented.',
+        })
+      }
+      presentations += 1
+    }
+    return executeTool(call)
+  }
 }
