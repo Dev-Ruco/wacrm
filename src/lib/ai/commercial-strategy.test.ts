@@ -6,16 +6,16 @@ import {
 } from './commercial-strategy'
 
 describe('commercial strategy', () => {
-  it('defaults new tenants to conversation-first text-first behaviour', () => {
+  it('defaults initiative to conversation-first while preserving the legacy media fallback', () => {
     expect(normalizeCommercialStrategy(null)).toMatchObject({
       initiativeMode: 'conversation_first',
-      preferVisual: false,
+      preferVisual: true,
     })
   })
 
   it('preserves an existing tenant visual setting', () => {
-    expect(normalizeCommercialStrategy({ prefer_visual: true })).toMatchObject({
-      preferVisual: true,
+    expect(normalizeCommercialStrategy({ prefer_visual: false })).toMatchObject({
+      preferVisual: false,
     })
   })
 
