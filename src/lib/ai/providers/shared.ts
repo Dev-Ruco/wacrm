@@ -8,9 +8,25 @@ import {
   type ChatMessage,
 } from '../types'
 
-// ============================================================
-// Bits shared by the OpenAI + Anthropic adapters.
-// ============================================================
+export type ProviderLifecycleEvent =
+  | { type: 'round_started'; round: number; provider: 'openai' | 'anthropic'; model: string }
+  | {
+      type: 'round_finished'
+      round: number
+      provider: 'openai' | 'anthropic'
+      model: string
+      durationMs: number
+      usage: AiUsage | null
+      toolCallCount: number
+    }
+  | {
+      type: 'round_failed'
+      round: number
+      provider: 'openai' | 'anthropic'
+      model: string
+      durationMs: number
+      errorCode: string | null
+    }
 
 export interface ProviderArgs {
   apiKey: string
@@ -18,20 +34,24 @@ export interface ProviderArgs {
   systemPrompt: string
   messages: ChatMessage[]
   timeoutMs: number
-  /** Optional agent tools. Providers without tool support may ignore them. */
   tools?: AgentToolDefinition[]
   executeTool?: AgentToolExecutor
-  /** Sampling temperature. Omitted from the provider request when null/undefined. */
   temperature?: number | null
+  onLifecycleEvent?: (event: ProviderLifecycleEvent) => void
 }
 
-/**
- * Coerce a provider's usage block into our normalized `AiUsage`, tolerant
- * of missing/partial fields (providers differ and older API versions may
- * omit counts). Returns null when there's nothing usable, so logging can
- * distinguish "no usage reported" from "zero tokens". `total` falls back
- * to prompt + completion when the provider doesn't send it (Anthropic).
- */
+export function emitProviderLifecycle(
+  callback: ProviderArgs['onLifecycleEvent'],
+  event: ProviderLifecycleEvent,
+): void {
+  if (!callback) return
+  try {
+    callback(event)
+  } catch (error) {
+    console.error('[ai provider] lifecycle callback failed:', error)
+  }
+}
+
 export function normalizeUsage(raw: {
   prompt?: unknown
   completion?: unknown
@@ -43,13 +63,10 @@ export function normalizeUsage(raw: {
   const completionTokens = num(raw.completion)
   const total = num(raw.total)
   const totalTokens = total > 0 ? total : promptTokens + completionTokens
-  if (promptTokens === 0 && completionTokens === 0 && totalTokens === 0) {
-    return null
-  }
+  if (promptTokens === 0 && completionTokens === 0 && totalTokens === 0) return null
   return { promptTokens, completionTokens, totalTokens }
 }
 
-/** Map a fetch rejection (timeout / DNS / offline) to a typed AiError. */
 export function toNetworkError(err: unknown): AiError {
   if (err instanceof DOMException && err.name === 'TimeoutError') {
     return new AiError('The AI provider took too long to respond.', {
@@ -64,19 +81,12 @@ export function toNetworkError(err: unknown): AiError {
   })
 }
 
-/** Build a typed AiError from a non-2xx provider response, pulling the
- *  provider's own error message out of the JSON body when present. */
 export async function providerHttpError(provider: string, res: Response): Promise<AiError> {
   let detail = ''
   try {
-    const body = (await res.json()) as {
-      error?: { message?: string } | string
-    }
+    const body = (await res.json()) as { error?: { message?: string } | string }
     detail = typeof body?.error === 'string' ? body.error : (body?.error?.message ?? '')
-  } catch {
-    // Non-JSON error body — fall back to the status line.
-  }
-
+  } catch {}
   const { status } = res
   const code =
     status === 401 || status === 403
@@ -90,20 +100,12 @@ export async function providerHttpError(provider: string, res: Response): Promis
       : code === 'rate_limited'
         ? `${provider} rate limit reached`
         : `${provider} API error (${status})`
-
   return new AiError(detail ? `${base}: ${detail}` : base, {
     code,
-    // Surface an auth failure as 401 so the settings "Test key" button
-    // can show "invalid key"; everything else is an upstream 502.
     status: code === 'invalid_key' ? 401 : 502,
   })
 }
 
-/**
- * Collapse consecutive same-role turns into one (joined with blank
- * lines). Anthropic requires strictly alternating roles; merging is
- * also harmless for OpenAI and keeps the transcript compact.
- */
 export function mergeConsecutive(messages: ChatMessage[]): ChatMessage[] {
   const out: ChatMessage[] = []
   for (const m of messages) {
@@ -123,14 +125,12 @@ function cloneContent(content: ChatContent): ChatContent {
 
 function asParts(content: ChatContent): ChatContentPart[] {
   return typeof content === 'string'
-    ? [{ type: 'text', text: content }]
+    ? �[{type: 'text', text: content }]
     : content.map((part) => ({ ...part }))
 }
 
 function mergeContent(left: ChatContent, right: ChatContent): ChatContent {
-  if (typeof left === 'string' && typeof right === 'string') {
-    return `${left}\n\n${right}`
-  }
+  if (typeof left === 'string' && typeof right === 'string') return `${left}\n\n${right}`
   return [...asParts(left), { type: 'text', text: '\n\n' }, ...asParts(right)]
 }
 
@@ -141,8 +141,6 @@ export function hasImageContent(messages: ChatMessage[]): boolean {
   )
 }
 
-/** Remove pixel inputs while keeping all text placeholders/captions. Used for
- * one silent retry when a configured economical model rejects vision. */
 export function withoutImageContent(messages: ChatMessage[]): ChatMessage[] {
   return messages.map((message) => {
     if (typeof message.content === 'string') return { ...message }
@@ -152,7 +150,7 @@ export function withoutImageContent(messages: ChatMessage[]): ChatMessage[] {
       content:
         textParts.length > 0
           ? textParts.map((part) => ({ ...part }))
-          : '[Imagem enviada no WhatsApp; visão indisponível neste modelo]',
+          : '[Imagem eviada no WhatsApp; visão indisponível neste modelo]',
     }
   })
 }
