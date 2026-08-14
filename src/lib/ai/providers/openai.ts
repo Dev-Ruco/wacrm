@@ -7,6 +7,7 @@ import {
 } from '../types'
 import { MAX_OUTPUT_TOKENS } from '../defaults'
 import {
+  emitProviderLifecycle,
   hasImageContent,
   mergeConsecutive,
   normalizeUsage,
@@ -87,14 +88,18 @@ function toOpenAiMessage(message: ChatMessage): OpenAiMessage {
   }
 }
 
-/**
- * Call OpenAI's Chat Completions endpoint with the caller's own key.
- * When server-controlled tools are supplied, tool calls are executed in a
- * bounded loop and their results are returned to the model before the final
- * customer-facing answer is accepted.
- */
 export async function generateOpenAi(args: ProviderArgs): Promise<ProviderResult> {
-  const { apiKey, model, systemPrompt, messages, timeoutMs, tools = [], executeTool, temperature } = args
+  const {
+    apiKey,
+    model,
+    systemPrompt,
+    messages,
+    timeoutMs,
+    tools = [],
+    executeTool,
+    temperature,
+    onLifecycleEvent,
+  } = args
 
   if (tools.length > 0 && !executeTool) {
     throw new AiError('AI tools were configured without a server executor.', {
@@ -139,13 +144,18 @@ export async function generateOpenAi(args: ProviderArgs): Promise<ProviderResult
   let accumulatedUsage: AiUsage | null = null
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
+    const roundNumber = round + 1
+    const roundStartedAt = Date.now()
+    emitProviderLifecycle(onLifecycleEvent, {
+      type: 'round_started',
+      round: roundNumber,
+      provider: 'openai',
+      model,
+    })
+
     let res: Response
     try {
       res = await request(transcript)
-
-      // Model catalogues change and accounts may choose a text-only economy
-      // model. A 400 on the first multimodal request gets one silent text-only
-      // retry; captions/placeholders are retained by withoutImageContent.
       if (round === 0 && res.status === 400 && hasImageContent(mergedMessages)) {
         transcript = [
           { role: 'system', content: systemPrompt },
@@ -154,29 +164,66 @@ export async function generateOpenAi(args: ProviderArgs): Promise<ProviderResult
         res = await request(transcript)
       }
     } catch (err) {
-      throw toNetworkError(err)
+      const failure = toNetworkError(err)
+      emitProviderLifecycle(onLifecycleEvent, {
+        type: 'round_failed',
+        round: roundNumber,
+        provider: 'openai',
+        model,
+        durationMs: Math.max(0, Date.now() - roundStartedAt),
+        errorCode: failure.code,
+      })
+      throw failure
     }
 
-    if (!res.ok) throw await providerHttpError('OpenAI', res)
+    if (!res.ok) {
+      const failure = await providerHttpError('OpenAI', res)
+      emitProviderLifecycle(onLifecycleEvent, {
+        type: 'round_failed',
+        round: roundNumber,
+        provider: 'openai',
+        model,
+        durationMs: Math.max(0, Date.now() - roundStartedAt),
+        errorCode: failure.code,
+      })
+      throw failure
+    }
 
     const data = (await res.json().catch(() => null)) as OpenAiResponse | null
-    accumulatedUsage = addUsage(
-      accumulatedUsage,
-      normalizeUsage({
-        prompt: data?.usage?.prompt_tokens,
-        completion: data?.usage?.completion_tokens,
-        total: data?.usage?.total_tokens,
-      }),
-    )
+    const roundUsage = normalizeUsage({
+      prompt: data?.usage?.prompt_tokens,
+      completion: data?.usage?.completion_tokens,
+      total: data?.usage?.total_tokens,
+    })
+    accumulatedUsage = addUsage(accumulatedUsage, roundUsage)
 
     const message = data?.choices?.[0]?.message
     if (!message) {
-      throw new AiError('OpenAI returned an empty response.', {
+      const failure = new AiError('OpenAI returned an empty response.', {
         code: 'empty_response',
       })
+      emitProviderLifecycle(onLifecycleEvent, {
+        type: 'round_failed',
+        round: roundNumber,
+        provider: 'openai',
+        model,
+        durationMs: Math.max(0, Date.now() - roundStartedAt),
+        errorCode: failure.code,
+      })
+      throw failure
     }
 
     const toolCalls = message.tool_calls ?? []
+    emitProviderLifecycle(onLifecycleEvent, {
+      type: 'round_finished',
+      round: roundNumber,
+      provider: 'openai',
+      model,
+      durationMs: Math.max(0, Date.now() - roundStartedAt),
+      usage: roundUsage,
+      toolCallCount: toolCalls.length,
+    })
+
     if (toolCalls.length === 0) {
       const text = message.content
       if (!text || typeof text !== 'string' || !text.trim()) {

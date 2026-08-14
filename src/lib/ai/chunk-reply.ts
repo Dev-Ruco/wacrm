@@ -1,3 +1,5 @@
+import { stripHistoryAnnotationMarkers } from './history-annotations'
+
 export const REPLY_SPLIT_MARKER = '[[SPLIT]]'
 
 const HEURISTIC_SPLIT_MIN_LENGTH = 360
@@ -56,11 +58,15 @@ function splitLongReply(text: string, maxChunks: number): string[] {
 
 /**
  * Turns one model response into WhatsApp-sized conversational bubbles.
+ * Exact server-owned history annotations are stripped at this final send
+ * boundary so an otherwise-safe response cannot expose internal context to
+ * the customer. Arbitrary bracketed text is intentionally preserved.
+ *
  * The model's explicit marker wins; long unmarked replies fall back to
  * paragraph/sentence boundaries and short replies remain untouched.
  */
 export function splitReplyIntoChunks(text: string, maxChunks: number): string[] {
-  const cleanText = text.trim()
+  const cleanText = stripHistoryAnnotationMarkers(text)
   if (!cleanText) return []
 
   const limit = normalizeMaxChunks(maxChunks)

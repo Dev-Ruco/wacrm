@@ -1,120 +1,68 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_AGENT_TOOLS } from '@/lib/ai/tool-permissions'
-import { agentFlowAccountState, buildAgentFlowGraph } from './agent-flow-panel'
+import { buildExecutionFlow } from './agent-flow-panel'
+import type { AgentLiveStep } from '@/lib/ai/live-observability'
 
-describe('agentFlowAccountState', () => {
-  it('waits only while the profile is still loading', () => {
-    expect(agentFlowAccountState(null, true)).toBe('loading')
-  })
+function step(
+  sequence: number,
+  type: string,
+  label: string,
+  status: AgentLiveStep['status'] = 'completed',
+): AgentLiveStep {
+  return {
+    id: `step-${sequence}`,
+    trace_id: 'run-1',
+    sequence,
+    type,
+    label,
+    status,
+    started_at: `2026-08-13T19:00:0${sequence}.000Z`,
+    finished_at: `2026-08-13T19:00:0${sequence}.100Z`,
+    duration_ms: 100,
+    metadata: {},
+  }
+}
 
-  it('uses the account id without requiring the account summary object', () => {
-    expect(agentFlowAccountState('account-1', false)).toBe('ready')
-  })
-
-  it('stops loading when the profile settled without an account id', () => {
-    expect(agentFlowAccountState(null, false)).toBe('unavailable')
-  })
-})
-
-describe('buildAgentFlowGraph', () => {
-  it('shows every known tool, wires the pipeline through the active ones only', () => {
-    const graph = buildAgentFlowGraph({
-      config: {
-        configured: true,
-        provider: 'openai',
-        model: 'gpt-test',
-        buffer_window_seconds: 12,
-        max_reply_chunks: 3,
-        context_message_limit: 20,
-      },
-      agentId: 'agent-1',
-      tools: {
-        ...DEFAULT_AGENT_TOOLS,
-        search_catalog: false,
-        send_product: false,
-        add_tag: true,
-      },
-      counts: { add_tag: 4, handoff_human: 2 },
-    })
-
-    // All 6 tools always render as nodes — disabled ones stay visible
-    // (dimmed, toolEnabled: false) so they can be turned on from the canvas.
-    expect(graph.nodes.map((node) => node.id)).toEqual([
-      'whatsapp',
-      'buffer',
-      'agent',
-      'tool:search_catalog',
-      'tool:send_product',
-      'tool:search_knowledge',
-      'tool:add_tag',
-      'tool:create_deal',
-      'tool:schedule_visit',
-      'tool:get_style_opinion',
-      'tool:handoff_human',
-      'response',
+describe('buildExecutionFlow', () => {
+  it('renders only steps that the runtime actually persisted', () => {
+    const flow = buildExecutionFlow([
+      step(0, 'message_received', 'Mensagem'),
+      step(1, 'memory_retrieved', 'Memória'),
+      step(2, 'response_sent', 'Resposta'),
     ])
-    // Only enabled tools are wired into the actual pipeline.
-    expect(graph.edges).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ source: 'whatsapp', target: 'buffer' }),
-        expect.objectContaining({ source: 'buffer', target: 'agent' }),
-        expect.objectContaining({ source: 'agent', target: 'tool:add_tag' }),
-        expect.objectContaining({ source: 'tool:add_tag', target: 'response' }),
-      ]),
-    )
-    expect(graph.edges).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ target: 'tool:search_catalog' })]),
-    )
-    expect(
-      graph.nodes.find((node) => node.id === 'tool:add_tag')?.data,
-    ).toMatchObject({ count: 4, toolEnabled: true })
-    expect(
-      graph.nodes.find((node) => node.id === 'tool:search_catalog')?.data,
-    ).toMatchObject({ toolEnabled: false, detail: 'Desligada' })
+
+    expect(flow.nodes.map((node) => node.id)).toEqual(['step-0', 'step-1', 'step-2'])
+    expect(flow.edges).toHaveLength(2)
+    expect(flow.nodes.some((node) => node.data.step.type === 'tool_called')).toBe(false)
   })
 
-  it('marks a tool live only when its most recent call is within the last 5 minutes', () => {
-    const now = Date.now()
-    const graph = buildAgentFlowGraph({
-      config: { configured: true },
-      agentId: 'agent-1',
-      tools: { ...DEFAULT_AGENT_TOOLS },
-      counts: { handoff_human: 2, add_tag: 1 },
-      recentByTool: {
-        handoff_human: [
-          { tool_key: 'handoff_human', called_at: new Date(now - 60_000).toISOString(), succeeded: true },
-        ],
-        add_tag: [
-          { tool_key: 'add_tag', called_at: new Date(now - 30 * 60_000).toISOString(), succeeded: false },
-        ],
-      },
-    })
+  it('keeps repeated tool/model steps in execution order instead of collapsing them', () => {
+    const flow = buildExecutionFlow([
+      step(0, 'message_received', 'Mensagem'),
+      step(1, 'llm_round', 'LLM · Round 1'),
+      step(2, 'tool_called', 'search_catalog'),
+      step(3, 'llm_round', 'LLM · Round 2'),
+      step(4, 'tool_called', 'send_product'),
+      step(5, 'llm_round', 'LLM · Round 3'),
+      step(6, 'response_sent', 'Resposta'),
+    ])
 
-    expect(graph.nodes.find((node) => node.id === 'tool:handoff_human')?.data).toMatchObject({
-      live: true,
-    })
-    expect(graph.nodes.find((node) => node.id === 'tool:add_tag')?.data).toMatchObject({
-      live: false,
-    })
+    expect(flow.nodes.map((node) => node.data.step.label)).toEqual([
+      'Mensagem',
+      'LLM · Round 1',
+      'search_catalog',
+      'LLM · Round 2',
+      'send_product',
+      'LLM · Round 3',
+      'Resposta',
+    ])
   })
 
-  it('connects the agent directly to the response when every tool is off', () => {
-    const graph = buildAgentFlowGraph({
-      config: { configured: true },
-      agentId: 'agent-1',
-      tools: Object.fromEntries(
-        Object.keys(DEFAULT_AGENT_TOOLS).map((key) => [key, false]),
-      ) as typeof DEFAULT_AGENT_TOOLS,
-      counts: {},
-    })
-    expect(graph.edges).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'agent-response',
-          source: 'agent',
-          target: 'response',
-        }),
-      ]),
-    )
+  it('animates only the edge entering a running step and respects reduced motion', () => {
+    const steps = [
+      step(0, 'message_received', 'Mensagem'),
+      step(1, 'llm_round', 'LLM · Round 1', 'running'),
+    ]
+    expect(buildExecutionFlow(steps, false).edges[0]?.animated).toBe(true)
+    expect(buildExecutionFlow(steps, true).edges[0]?.animated).toBe(false)
   })
 })

@@ -1,8 +1,7 @@
 import type { WacrmSupabaseClient } from '@/lib/supabase/types'
 import { AGENT_TOOL_KEYS, type AgentToolKey } from './tool-permissions'
+import { getAgentTraceContext } from './trace-context'
 
-/** Columns the skills management API (list/create/update) reads and
- *  returns — shared so the collection and [id] routes stay in sync. */
 export const SKILL_COLUMNS =
   'id, name, instructions, objective, when_to_use, when_not_to_use, tool_keys, enabled, sort_order'
 
@@ -32,12 +31,6 @@ interface SkillRow {
   tool_keys: string[] | null
 }
 
-/**
- * Enabled skills for this agent, in display order. An agent that has never
- * configured a skill gets `[]` — every caller must treat that as "no
- * skill-based narrowing", not "no tools allowed", so every existing
- * account keeps today's behaviour until it opts in by creating a skill.
- */
 export async function loadAgentSkills(
   db: WacrmSupabaseClient,
   accountId: string,
@@ -55,7 +48,8 @@ export async function loadAgentSkills(
     console.error('[ai skills] load failed:', error)
     return []
   }
-  return (data ?? []).map((row) => {
+
+  const skills = (data ?? []).map((row) => {
     const r = row as SkillRow
     return {
       id: r.id,
@@ -69,15 +63,14 @@ export async function loadAgentSkills(
       ),
     }
   })
+
+  getAgentTraceContext()?.recordEvent('skills_loaded', 'Skills activas no contexto', {
+    count: skills.length,
+    names: skills.map((skill) => skill.name).slice(0, 20),
+  })
+  return skills
 }
 
-/**
- * Prompt block folding each enabled skill's own objective/instructions in,
- * alongside the fixed scaffold in defaults.ts and the account's own
- * system_prompt — additive, never a replacement for either. Mirrors the
- * shape of lessonsPrompt/contactMemoryPrompt so all "extra context" blocks
- * read the same way to the model.
- */
 export function skillsPrompt(skills: AgentSkill[]): string | null {
   const withContent = skills.filter(
     (skill) => skill.instructions || skill.objective || skill.whenToUse || skill.whenNotToUse,
@@ -98,14 +91,6 @@ export function skillsPrompt(skills: AgentSkill[]): string | null {
   ].join('\n\n')
 }
 
-/**
- * Union of tool keys referenced by the agent's enabled skills, or `null`
- * when the agent has no skills at all (meaning: don't narrow, agent_tools
- * alone still governs). `handoff_human` is deliberately excluded from this
- * narrowing at the call site (see tools/index.ts) — it's the safety valve
- * the rest of the guardrail system depends on, not a business capability
- * that should require an admin to remember to attach it to every skill.
- */
 export function skillToolKeys(skills: AgentSkill[]): Set<AgentToolKey> | null {
   if (skills.length === 0) return null
   const keys = new Set<AgentToolKey>()
@@ -115,11 +100,6 @@ export function skillToolKeys(skills: AgentSkill[]): Set<AgentToolKey> | null {
   return keys
 }
 
-/**
- * Apply skill-based narrowing on top of the account's agent_tools
- * permissions. Returns `permissions` unchanged when the agent has no
- * skills configured. `handoff_human` is always exempt — see skillToolKeys.
- */
 export function applySkillNarrowing(
   permissions: Record<AgentToolKey, boolean>,
   skills: AgentSkill[],

@@ -21,6 +21,25 @@ describe('splitReplyIntoChunks', () => {
     ).toEqual(['Tenho estas opções.', 'Quer ver primeiro as pretas?'])
   })
 
+  it('strips exact internal history annotations before WhatsApp send', () => {
+    expect(
+      splitReplyIntoChunks(
+        '[Imagem enviada no WhatsApp]\nAqui estão outras duas opções.',
+        3,
+      ),
+    ).toEqual(['Aqui estão outras duas opções.'])
+  })
+
+  it('does not strip arbitrary bracketed customer/model text', () => {
+    expect(
+      splitReplyIntoChunks('[Tamanho M] está disponível para esta opção.', 3),
+    ).toEqual(['[Tamanho M] está disponível para esta opção.'])
+  })
+
+  it('returns no chunks when an internal annotation is the whole output', () => {
+    expect(splitReplyIntoChunks('[Imagem enviada no WhatsApp]', 3)).toEqual([])
+  })
+
   it('merges overflow into the final allowed bubble', () => {
     expect(
       splitReplyIntoChunks(

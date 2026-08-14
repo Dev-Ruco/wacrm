@@ -6,7 +6,11 @@ import { useTranslations } from 'next-intl';
 import { useAuth } from '@/hooks/use-auth';
 import { canEditSettings } from '@/lib/auth/roles';
 import { AI_PROVIDER_DEFAULT_MODEL } from '@/lib/ai/defaults';
-import type { AiProvider, ProductQualificationOrder } from '@/lib/ai/types';
+import type {
+  AgentInitiativeMode,
+  AiProvider,
+  ProductQualificationOrder,
+} from '@/lib/ai/types';
 import type { AccountMember } from '@/types';
 import { fetchAccountMembers } from '@/lib/account/members';
 
@@ -59,22 +63,25 @@ export function useAgentConfig() {
   const [agentDescription, setAgentDescription] = useState('');
 
   const [maxProducts, setMaxProducts] = useState(3);
-  const [preferVisual, setPreferVisual] = useState(true);
+  const [preferVisual, setPreferVisual] = useState(false);
   const [autoRecommend, setAutoRecommend] = useState(true);
   const [checkStock, setCheckStock] = useState(true);
   const [keepSelectedProduct, setKeepSelectedProduct] = useState(true);
   const [qualificationOrder, setQualificationOrder] =
     useState<ProductQualificationOrder>('size_then_color');
+  const [initiativeMode, setInitiativeMode] =
+    useState<AgentInitiativeMode>('conversation_first');
 
   const loadedAccountIdRef = useRef<string | null>(null);
 
   const resetCommercialStrategy = () => {
     setMaxProducts(3);
-    setPreferVisual(true);
+    setPreferVisual(false);
     setAutoRecommend(true);
     setCheckStock(true);
     setKeepSelectedProduct(true);
     setQualificationOrder('size_then_color');
+    setInitiativeMode('conversation_first');
   };
 
   const fetchConfig = useCallback(async () => {
@@ -114,7 +121,7 @@ export function useAgentConfig() {
 
         const strategy = data.commercial_strategy ?? {};
         setMaxProducts(strategy.max_products ?? 3);
-        setPreferVisual(strategy.prefer_visual ?? true);
+        setPreferVisual(strategy.prefer_visual ?? false);
         setAutoRecommend(strategy.auto_recommend ?? true);
         setCheckStock(strategy.check_stock ?? true);
         setKeepSelectedProduct(strategy.keep_selected_product ?? true);
@@ -122,6 +129,11 @@ export function useAgentConfig() {
           strategy.qualification_order === 'color_then_size'
             ? 'color_then_size'
             : 'size_then_color',
+        );
+        setInitiativeMode(
+          strategy.initiative_mode === 'balanced' || strategy.initiative_mode === 'action_first'
+            ? strategy.initiative_mode
+            : 'conversation_first',
         );
       } else {
         resetCommercialStrategy();
@@ -166,6 +178,7 @@ export function useAgentConfig() {
       check_stock: checkStock,
       keep_selected_product: keepSelectedProduct,
       qualification_order: qualificationOrder,
+      initiative_mode: initiativeMode,
     },
     is_active: isActive,
     auto_reply_enabled: autoReplyEnabled,
@@ -331,6 +344,8 @@ export function useAgentConfig() {
     setKeepSelectedProduct,
     qualificationOrder,
     setQualificationOrder,
+    initiativeMode,
+    setInitiativeMode,
     handleTest,
     handleSave,
     handleRemove,

@@ -22,12 +22,33 @@ describe('AI output guardrails', () => {
     ).toContain('system_prompt_leak')
   })
 
-  it('blocks a leaked history annotation marker (real production incident)', () => {
+  it('marks an isolated history annotation leak as recoverable when useful text remains', () => {
+    const result = evaluateAgentOutput({
+      text: 'Veja estas opções:\n\n[Opção interactiva no WhatsApp]\nSeleccione este produto abaixo.',
+    })
+    expect(result.safe).toBe(true)
+    expect(result.violations).toContain('history_annotation_leak')
+  })
+
+  it('blocks a history annotation when no useful reply remains', () => {
     expect(
       evaluateAgentOutput({
-        text: 'Veja estas opções:\n\n[Opção interactiva no WhatsApp]\nSeleccione este produto abaixo.',
-      }).violations,
-    ).toContain('history_annotation_leak')
+        text: '[Imagem enviada no WhatsApp]',
+      }),
+    ).toMatchObject({
+      safe: false,
+      violations: ['history_annotation_leak'],
+    })
+  })
+
+  it('does not let a recoverable history annotation hide a serious violation', () => {
+    const result = evaluateAgentOutput({
+      text: '[Imagem enviada no WhatsApp] Use sk-abcdefghijklmnopqrstuvwxyz1234567890',
+    })
+    expect(result.safe).toBe(false)
+    expect(result.violations).toEqual(
+      expect.arrayContaining(['history_annotation_leak', 'credential_or_secret']),
+    )
   })
 
   it('blocks credentials and valid payment-card numbers', () => {

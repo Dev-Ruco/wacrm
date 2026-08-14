@@ -18,6 +18,7 @@ import { createAutoReplyTools } from './tools'
 import {
   createAgentTraceCollector,
   type AgentFinalAction,
+  type AgentRunStatus,
   type AgentTraceCollector,
 } from './trace'
 import { loadAgentToolPermissions } from './tool-permissions'
@@ -113,6 +114,7 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
   const { accountId, conversationId, contactId, configOwnerUserId } = args
   let trace: AgentTraceCollector | null = null
   let finalAction: AgentFinalAction = 'no_reply'
+  let runStatusOverride: AgentRunStatus | undefined
 
   try {
     const db = supabaseAdmin()
@@ -189,6 +191,7 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
         accountId,
         agentId: config.agentId,
         conversationId,
+        inboundMessageId: args.inboundMessageId,
       })
     }
 
@@ -460,6 +463,7 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
         'A mensagem do cliente foi recebida, mas o sistema não conseguiu reservar uma resposta da IA. Continue a partir da última mensagem.',
       )
       finalAction = 'handoff'
+      runStatusOverride = 'failed'
       await sendStaticNotice(args, TEMPORARY_FAILURE_NOTICE)
       return
     }
@@ -509,12 +513,13 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
   } catch (err) {
     console.error('[ai auto-reply] dispatch failed:', err)
     finalAction = 'handoff'
+    runStatusOverride = 'failed'
     try {
       await sendStaticNotice(args, TEMPORARY_FAILURE_NOTICE)
     } catch (fallbackErr) {
       console.error('[ai auto-reply] fallback send failed:', fallbackErr)
     }
   } finally {
-    trace?.finish(finalAction)
+    trace?.finish(finalAction, runStatusOverride)
   }
 }
