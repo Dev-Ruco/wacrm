@@ -45,6 +45,8 @@ import { createClient } from '@/lib/supabase/client'
 import { autoLayout } from '@/lib/flows/layout'
 import {
   buildLiveExecutionGraph,
+  normalizeLiveRun,
+  normalizeLiveStep,
   runDurationMs,
   stepKind,
   upsertLiveRun,
@@ -256,6 +258,7 @@ function TopologyNode({ data }: NodeProps) {
 }
 
 function PacketEdge(props: EdgeProps) {
+  if (![props.sourceX, props.sourceY, props.targetX, props.targetY].every(Number.isFinite)) return null
   const [path] = getSmoothStepPath({
     sourceX: props.sourceX,
     sourceY: props.sourceY,
@@ -326,8 +329,8 @@ function toolNodeId(key: string) {
 }
 
 function topologyIdForStep(step: AgentLiveStep, tools: string[]): string {
-  const type = step.type.toLowerCase()
-  const label = step.label.toLowerCase()
+  const type = String(step.type ?? '').toLowerCase()
+  const label = String(step.label ?? '').toLowerCase()
   if (type.includes('message')) return 'whatsapp_in'
   if (type.includes('working_state') || type === 'state_updated' || type.includes('state')) return 'working_state'
   if (type.includes('intent')) return 'intent'
@@ -435,7 +438,7 @@ function buildPersistentTopology(
     const kind: TopologyKind = tool === 'handoff_human' ? 'handoff' : 'tool'
     addNode(toolNodeId(tool), TOOL_LABELS[tool] ?? tool, tool, kind, x, y)
     addEdge('model', toolNodeId(tool), 'bottom', 'top')
-    if (tool !== 'handoff_human') addEdge(toolNodeId(tool), 'model', undefined, 'bottom')
+    if (tool !== 'handoff_human') addEdge(toolNodeId(tool), 'model')
   })
 
   if (isRunning && progress.previous && progress.current) {
@@ -588,7 +591,7 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
         .order('started_at', { ascending: false })
         .limit(30)
       if (runsError) throw runsError
-      const next = (data ?? []) as AgentLiveRun[]
+      const next = (data ?? []).map(normalizeLiveRun).filter((row): row is AgentLiveRun => Boolean(row))
       setRuns(next)
       setSelectedRunId((current) => current && next.some((run) => run.id === current) ? current : (next[0]?.id ?? null))
     } catch (loadError) {
@@ -611,7 +614,7 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
       setTelemetryError(stepsError.message)
       return
     }
-    setSteps((data ?? []) as AgentLiveStep[])
+    setSteps((data ?? []).map(normalizeLiveStep).filter((row): row is AgentLiveStep => Boolean(row)))
   }, [accountId])
 
   useEffect(() => {
@@ -633,8 +636,8 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
         'postgres_changes',
         { event: '*', schema: 'wacrm', table: 'agent_traces', filter: `account_id=eq.${accountId}` },
         (payload) => {
-          const row = payload.new as AgentLiveRun
-          if (!row?.id) return
+          const row = normalizeLiveRun(payload.new)
+          if (!row) return
           setRuns((current) => upsertLiveRun(current, row))
           if (payload.eventType === 'INSERT') setSelectedRunId(row.id)
         },
@@ -643,8 +646,8 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
         'postgres_changes',
         { event: '*', schema: 'wacrm', table: 'agent_trace_steps', filter: `account_id=eq.${accountId}` },
         (payload) => {
-          const row = payload.new as AgentLiveStep
-          if (!row?.id) return
+          const row = normalizeLiveStep(payload.new)
+          if (!row) return
           if (row.trace_id === selectedRunId) {
             setSteps((current) => upsertLiveStep(current, row))
             setSelectedStep((current) => current?.id === row.id ? row : current)

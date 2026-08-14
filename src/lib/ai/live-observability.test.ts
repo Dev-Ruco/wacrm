@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildLiveExecutionGraph,
+  normalizeLiveRun,
+  normalizeLiveStep,
   runDurationMs,
   upsertLiveRun,
   upsertLiveStep,
@@ -68,5 +70,28 @@ describe('live observability view model', () => {
   it('computes live duration without changing completed duration', () => {
     expect(runDurationMs(run('done', '2026-08-13T18:00:00Z'), Date.parse('2026-08-13T19:00:00Z'))).toBe(500)
     expect(runDurationMs(run('live', '2026-08-13T18:00:00Z', 'running'), Date.parse('2026-08-13T18:00:02Z'))).toBe(2000)
+  })
+
+  it('rejects partial realtime rows instead of exposing them to React state', () => {
+    expect(normalizeLiveRun({ id: 'run-partial', status: 'running' })).toBeNull()
+    expect(normalizeLiveStep({ id: 'step-partial', trace_id: 'run-1' })).toBeNull()
+  })
+
+  it('keeps existing state when an invalid realtime row arrives', () => {
+    const existingRun = run('a', '2026-08-13T18:00:00Z')
+    const existingStep = step(0)
+    expect(upsertLiveRun([existingRun], { id: 'broken' })).toEqual([existingRun])
+    expect(upsertLiveStep([existingStep], { id: 'broken' })).toEqual([existingStep])
+  })
+
+  it('sanitizes malformed step metadata and negative duration values', () => {
+    const normalized = normalizeLiveStep({
+      ...step(1),
+      status: 'completed',
+      metadata: 'unexpected',
+      duration_ms: -10,
+    })
+    expect(normalized?.metadata).toEqual({})
+    expect(normalized?.duration_ms).toBe(0)
   })
 })
