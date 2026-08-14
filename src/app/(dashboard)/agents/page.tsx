@@ -7,6 +7,7 @@ import { AiUsageCard } from '@/components/agents/ai-usage';
 import { AgentTools } from '@/components/agents/agent-tools';
 import { AgentSkills } from '@/components/agents/agent-skills';
 import { AgentFlowPanel } from '@/components/agents/agent-flow-panel';
+import { AgentFlowErrorBoundary } from '@/components/agents/agent-flow-error-boundary';
 import { AgentSuggestions } from '@/components/agents/agent-suggestions';
 import { AgentEval } from '@/components/agents/agent-eval';
 import { AgentOverview } from '@/components/agents/agent-overview';
@@ -45,6 +46,53 @@ export default function AgentsPage() {
     };
   }, []);
 
+  const renderSection = () => {
+    switch (section) {
+      case 'overview':
+        return <AgentOverview state={agentConfig} onNavigate={setSection} />;
+      case 'identity':
+        return <AgentIdentity state={agentConfig} />;
+      case 'skills':
+        return <AgentSkills />;
+      case 'tools':
+        return <AgentTools />;
+      case 'knowledge':
+        return (
+          <AiKnowledgeCard
+            accountId={accountId}
+            canEdit={agentConfig.canEdit}
+            hasEmbeddingsKey={
+              agentConfig.embeddingsKeyEdited
+                ? agentConfig.embeddingsKey.trim().length > 0
+                : agentConfig.hasStoredEmbeddingsKey
+            }
+          />
+        );
+      case 'memory':
+        return <AgentMemory />;
+      case 'security':
+        return <AgentSecurity state={agentConfig} />;
+      case 'runtime':
+        return <AgentRuntime state={agentConfig} />;
+      case 'playground':
+        return <AiPlayground onGoToSetup={() => setSection('runtime')} />;
+      case 'flow':
+        return (
+          <AgentFlowErrorBoundary>
+            <AgentFlowPanel onOpenTab={(next) => setSection(next)} />
+          </AgentFlowErrorBoundary>
+        );
+      case 'suggestions':
+        return <AgentSuggestions />;
+      case 'eval':
+        return canViewUsage ? <AgentEval /> : null;
+      case 'usage':
+        return canViewUsage ? <AiUsageCard /> : null;
+      default:
+        return null;
+    }
+  };
+
   return (
     <div>
       <div className="flex items-center gap-2">
@@ -66,69 +114,7 @@ export default function AgentsPage() {
           isActive={agentConfig.isActive}
           canViewUsage={canViewUsage}
         >
-          <div hidden={section !== 'overview'}>
-            <AgentOverview state={agentConfig} onNavigate={setSection} />
-          </div>
-
-          <div hidden={section !== 'identity'}>
-            <AgentIdentity state={agentConfig} />
-          </div>
-
-          <div hidden={section !== 'skills'}>
-            <AgentSkills />
-          </div>
-
-          <div hidden={section !== 'tools'}>
-            <AgentTools />
-          </div>
-
-          <div hidden={section !== 'knowledge'}>
-            <AiKnowledgeCard
-              accountId={accountId}
-              canEdit={agentConfig.canEdit}
-              hasEmbeddingsKey={
-                agentConfig.embeddingsKeyEdited
-                  ? agentConfig.embeddingsKey.trim().length > 0
-                  : agentConfig.hasStoredEmbeddingsKey
-              }
-            />
-          </div>
-
-          <div hidden={section !== 'memory'}>
-            <AgentMemory />
-          </div>
-
-          <div hidden={section !== 'security'}>
-            <AgentSecurity state={agentConfig} />
-          </div>
-
-          <div hidden={section !== 'runtime'}>
-            <AgentRuntime state={agentConfig} />
-          </div>
-
-          <div hidden={section !== 'playground'}>
-            <AiPlayground onGoToSetup={() => setSection('runtime')} />
-          </div>
-
-          <div hidden={section !== 'flow'}>
-            <AgentFlowPanel onOpenTab={(next) => setSection(next)} />
-          </div>
-
-          <div hidden={section !== 'suggestions'}>
-            <AgentSuggestions />
-          </div>
-
-          {canViewUsage && (
-            <div hidden={section !== 'eval'}>
-              <AgentEval />
-            </div>
-          )}
-
-          {canViewUsage && (
-            <div hidden={section !== 'usage'}>
-              <AiUsageCard />
-            </div>
-          )}
+          {renderSection()}
         </AgentBuilderShell>
       )}
     </div>
