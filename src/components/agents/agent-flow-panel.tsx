@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Background,
   BackgroundVariant,
@@ -15,6 +15,7 @@ import {
   type EdgeProps,
   type Node,
   type NodeProps,
+  type ReactFlowInstance,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import {
@@ -69,7 +70,6 @@ import { useAuth } from '@/hooks/use-auth'
 
 type AgentTab = 'runtime' | 'tools' | 'usage' | 'playground'
 type ViewMode = 'graph' | 'timeline'
-
 type TopologyKind =
   | 'channel'
   | 'context'
@@ -84,10 +84,7 @@ type TopologyKind =
   | 'response'
   | 'handoff'
 
-interface ExecutionNodeData extends Record<string, unknown> {
-  step: AgentLiveStep
-}
-
+interface ExecutionNodeData extends Record<string, unknown> { step: AgentLiveStep }
 interface TopologyNodeData extends Record<string, unknown> {
   topologyId: string
   label: string
@@ -97,7 +94,6 @@ interface TopologyNodeData extends Record<string, unknown> {
   completed: boolean
   failed: boolean
 }
-
 interface RuntimeTopologyConfig {
   agentName: string
   agentRole: string
@@ -106,7 +102,6 @@ interface RuntimeTopologyConfig {
   skills: string[]
   tools: string[]
 }
-
 interface PacketEdgeData extends Record<string, unknown> {
   packetActive?: boolean
   reducedMotion?: boolean
@@ -132,25 +127,11 @@ const TOOL_LABELS: Record<string, string> = {
   handoff_human: 'Handoff humano',
 }
 
-const TIME_FORMATTER = new Intl.DateTimeFormat('pt-PT', {
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-})
-
-const RUN_TIME_FORMATTER = new Intl.DateTimeFormat('pt-PT', {
-  hour: '2-digit',
-  minute: '2-digit',
-})
-
+const TIME_FORMATTER = new Intl.DateTimeFormat('pt-PT', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+const RUN_TIME_FORMATTER = new Intl.DateTimeFormat('pt-PT', { hour: '2-digit', minute: '2-digit' })
 const STATUS_LABEL: Record<string, string> = {
-  running: 'Em processamento',
-  completed: 'Concluído',
-  failed: 'Falhou',
-  blocked: 'Bloqueado',
-  handoff: 'Handoff',
+  running: 'Em processamento', completed: 'Concluído', failed: 'Falhou', blocked: 'Bloqueado', handoff: 'Handoff',
 }
-
 const STEP_STATUS_CLASS: Record<LiveStepStatus, string> = {
   running: 'border-primary/70 bg-primary/10',
   completed: 'border-emerald-500/40 bg-emerald-500/10',
@@ -228,15 +209,13 @@ function TopologyNode({ data }: NodeProps) {
   const node = data as TopologyNodeData
   const Icon = topologyIcon(node.kind)
   return (
-    <div
-      className={cn(
-        'relative w-[184px] rounded-xl border bg-card px-3 py-3 shadow-sm transition-all duration-300',
-        node.kind === 'agent' && 'w-[218px] border-primary/40 bg-primary/5 shadow-md',
-        node.active && 'border-primary bg-primary/10 shadow-lg ring-2 ring-primary/20',
-        node.completed && !node.active && 'border-emerald-500/35',
-        node.failed && 'border-destructive/70 bg-destructive/5',
-      )}
-    >
+    <div className={cn(
+      'relative w-[184px] rounded-xl border bg-card px-3 py-3 shadow-sm transition-all duration-300',
+      node.kind === 'agent' && 'w-[218px] border-primary/40 bg-primary/5 shadow-md',
+      node.active && 'border-primary bg-primary/10 shadow-lg ring-2 ring-primary/20',
+      node.completed && !node.active && 'border-emerald-500/35',
+      node.failed && 'border-destructive/70 bg-destructive/5',
+    )}>
       <Handle type="target" position={Position.Left} className="!opacity-0" />
       <Handle type="target" id="top" position={Position.Top} className="!opacity-0" />
       <div className="flex items-center gap-2.5">
@@ -276,15 +255,11 @@ function PacketEdge(props: EdgeProps) {
         id={props.id}
         path={path}
         markerEnd={props.markerEnd}
-        style={{
-          ...props.style,
-          stroke: active ? 'var(--primary)' : 'var(--border)',
-          strokeWidth: active ? 2.4 : 1.4,
-        }}
+        style={{ ...props.style, stroke: active ? 'var(--primary)' : 'var(--border)', strokeWidth: active ? 2.4 : 1.4 }}
       />
       {active && !data.reducedMotion && (
-        <circle r="4.5" fill="var(--primary)">
-          <animateMotion dur="0.72s" repeatCount="indefinite" path={path} />
+        <circle r="5" fill="var(--primary)">
+          <animateMotion dur="0.86s" repeatCount="indefinite" path={path} />
         </circle>
       )}
     </>
@@ -294,7 +269,6 @@ function PacketEdge(props: EdgeProps) {
 const NODE_TYPES = { execution: ExecutionNode, topology: TopologyNode }
 const EDGE_TYPES = { packet: PacketEdge }
 
-/** Kept for execution-focused unit tests and the Timeline model. The V2 canvas itself uses a persistent topology. */
 export function buildExecutionFlow(steps: AgentLiveStep[], reducedMotion = false): {
   nodes: Node<ExecutionNodeData>[]
   edges: Edge[]
@@ -306,12 +280,7 @@ export function buildExecutionFlow(steps: AgentLiveStep[], reducedMotion = false
     { direction: 'LR', rankSep: 72, nodeSep: 24, defaultWidth: 220 },
   )
   return {
-    nodes: graph.nodes.map(({ id, step }) => ({
-      id,
-      type: 'execution',
-      data: { step },
-      position: positions.get(id) ?? { x: 0, y: 0 },
-    })),
+    nodes: graph.nodes.map(({ id, step }) => ({ id, type: 'execution', data: { step }, position: positions.get(id) ?? { x: 0, y: 0 } })),
     edges: graph.edges.map((edge) => ({
       id: edge.id,
       source: edge.source,
@@ -324,9 +293,7 @@ export function buildExecutionFlow(steps: AgentLiveStep[], reducedMotion = false
   }
 }
 
-function toolNodeId(key: string) {
-  return `tool:${key}`
-}
+function toolNodeId(key: string) { return `tool:${key}` }
 
 function topologyIdForStep(step: AgentLiveStep, tools: string[]): string {
   const type = String(step.type ?? '').toLowerCase()
@@ -348,16 +315,23 @@ function topologyIdForStep(step: AgentLiveStep, tools: string[]): string {
   return 'agent'
 }
 
-function runtimeProgress(steps: AgentLiveStep[], tools: string[]) {
+function playbackPathForSteps(steps: AgentLiveStep[], tools: string[]): string[] {
   const ordered = [...steps].sort((a, b) => a.sequence - b.sequence)
-  const mapped = ordered.map((step) => ({ step, nodeId: topologyIdForStep(step, tools) }))
-  const running = [...mapped].reverse().find(({ step }) => step.status === 'running') ?? null
-  const failed = [...mapped].reverse().find(({ step }) => step.status === 'failed' || step.status === 'blocked') ?? null
-  const completed = new Set(mapped.filter(({ step }) => step.status === 'completed').map(({ nodeId }) => nodeId))
-  const current = running?.nodeId ?? null
-  const currentIndex = running ? mapped.findIndex(({ step }) => step.id === running.step.id) : -1
-  const previous = currentIndex > 0 ? mapped[currentIndex - 1]?.nodeId ?? null : null
-  return { completed, current, previous, failed: failed?.nodeId ?? null }
+  const result: string[] = []
+  for (const step of ordered) {
+    const nodeId = topologyIdForStep(step, tools)
+    if (result[result.length - 1] !== nodeId) result.push(nodeId)
+  }
+  return result
+}
+
+function playbackDelay(nodeId: string, backlog: number): number {
+  const base = nodeId === 'model' || nodeId.startsWith('tool:') ? 1050
+    : nodeId === 'guardrails' || nodeId === 'whatsapp_out' ? 800
+      : 900
+  if (backlog >= 6) return Math.max(650, Math.round(base * 0.72))
+  if (backlog >= 3) return Math.max(760, Math.round(base * 0.86))
+  return base
 }
 
 function buildPersistentTopology(
@@ -365,36 +339,28 @@ function buildPersistentTopology(
   steps: AgentLiveStep[],
   run: AgentLiveRun | null,
   reducedMotion: boolean,
+  playbackPath: string[],
+  playbackCursor: number,
 ): { nodes: Node<TopologyNodeData>[]; edges: Edge[] } {
-  const progress = runtimeProgress(steps, config.tools)
-  const isRunning = run?.status === 'running'
+  const playbackFinished = Boolean(run && run.status !== 'running' && playbackPath.length > 0 && playbackCursor >= playbackPath.length - 1)
+  const current = playbackFinished ? null : playbackPath[playbackCursor] ?? null
+  const previous = playbackCursor > 0 ? playbackPath[playbackCursor - 1] ?? null : null
+  const completed = new Set(playbackFinished ? playbackPath : playbackPath.slice(0, Math.max(0, playbackCursor)))
+  const failedStep = [...steps].reverse().find((step) => step.status === 'failed' || step.status === 'blocked')
+  const failed = failedStep ? topologyIdForStep(failedStep, config.tools) : null
+
   const nodes: Node<TopologyNodeData>[] = []
   const edges: Edge[] = []
-  const addNode = (
-    id: string,
-    label: string,
-    subtitle: string,
-    kind: TopologyKind,
-    x: number,
-    y: number,
-  ) => {
+  const addNode = (id: string, label: string, subtitle: string, kind: TopologyKind, x: number, y: number) => {
     nodes.push({
       id,
       type: 'topology',
       position: { x, y },
-      data: {
-        topologyId: id,
-        label,
-        subtitle,
-        kind,
-        active: progress.current === id || (id === 'agent' && Boolean(isRunning) && !progress.current),
-        completed: progress.completed.has(id),
-        failed: progress.failed === id,
-      },
+      data: { topologyId: id, label, subtitle, kind, active: current === id, completed: completed.has(id), failed: failed === id },
     })
   }
   const addEdge = (source: string, target: string, sourceHandle?: string, targetHandle?: string) => {
-    const packetActive = Boolean(isRunning && progress.previous === source && progress.current === target)
+    const packetActive = Boolean(previous === source && current === target)
     edges.push({
       id: `${source}->${target}`,
       source,
@@ -422,7 +388,7 @@ function buildPersistentTopology(
   addEdge('context', 'intent')
   addEdge('intent', 'agent')
   addEdge('working_state', 'agent', undefined, 'top')
-  addEdge('skills', 'agent', undefined, undefined)
+  addEdge('skills', 'agent')
   addEdge('memory', 'agent', undefined, 'top')
   addEdge('agent', 'model')
   addEdge('model', 'guardrails')
@@ -441,16 +407,16 @@ function buildPersistentTopology(
     if (tool !== 'handoff_human') addEdge(toolNodeId(tool), 'model')
   })
 
-  if (isRunning && progress.previous && progress.current) {
-    const directId = `${progress.previous}->${progress.current}`
+  if (previous && current) {
+    const directId = `${previous}->${current}`
     const direct = edges.find((edge) => edge.id === directId)
     if (direct) {
       direct.data = { ...(direct.data ?? {}), packetActive: true, reducedMotion }
-    } else if (nodes.some((node) => node.id === progress.previous) && nodes.some((node) => node.id === progress.current)) {
+    } else if (nodes.some((node) => node.id === previous) && nodes.some((node) => node.id === current)) {
       edges.push({
-        id: `live:${directId}`,
-        source: progress.previous,
-        target: progress.current,
+        id: `playback:${directId}`,
+        source: previous,
+        target: current,
         type: 'packet',
         markerEnd: { type: MarkerType.ArrowClosed },
         data: { packetActive: true, reducedMotion },
@@ -461,19 +427,17 @@ function buildPersistentTopology(
   return { nodes, edges }
 }
 
-function RunStatusBadge({ run }: { run: AgentLiveRun }) {
+function RunStatusBadge({ run, playbackActive }: { run: AgentLiveRun; playbackActive: boolean }) {
   return (
     <Badge variant={run.status === 'running' ? 'default' : 'secondary'}>
-      {run.status === 'running' && <Radio className="h-3 w-3 animate-pulse motion-reduce:animate-none" />}
-      {STATUS_LABEL[run.status] ?? run.status}
+      {(run.status === 'running' || playbackActive) && <Radio className="h-3 w-3 animate-pulse motion-reduce:animate-none" />}
+      {playbackActive && run.status !== 'running' ? 'A reproduzir' : (STATUS_LABEL[run.status] ?? run.status)}
     </Badge>
   )
 }
 
 function metadataText(metadata: Record<string, unknown>): string {
-  const keys = Object.keys(metadata ?? {})
-  if (keys.length === 0) return 'Sem metadata adicional.'
-  return JSON.stringify(metadata, null, 2)
+  return Object.keys(metadata ?? {}).length === 0 ? 'Sem metadata adicional.' : JSON.stringify(metadata, null, 2)
 }
 
 export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => void }) {
@@ -491,9 +455,33 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
   const [reducedMotion, setReducedMotion] = useState(false)
   const [fullScreen, setFullScreen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [playbackCursor, setPlaybackCursor] = useState(-1)
   const [tick, setTick] = useState(0)
 
+  const selectedRunIdRef = useRef<string | null>(null)
+  const stepLoadTokenRef = useRef(0)
+  const flowRef = useRef<ReactFlowInstance<Node<TopologyNodeData>, Edge> | null>(null)
+
   const selectedRun = runs.find((run) => run.id === selectedRunId) ?? null
+  const playbackPath = useMemo(() => playbackPathForSteps(steps, topologyConfig.tools), [steps, topologyConfig.tools])
+  const playbackActive = playbackPath.length > 0 && (
+    playbackCursor < playbackPath.length - 1 || selectedRun?.status === 'running'
+  )
+
+  const recenter = useCallback((duration = 250) => {
+    window.setTimeout(() => {
+      void flowRef.current?.fitView({ padding: 0.08, minZoom: 0.5, maxZoom: 1, duration })
+    }, 40)
+  }, [])
+
+  const selectRun = useCallback((runId: string | null, clear = false) => {
+    selectedRunIdRef.current = runId
+    setSelectedRunId(runId)
+    setSelectedStep(null)
+    setPlaybackCursor(-1)
+    if (clear) setSteps([])
+    recenter(220)
+  }, [recenter])
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -515,15 +503,31 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
     if (!fullScreen) return
     const previous = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setFullScreen(false)
-    }
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setFullScreen(false) }
     window.addEventListener('keydown', onKey)
     return () => {
       document.body.style.overflow = previous
       window.removeEventListener('keydown', onKey)
     }
   }, [fullScreen])
+
+  useEffect(() => { recenter(200) }, [fullScreen, topologyConfig, recenter])
+
+  useEffect(() => {
+    if (playbackPath.length === 0) {
+      if (playbackCursor !== -1) setPlaybackCursor(-1)
+      return
+    }
+    if (playbackCursor < 0) {
+      setPlaybackCursor(0)
+      return
+    }
+    if (playbackCursor >= playbackPath.length - 1) return
+    const backlog = playbackPath.length - playbackCursor - 1
+    const delay = reducedMotion ? 80 : playbackDelay(playbackPath[playbackCursor], backlog)
+    const timer = window.setTimeout(() => setPlaybackCursor((cursor) => Math.min(cursor + 1, playbackPath.length - 1)), delay)
+    return () => window.clearTimeout(timer)
+  }, [playbackCursor, playbackPath, reducedMotion])
 
   const loadTopology = useCallback(async () => {
     setTopologyError(null)
@@ -545,7 +549,6 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
           return data
         }),
       ])
-
       const config = configResult.status === 'fulfilled' ? configResult.value : {}
       const toolsPayload = toolsResult.status === 'fulfilled' ? toolsResult.value : {}
       const skillsPayload = skillsResult.status === 'fulfilled' ? skillsResult.value : {}
@@ -555,7 +558,6 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
       const enabledSkills = Array.isArray(skillsPayload.skills)
         ? skillsPayload.skills.filter((skill: { enabled?: boolean }) => skill.enabled).map((skill: { name?: string }) => skill.name).filter(Boolean)
         : []
-
       setTopologyConfig({
         agentName: config.agent_name ?? 'Agente de IA',
         agentRole: config.agent_role ?? 'Runtime conversacional',
@@ -564,7 +566,6 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
         tools: enabledTools,
         skills: enabledSkills as string[],
       })
-
       if (configResult.status === 'rejected' || toolsResult.status === 'rejected' || skillsResult.status === 'rejected') {
         setTopologyError('Parte da configuração do agente não pôde ser carregada. O mapa está a mostrar apenas o que foi possível confirmar.')
       }
@@ -593,16 +594,19 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
       if (runsError) throw runsError
       const next = (data ?? []).map(normalizeLiveRun).filter((row): row is AgentLiveRun => Boolean(row))
       setRuns(next)
-      setSelectedRunId((current) => current && next.some((run) => run.id === current) ? current : (next[0]?.id ?? null))
+      const current = selectedRunIdRef.current
+      const nextId = current && next.some((run) => run.id === current) ? current : (next[0]?.id ?? null)
+      if (nextId !== current) selectRun(nextId, true)
     } catch (loadError) {
       setTelemetryError(loadError instanceof Error ? loadError.message : 'Não foi possível carregar as execuções do agente.')
     } finally {
       setLoading(false)
     }
-  }, [accountId, profileLoading])
+  }, [accountId, profileLoading, selectRun])
 
   const loadSteps = useCallback(async (runId: string) => {
     if (!accountId) return
+    const token = ++stepLoadTokenRef.current
     const supabase = createClient()
     const { data, error: stepsError } = await supabase
       .from('agent_trace_steps')
@@ -610,6 +614,7 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
       .eq('account_id', accountId)
       .eq('trace_id', runId)
       .order('sequence', { ascending: true })
+    if (token !== stepLoadTokenRef.current || runId !== selectedRunIdRef.current) return
     if (stepsError) {
       setTelemetryError(stepsError.message)
       return
@@ -617,12 +622,9 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
     setSteps((data ?? []).map(normalizeLiveStep).filter((row): row is AgentLiveStep => Boolean(row)))
   }, [accountId])
 
-  useEffect(() => {
-    void Promise.all([loadRuns(), loadTopology()])
-  }, [loadRuns, loadTopology])
+  useEffect(() => { void Promise.all([loadRuns(), loadTopology()]) }, [loadRuns, loadTopology])
 
   useEffect(() => {
-    setSelectedStep(null)
     if (selectedRunId) void loadSteps(selectedRunId)
     else setSteps([])
   }, [selectedRunId, loadSteps])
@@ -632,47 +634,35 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
     const supabase = createClient()
     const channel = supabase
       .channel(`agent-live-observability:${accountId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'wacrm', table: 'agent_traces', filter: `account_id=eq.${accountId}` },
-        (payload) => {
-          const row = normalizeLiveRun(payload.new)
-          if (!row) return
-          setRuns((current) => upsertLiveRun(current, row))
-          if (payload.eventType === 'INSERT') setSelectedRunId(row.id)
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'wacrm', table: 'agent_trace_steps', filter: `account_id=eq.${accountId}` },
-        (payload) => {
-          const row = normalizeLiveStep(payload.new)
-          if (!row) return
-          if (row.trace_id === selectedRunId) {
-            setSteps((current) => upsertLiveStep(current, row))
-            setSelectedStep((current) => current?.id === row.id ? row : current)
-          }
-        },
-      )
+      .on('postgres_changes', { event: '*', schema: 'wacrm', table: 'agent_traces', filter: `account_id=eq.${accountId}` }, (payload) => {
+        const row = normalizeLiveRun(payload.new)
+        if (!row) return
+        setRuns((current) => upsertLiveRun(current, row))
+        if (payload.eventType === 'INSERT') {
+          selectRun(row.id, true)
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'wacrm', table: 'agent_trace_steps', filter: `account_id=eq.${accountId}` }, (payload) => {
+        const row = normalizeLiveStep(payload.new)
+        if (!row || row.trace_id !== selectedRunIdRef.current) return
+        setSteps((current) => upsertLiveStep(current, row))
+        setSelectedStep((current) => current?.id === row.id ? row : current)
+      })
       .subscribe((status) => setIsConnected(status === 'SUBSCRIBED'))
-
     return () => {
       void supabase.removeChannel(channel)
       setIsConnected(false)
     }
-  }, [accountId, selectedRunId])
+  }, [accountId, selectRun])
 
   const topology = useMemo(
-    () => buildPersistentTopology(topologyConfig, steps, selectedRun, reducedMotion),
-    [topologyConfig, steps, selectedRun, reducedMotion],
+    () => buildPersistentTopology(topologyConfig, steps, selectedRun, reducedMotion, playbackPath, playbackCursor),
+    [topologyConfig, steps, selectedRun, reducedMotion, playbackPath, playbackCursor],
   )
   const duration = selectedRun ? runDurationMs(selectedRun) : 0
   void tick
 
-  const shellClass = cn(
-    'space-y-3',
-    fullScreen && 'fixed inset-0 z-50 overflow-hidden bg-background p-4 sm:p-5',
-  )
+  const shellClass = cn('space-y-3', fullScreen && 'fixed inset-0 z-50 overflow-hidden bg-background p-4 sm:p-5')
   const canvasHeight = fullScreen ? 'h-[calc(100vh-122px)]' : 'h-[min(720px,calc(100vh-250px))] min-h-[580px]'
 
   return (
@@ -681,7 +671,7 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-foreground">Mapa do Agent Runtime</p>
-            {selectedRun && <RunStatusBadge run={selectedRun} />}
+            {selectedRun && <RunStatusBadge run={selectedRun} playbackActive={playbackActive} />}
           </div>
           <p className="mt-1 truncate text-xs text-muted-foreground">
             {selectedRun
@@ -694,16 +684,11 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
             <span className={cn('h-1.5 w-1.5 rounded-full', isConnected ? 'bg-emerald-500' : 'bg-muted-foreground')} />
             {isConnected ? 'Ao vivo' : 'A ligar'}
           </Badge>
-          <Button type="button" size="sm" variant="outline" onClick={() => setHistoryOpen(true)}>
-            <History className="h-4 w-4" /> Execuções
-          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => setHistoryOpen(true)}><History className="h-4 w-4" /> Execuções</Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => recenter(280)}><Route className="h-4 w-4" /> Centralizar</Button>
           <div className="flex rounded-lg border border-border p-0.5">
-            <Button type="button" size="sm" variant={view === 'graph' ? 'secondary' : 'ghost'} onClick={() => setView('graph')}>
-              <Workflow className="h-4 w-4" /> Grafo
-            </Button>
-            <Button type="button" size="sm" variant={view === 'timeline' ? 'secondary' : 'ghost'} onClick={() => setView('timeline')}>
-              <List className="h-4 w-4" /> Timeline
-            </Button>
+            <Button type="button" size="sm" variant={view === 'graph' ? 'secondary' : 'ghost'} onClick={() => setView('graph')}><Workflow className="h-4 w-4" /> Grafo</Button>
+            <Button type="button" size="sm" variant={view === 'timeline' ? 'secondary' : 'ghost'} onClick={() => setView('timeline')}><List className="h-4 w-4" /> Timeline</Button>
           </div>
           <Button type="button" size="icon" variant="outline" onClick={() => setFullScreen((value) => !value)} aria-label={fullScreen ? 'Sair do ecrã inteiro' : 'Abrir em ecrã inteiro'}>
             {fullScreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
@@ -714,9 +699,7 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
       {(telemetryError || topologyError) && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
           <span>{telemetryError ?? topologyError}</span>
-          <Button variant="ghost" size="sm" onClick={() => void Promise.all([loadRuns(), loadTopology()])}>
-            <RefreshCw className="h-3.5 w-3.5" /> Tentar novamente
-          </Button>
+          <Button variant="ghost" size="sm" onClick={() => void Promise.all([loadRuns(), loadTopology()])}><RefreshCw className="h-3.5 w-3.5" /> Tentar novamente</Button>
         </div>
       )}
 
@@ -736,9 +719,10 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
               nodesConnectable={false}
               deleteKeyCode={null}
               fitView
-              fitViewOptions={{ padding: 0.08, minZoom: 0.52, maxZoom: 1 }}
+              fitViewOptions={{ padding: 0.08, minZoom: 0.5, maxZoom: 1 }}
               minZoom={0.35}
               maxZoom={1.7}
+              onInit={(instance) => { flowRef.current = instance; recenter(0) }}
               onNodeClick={(_, node) => {
                 const nodeId = (node.data as TopologyNodeData).topologyId
                 const matching = [...steps].reverse().find((step) => topologyIdForStep(step, topologyConfig.tools) === nodeId)
@@ -752,20 +736,14 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
           </div>
         ) : steps.length === 0 ? (
           <div className={cn(canvasHeight, 'flex items-center justify-center px-6 text-center text-sm text-muted-foreground')}>
-            {selectedRun
-              ? 'Esta execução ainda não tem passos observáveis registados.'
-              : 'Ainda não existe uma execução para esta conta. O mapa do agente permanece disponível no modo Grafo.'}
+            {selectedRun ? 'Esta execução ainda não tem passos observáveis registados.' : 'Ainda não existe uma execução para esta conta. O mapa do agente permanece disponível no modo Grafo.'}
           </div>
         ) : (
           <div className={cn(canvasHeight, 'overflow-y-auto p-3 sm:p-4')}>
             <ol className="mx-auto max-w-3xl space-y-2">
               {steps.map((step) => (
                 <li key={step.id}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedStep(step)}
-                    className="flex w-full items-center gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left hover:bg-muted/50"
-                  >
+                  <button type="button" onClick={() => setSelectedStep(step)} className="flex w-full items-center gap-3 rounded-lg border border-border bg-card px-3 py-3 text-left hover:bg-muted/50">
                     <StepStatusIcon status={step.status} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-foreground">{step.label}</p>
@@ -785,7 +763,7 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
 
       {!fullScreen && (
         <p className="text-xs text-muted-foreground">
-          O mapa mostra a arquitectura configurada da conta mesmo em repouso. Durante uma execução, o ponto em movimento e o nó em rotação acompanham apenas passos observados pelo runtime; não expõem chain-of-thought ou dados privados completos.
+          O runtime continua rápido. O percurso visual usa uma reprodução curta e desacoplada para permitir acompanhar cada nó sem atrasar a resposta enviada ao cliente.
         </p>
       )}
 
@@ -799,20 +777,10 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
             {runs.length === 0 ? (
               <div className="rounded-lg border border-border p-4 text-sm text-muted-foreground">
                 Ainda não existem execuções registadas. Pode abrir o Playground ou aguardar uma nova mensagem do WhatsApp.
-                <Button className="mt-3 w-full" variant="outline" onClick={() => { setHistoryOpen(false); onOpenTab('playground') }}>
-                  Abrir Playground
-                </Button>
+                <Button className="mt-3 w-full" variant="outline" onClick={() => { setHistoryOpen(false); onOpenTab('playground') }}>Abrir Playground</Button>
               </div>
             ) : runs.map((run) => (
-              <button
-                key={run.id}
-                type="button"
-                onClick={() => { setSelectedRunId(run.id); setHistoryOpen(false) }}
-                className={cn(
-                  'w-full rounded-lg px-3 py-2.5 text-left transition-colors',
-                  run.id === selectedRun?.id ? 'bg-primary/10 text-foreground' : 'hover:bg-muted',
-                )}
-              >
+              <button key={run.id} type="button" onClick={() => { selectRun(run.id, true); setHistoryOpen(false) }} className={cn('w-full rounded-lg px-3 py-2.5 text-left transition-colors', run.id === selectedRun?.id ? 'bg-primary/10 text-foreground' : 'hover:bg-muted')}>
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium tabular-nums">{RUN_TIME_FORMATTER.format(new Date(run.started_at))}</span>
                   <span className={cn('ml-auto h-2 w-2 rounded-full', run.status === 'running' ? 'animate-pulse bg-primary motion-reduce:animate-none' : run.status === 'failed' ? 'bg-destructive' : run.status === 'blocked' ? 'bg-amber-500' : 'bg-emerald-500')} />
@@ -834,22 +802,14 @@ export function AgentFlowPanel({ onOpenTab }: { onOpenTab: (tab: AgentTab) => vo
               </SheetHeader>
               <div className="space-y-4 px-4 pb-6">
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="rounded-lg border border-border p-3">
-                    <p className="text-xs text-muted-foreground">Estado</p>
-                    <p className="mt-1 text-sm font-medium">{STATUS_LABEL[selectedStep.status] ?? selectedStep.status}</p>
-                  </div>
-                  <div className="rounded-lg border border-border p-3">
-                    <p className="text-xs text-muted-foreground">Duração</p>
-                    <p className="mt-1 text-sm font-medium tabular-nums">{formatDuration(selectedStep.duration_ms)}</p>
-                  </div>
+                  <div className="rounded-lg border border-border p-3"><p className="text-xs text-muted-foreground">Estado</p><p className="mt-1 text-sm font-medium">{STATUS_LABEL[selectedStep.status] ?? selectedStep.status}</p></div>
+                  <div className="rounded-lg border border-border p-3"><p className="text-xs text-muted-foreground">Duração</p><p className="mt-1 text-sm font-medium tabular-nums">{formatDuration(selectedStep.duration_ms)}</p></div>
                 </div>
                 <div className="rounded-lg border border-border p-3">
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Metadata sanitizada</p>
                   <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground">{metadataText(selectedStep.metadata ?? {})}</pre>
                 </div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Este inspector mostra apenas factos observáveis do runtime. O raciocínio privado do modelo não é guardado nem apresentado.
-                </p>
+                <p className="text-xs leading-relaxed text-muted-foreground">Este inspector mostra apenas factos observáveis do runtime. O raciocínio privado do modelo não é guardado nem apresentado.</p>
               </div>
             </>
           )}
