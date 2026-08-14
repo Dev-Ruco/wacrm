@@ -83,6 +83,44 @@ function matchesAliases(
   return textIncludesAll(haystack, tokens(normalizedRequested))
 }
 
+function containsPhrase(haystack: string, phrase: string): boolean {
+  if (!phrase) return false
+  return (` ${haystack} `).includes(` ${phrase} `)
+}
+
+/**
+ * Generic catalogue safety gate. It uses ONLY the current tenant's configured
+ * category taxonomy. If a product name clearly names a different configured
+ * category than the one requested, the stale/incorrect stored category is not
+ * allowed to win merely because it would otherwise receive the exact-category
+ * ranking bonus. Products whose names do not contain any known category remain
+ * eligible, so this is deliberately conservative rather than a classifier.
+ */
+export function catalogNameConflictsWithRequestedCategory(
+  productName: string,
+  requestedCategory: string | null | undefined,
+  categoryGroups: readonly (readonly string[])[],
+): boolean {
+  const requested = normalize(requestedCategory)
+  if (!requested || categoryGroups.length === 0) return false
+
+  const requestedGroup = bestAliasGroup(requested, categoryGroups)
+  if (!requestedGroup) return false
+
+  const normalizedName = normalize(productName)
+  if (!normalizedName) return false
+
+  const matchedGroups = categoryGroups
+    .map((group) => group.map(normalize).filter(Boolean))
+    .filter((group) => group.some((alias) => containsPhrase(normalizedName, alias)))
+
+  if (matchedGroups.length === 0) return false
+  const explicitlyMatchesRequested = matchedGroups.some((group) =>
+    group.some((alias) => requestedGroup.includes(alias)),
+  )
+  return !explicitlyMatchesRequested
+}
+
 function categoryMatches(
   product: CatalogProduct,
   category: string | null | undefined,
@@ -177,7 +215,8 @@ function retrievalQueries(input: AgentCatalogSearchInput): string[] {
  * The legacy search layer is intentionally kept as a broad source adapter.
  * This layer fetches a wider candidate pool, applies explicit category/colour
  * constraints as AND conditions, removes products already shown by the live
- * conversation state, then ranks and limits. A known size mismatch is also
+ * conversation state, rejects strong name/category conflicts using only the
+ * tenant taxonomy, then ranks and limits. A known size mismatch is also
  * excluded; products with no size data stay eligible but are marked unknown
  * so the agent can be honest. It never sends WhatsApp media.
  */
@@ -216,6 +255,7 @@ export async function searchCatalogForAgent(
   const excluded = new Set(input.excludeProductKeys ?? [])
   return candidates
     .filter((product) => !excluded.has(catalogProductKey(product)))
+    .filter((product) => !catalogNameConflictsWithRequestedCategory(product.name, input.category, taxonomy.categoryGroups))
     .filter((product) => categoryMatches(product, input.category, taxonomy))
     .filter((product) => colorMatches(product, input.color, taxonomy))
     .map((product) => ({ product, sizeMatch: productSizeMatch(product, input.size) }))
