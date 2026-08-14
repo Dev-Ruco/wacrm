@@ -20,6 +20,15 @@ describe('catalogNameConflictsWithRequestedCategory', () => {
     ).toBe(false)
   })
 
+  it('resolves requested aliases through the tenant taxonomy', () => {
+    expect(
+      catalogNameConflictsWithRequestedCategory('TOP ECLIPSE', 'tops', fashionTaxonomy),
+    ).toBe(false)
+    expect(
+      catalogNameConflictsWithRequestedCategory('CAMISOLA COM FECHO', 'tops', fashionTaxonomy),
+    ).toBe(true)
+  })
+
   it('stays conservative when the product name contains no configured category term', () => {
     expect(
       catalogNameConflictsWithRequestedCategory('Modelo Eclipse', 'top', fashionTaxonomy),
