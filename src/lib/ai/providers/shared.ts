@@ -125,7 +125,7 @@ function cloneContent(content: ChatContent): ChatContent {
 
 function asParts(content: ChatContent): ChatContentPart[] {
   return typeof content === 'string'
-    ? �[{type: 'text', text: content }]
+    ? [{ type: 'text', text: content }]
     : content.map((part) => ({ ...part }))
 }
 
@@ -150,7 +150,7 @@ export function withoutImageContent(messages: ChatMessage[]): ChatMessage[] {
       content:
         textParts.length > 0
           ? textParts.map((part) => ({ ...part }))
-          : '[Imagem eviada no WhatsApp; visão indisponível neste modelo]',
+          : '[Imagem enviada no WhatsApp; visão indisponível neste modelo]',
     }
   })
 }
