@@ -6,6 +6,8 @@ export interface CatalogProductVariant {
   imageUrl?: string | null
 }
 
+export type CatalogProductSourceType = 'internal' | 'external_rest' | 'external_supabase'
+
 export interface CatalogProduct {
   id: string
   name: string
@@ -18,6 +20,8 @@ export interface CatalogProduct {
   stockQuantity: number | null
   variants?: CatalogProductVariant[]
   sourceName: string
+  /** Stable source capability marker. Do not infer internal/external from a UI label. */
+  sourceType?: CatalogProductSourceType
 }
 
 export interface CatalogSearchInput {
@@ -85,7 +89,7 @@ export interface CatalogSourceRow {
   id: string
   account_id: string
   name: string
-  source_type: 'internal' | 'external_rest' | 'external_supabase'
+  source_type: CatalogProductSourceType
   is_active: boolean
   base_url: string | null
   search_path: string | null
