@@ -75,6 +75,10 @@ interface RegisteredToolRow {
   default_enabled: boolean
 }
 
+const MAX_OFFERING_GUIDANCE_CHARS = 6_000
+const MAX_OFFERING_GUIDANCE_DEFINITIONS = 24
+const MAX_OFFERING_GUIDANCE_OPTIONS = 12
+
 function appendInstruction(
   instructions: Partial<Record<AgentToolKey, string>>,
   key: AgentToolKey,
@@ -94,19 +98,25 @@ async function appendOfferingFilterGuidance(
       .filter((definition) => definition.enabled && definition.isFilterable)
     if (definitions.length === 0) return
 
-    const lines = definitions.slice(0, 40).map((definition) => {
+    const lines: string[] = []
+    let usedChars = 0
+    for (const definition of definitions.slice(0, MAX_OFFERING_GUIDANCE_DEFINITIONS)) {
       const options = definition.valueType === 'enum'
         ? definition.options
             .filter((option) => option.enabled)
-            .slice(0, 25)
+            .slice(0, MAX_OFFERING_GUIDANCE_OPTIONS)
             .map((option) => {
               const aliases = option.aliases.length > 0 ? ` [aliases: ${option.aliases.join(', ')}]` : ''
               return `${option.value}=${option.label}${aliases}`
             })
             .join('; ')
         : ''
-      return `- ${definition.key}: ${definition.label} (${definition.valueType}${definition.unit ? `, ${definition.unit}` : ''})${options ? `; opções: ${options}` : ''}`
-    })
+      const line = `- ${definition.key}: ${definition.label} (${definition.valueType}${definition.unit ? `, ${definition.unit}` : ''})${options ? `; opções: ${options}` : ''}`
+      if (usedChars + line.length > MAX_OFFERING_GUIDANCE_CHARS) break
+      lines.push(line)
+      usedChars += line.length
+    }
+    if (lines.length === 0) return
 
     appendInstruction(
       instructions,
