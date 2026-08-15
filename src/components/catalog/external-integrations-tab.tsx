@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { CanonicalSyncManager } from '@/components/catalog/canonical-sync-manager'
 import { DatabaseIntegrations } from '@/components/settings/database-integrations'
 
 export interface Source {
@@ -53,14 +54,9 @@ function BetaBadge() {
   )
 }
 
-/**
- * External catalogue integrations (REST API + external Supabase) —
- * deliberately kept out of the main Produtos flow. A new account never
- * needs this to get the agent working: the internal catalogue is
- * enough on its own. This area stays available and fully functional
- * for accounts that already depend on it, just clearly marked as
- * secondary/beta rather than the default path.
- */
+/** External catalogue integrations stay optional; the canonical mirror lets an
+ * account decouple customer conversations from its operational database after
+ * a verified snapshot, without removing the legacy live path. */
 export function ExternalIntegrationsTab({ sources, setSources }: { sources: Source[]; setSources: (updater: (current: Source[]) => Source[]) => void }) {
   const [sourceForm, setSourceForm] = useState(initialSource)
   const [savingSource, setSavingSource] = useState(false)
@@ -125,7 +121,8 @@ export function ExternalIntegrationsTab({ sources, setSources }: { sources: Sour
       setSources((current) => current.filter((s) => s.id !== id))
       toast.success('Fonte removida.')
     } else {
-      toast.error('Não foi possível remover a fonte.')
+      const body = await r.json().catch(() => ({}))
+      toast.error(body.error ?? 'Não foi possível remover a fonte.')
     }
   }
 
@@ -251,6 +248,7 @@ export function ExternalIntegrationsTab({ sources, setSources }: { sources: Sour
       </div>
 
       <DatabaseIntegrations />
+      <CanonicalSyncManager />
     </div>
   )
 }

@@ -7,6 +7,8 @@ export interface CatalogProductVariant {
 }
 
 export type CatalogProductSourceType = 'internal' | 'external_rest' | 'external_supabase'
+export type CatalogSourceSyncMode = 'live' | 'mirror'
+export type CatalogSourceSyncStatus = 'running' | 'succeeded' | 'failed'
 
 export interface CatalogProduct {
   id: string
@@ -95,6 +97,11 @@ export interface CatalogSourceRow {
   is_active: boolean
   base_url: string | null
   search_path: string | null
+  sync_path?: string | null
+  sync_mode?: CatalogSourceSyncMode
+  last_synced_at?: string | null
+  last_sync_status?: CatalogSourceSyncStatus | null
+  last_sync_error?: string | null
   auth_type: 'none' | 'bearer' | 'api_key_header'
   auth_header: string | null
   auth_secret_encrypted: string | null

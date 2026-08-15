@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildSearchVariants } from './search'
+import { buildSearchVariants, shouldQueryCatalogueSourceLive } from './search'
+import type { CatalogSourceRow } from './types'
 
 // Sample account-configured groups, used to prove the generic mechanism
 // works when a caller supplies its own taxonomy — this is deliberately
@@ -13,6 +14,23 @@ const SAMPLE_CATEGORY_GROUPS = [
   ['legging', 'leggings', 'colante', 'colantes'],
   ['sapatilha', 'sapatilhas'],
 ]
+
+function source(overrides: Partial<CatalogSourceRow> = {}): CatalogSourceRow {
+  return {
+    id: 'source-1',
+    account_id: 'account-1',
+    name: 'Fonte',
+    source_type: 'external_supabase',
+    is_active: true,
+    base_url: 'https://example.supabase.co',
+    search_path: null,
+    auth_type: 'api_key_header',
+    auth_header: 'apikey',
+    auth_secret_encrypted: 'encrypted',
+    field_mapping: {},
+    ...overrides,
+  }
+}
 
 describe('buildSearchVariants — no built-in vocabulary by default', () => {
   it('does not expand a colour word to other grammatical forms with no groups supplied', () => {
@@ -94,5 +112,30 @@ describe('buildSearchVariants — size cue', () => {
     expect(variants).not.toContain('m')
     expect(variants).not.toContain('p')
     expect(variants).not.toContain('g')
+  })
+})
+
+describe('canonical mirror live fallback', () => {
+  it('stops querying a mirror live only after a successful canonical snapshot', () => {
+    expect(shouldQueryCatalogueSourceLive(source({
+      sync_mode: 'mirror',
+      last_sync_status: 'succeeded',
+    }))).toBe(false)
+  })
+
+  it('keeps live fallback for new or failed mirrors', () => {
+    expect(shouldQueryCatalogueSourceLive(source({
+      sync_mode: 'mirror',
+      last_sync_status: null,
+    }))).toBe(true)
+    expect(shouldQueryCatalogueSourceLive(source({
+      sync_mode: 'mirror',
+      last_sync_status: 'failed',
+    }))).toBe(true)
+  })
+
+  it('keeps legacy live sources unchanged', () => {
+    expect(shouldQueryCatalogueSourceLive(source({ sync_mode: 'live' }))).toBe(true)
+    expect(shouldQueryCatalogueSourceLive(source({ sync_mode: undefined }))).toBe(true)
   })
 })

@@ -10,20 +10,7 @@ import type {
 } from './types'
 
 const REQUEST_TIMEOUT_MS = 8_000
-// A query can legitimately match both a product-category group and a
-// colour group at once ("legging preta"), each contributing several
-// synonyms — 8 was tight enough that colour synonyms got silently
-// crowded out by category ones. This only widens an OR-filter list, no
-// functional downside to a bit more headroom.
 const MAX_SEARCH_VARIANTS = 16
-
-// Bare size tokens ("M", "P", "G") are too short and too common as
-// substrings of ordinary words ("co-M-prar") to treat like the product/
-// colour synonym groups above, which match anywhere in the query. This
-// only fires when the token is explicitly cued by a size-indicating word
-// immediately before it, so it stays opt-in and query-shape-specific
-// instead of adding noise to every search. Longest letter codes first so
-// "gg"/"xg"/"xxg" aren't cut short by the bare "g" alternative.
 const SIZE_CUE_PATTERN = /\b(?:tamanho|tam|numero|n|size)\s+(xxg|xg|gg|pp|g|m|p|\d{2})\b/i
 
 function valueAt(input: unknown, path: string | undefined): unknown {
@@ -48,7 +35,15 @@ function text(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+function externalIdText(value: unknown): string | null {
+  if (typeof value === 'string') return value.trim() || null
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  if (typeof value === 'bigint') return String(value)
+  return null
+}
+
 function numberValue(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
   const parsed = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(parsed) ? parsed : null
 }
@@ -63,11 +58,8 @@ function normalizeSearchText(value: string): string {
 }
 
 /**
- * categoryGroups/colorGroups default to empty — no built-in vocabulary
- * lives here. Without an account's own taxonomy (see ./taxonomy.ts),
- * this still does plain textual matching (the raw query plus its
- * individual words, see below); passing an account's configured groups
- * additionally expands synonyms/gender-inflected forms.
+ * No business-domain vocabulary lives here. Tenant taxonomy groups are the
+ * only source of category/colour aliases used by the shared runtime.
  */
 export function buildSearchVariants(
   query: string,
@@ -94,8 +86,14 @@ export function buildSearchVariants(
 
   const sizeCue = normalized.match(SIZE_CUE_PATTERN)
   if (sizeCue) variants.add(sizeCue[1])
-
   return Array.from(variants).slice(0, MAX_SEARCH_VARIANTS)
+}
+
+export function shouldQueryCatalogueSourceLive(source: CatalogSourceRow): boolean {
+  // A mirror is removed from the customer-facing network path only after a
+  // complete successful snapshot exists. Failed/new mirrors deliberately fall
+  // back to the live adapter instead of making the agent blind.
+  return !(source.sync_mode === 'mirror' && source.last_sync_status === 'succeeded')
 }
 
 function safePostgrestTerm(value: string): string {
@@ -120,16 +118,10 @@ function assertSafeExternalUrl(raw: string): URL {
   if (url.protocol !== 'https:') throw new Error('External catalogue URL must use HTTPS.')
   const host = url.hostname.toLowerCase()
   if (
-    host === 'localhost' ||
-    host === '127.0.0.1' ||
-    host === '::1' ||
-    host.endsWith('.local') ||
-    /^10\./.test(host) ||
-    /^192\.168\./.test(host) ||
+    host === 'localhost' || host === '127.0.0.1' || host === '::1' ||
+    host.endsWith('.local') || /^10\./.test(host) || /^192\.168\./.test(host) ||
     /^172\.(1[6-9]|2\d|3[01])\./.test(host)
-  ) {
-    throw new Error('Private network catalogue URLs are not allowed.')
-  }
+  ) throw new Error('Private network catalogue URLs are not allowed.')
   return url
 }
 
@@ -154,7 +146,7 @@ function normalizeExternalProduct(
   if (!name || price === null || price < 0) return null
 
   return {
-    id: text(firstValueAt(item, [mapping.id, 'id', 'sku', 'external_id'])) ?? `${source.id}:${index}`,
+    id: externalIdText(firstValueAt(item, [mapping.id, 'id', 'sku', 'external_id'])) ?? `${source.id}:${index}`,
     name,
     description: text(firstValueAt(item, [mapping.description, 'description', 'short_description', 'summary'])),
     price,
@@ -164,6 +156,7 @@ function normalizeExternalProduct(
     category: text(firstValueAt(item, [mapping.category, 'category.name', 'category', 'type', 'product_type'])),
     stockQuantity: numberValue(firstValueAt(item, [mapping.stockQuantity, 'stock_quantity', 'stockQuantity', 'stock', 'quantity', 'current_stock'])),
     sourceName: source.name,
+    sourceType: source.source_type,
   }
 }
 
@@ -235,13 +228,6 @@ async function searchExternalRestSource(
     if (source.auth_type === 'api_key_header') headers[source.auth_header || 'X-API-Key'] = secret
   }
 
-  console.info('[catalog search] external REST request:', {
-    sourceId: source.id,
-    sourceName: source.name,
-    query: input.query,
-    url: url.toString(),
-  })
-
   const response = await fetch(url, {
     headers,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -258,20 +244,10 @@ async function searchExternalRestSource(
 
   const mapping = source.field_mapping ?? {}
   const items = externalItems(payload, mapping)
-  const products = items
+  return items
     .slice(0, input.limit)
     .map((item, index) => normalizeExternalProduct(item, mapping, source, index))
     .filter((item): item is CatalogProduct => item !== null)
-
-  console.info('[catalog search] external REST results:', {
-    sourceId: source.id,
-    sourceName: source.name,
-    query: input.query,
-    rawItemCount: items.length,
-    normalizedCount: products.length,
-  })
-
-  return products
 }
 
 async function searchExternalSupabaseSource(
@@ -302,12 +278,9 @@ async function searchExternalSupabaseSource(
     safeIdentifier(mapping.price, 'price'),
   ]
   const optionalColumns = [
-    optionalIdentifier(mapping.description),
-    optionalIdentifier(mapping.currency),
-    optionalIdentifier(mapping.imageUrl),
-    optionalIdentifier(mapping.productUrl),
-    optionalIdentifier(mapping.category),
-    optionalIdentifier(mapping.stockQuantity),
+    optionalIdentifier(mapping.description), optionalIdentifier(mapping.currency),
+    optionalIdentifier(mapping.imageUrl), optionalIdentifier(mapping.productUrl),
+    optionalIdentifier(mapping.category), optionalIdentifier(mapping.stockQuantity),
   ]
   const selectColumns = Array.from(new Set([
     ...requiredColumns,
@@ -318,7 +291,6 @@ async function searchExternalSupabaseSource(
   let query = client.from(table).select(selectColumns)
   if (mapping.activeColumn) query = query.eq(safeIdentifier(mapping.activeColumn), true)
   if (mapping.publishedColumn) query = query.eq(safeIdentifier(mapping.publishedColumn), true)
-
   const filters = terms.flatMap((term) => {
     const safeTerm = safePostgrestTerm(term)
     return searchColumns.map((column) => `${column}.ilike.%${safeTerm}%`)
@@ -327,13 +299,14 @@ async function searchExternalSupabaseSource(
 
   const result = await Promise.race([
     query.limit(input.limit),
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`External Supabase source ${source.name} timed out.`)), REQUEST_TIMEOUT_MS)),
+    new Promise<never>((_, reject) => setTimeout(
+      () => reject(new Error(`External Supabase source ${source.name} timed out.`)),
+      REQUEST_TIMEOUT_MS,
+    )),
   ])
+  if (result.error) throw new Error(`External Supabase source ${source.name} failed: ${result.error.message}`)
 
-  const { data, error } = result
-  if (error) throw new Error(`External Supabase source ${source.name} failed: ${error.message}`)
-
-  let products = (data ?? [])
+  let products = (result.data ?? [])
     .map((item, index) => normalizeExternalProduct(item, mapping, source, index))
     .filter((item): item is CatalogProduct => item !== null)
 
@@ -346,44 +319,37 @@ async function searchExternalSupabaseSource(
     const variantStock = optionalIdentifier(mapping.variantStock)
     const variantImageUrl = optionalIdentifier(mapping.variantImageUrl)
     const variantColumns = Array.from(new Set([
-      variantId,
-      variantProductId,
-      variantSize,
-      variantColor,
-      variantStock,
-      variantImageUrl,
+      variantId, variantProductId, variantSize, variantColor, variantStock, variantImageUrl,
     ].filter((value): value is string => Boolean(value)))).join(',')
     const productIds = products.map((product) => product.id)
 
     let variantsQuery = client.from(variantsTable).select(variantColumns).in(variantProductId, productIds)
     if (mapping.variantActiveColumn) variantsQuery = variantsQuery.eq(safeIdentifier(mapping.variantActiveColumn), true)
-
     const variantsResult = await Promise.race([
       variantsQuery.limit(Math.max(input.limit * 20, 100)),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`External Supabase variants ${source.name} timed out.`)), REQUEST_TIMEOUT_MS)),
+      new Promise<never>((_, reject) => setTimeout(
+        () => reject(new Error(`External Supabase variants ${source.name} timed out.`)),
+        REQUEST_TIMEOUT_MS,
+      )),
     ])
 
     if (variantsResult.error) {
       console.error('[catalog search] external Supabase variants failed:', variantsResult.error.message)
     } else {
       const variantsByProduct = new Map<string, CatalogProductVariant[]>()
-      const variantRows: unknown[] = Array.isArray(variantsResult.data)
-        ? variantsResult.data as unknown[]
-        : []
-      for (const row of variantRows) {
-        if (!row || typeof row !== 'object' || Array.isArray(row)) continue
-        const item = row as Record<string, unknown>
-        const productId = String(item[variantProductId] ?? '')
+      for (const raw of Array.isArray(variantsResult.data) ? variantsResult.data : []) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+        const row = raw as Record<string, unknown>
+        const productId = externalIdText(row[variantProductId])
         if (!productId) continue
-        const variant: CatalogProductVariant = {
-          id: String(item[variantId] ?? `${productId}:${variantsByProduct.get(productId)?.length ?? 0}`),
-          size: variantSize ? text(item[variantSize]) : null,
-          color: variantColor ? text(item[variantColor]) : null,
-          stockQuantity: variantStock ? numberValue(item[variantStock]) : null,
-          imageUrl: variantImageUrl ? text(item[variantImageUrl]) : null,
-        }
         const current = variantsByProduct.get(productId) ?? []
-        current.push(variant)
+        current.push({
+          id: externalIdText(row[variantId]) ?? `${productId}:${current.length}`,
+          size: variantSize ? text(row[variantSize]) : null,
+          color: variantColor ? text(row[variantColor]) : null,
+          stockQuantity: variantStock ? numberValue(row[variantStock]) : null,
+          imageUrl: variantImageUrl ? text(row[variantImageUrl]) : null,
+        })
         variantsByProduct.set(productId, current)
       }
       products = products.map((product) => ({
@@ -403,7 +369,6 @@ async function searchExternalSupabaseSource(
     let catalogueQuery = client.from(catalogueTable).select('*')
     if (catalogueMapping.activeColumn) catalogueQuery = catalogueQuery.eq(safeIdentifier(catalogueMapping.activeColumn), true)
     if (catalogueMapping.publishedColumn) catalogueQuery = catalogueQuery.eq(safeIdentifier(catalogueMapping.publishedColumn), true)
-
     if (catalogueSearchColumns.length > 0) {
       const catalogueFilters = terms.flatMap((term) => {
         const safeTerm = safePostgrestTerm(term)
@@ -417,7 +382,10 @@ async function searchExternalSupabaseSource(
       : Math.max(input.limit * 25, 250)
     const catalogueResult = await Promise.race([
       catalogueQuery.limit(catalogueFetchLimit),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`External Supabase catalogue ${source.name} timed out.`)), REQUEST_TIMEOUT_MS)),
+      new Promise<never>((_, reject) => setTimeout(
+        () => reject(new Error(`External Supabase catalogue ${source.name} timed out.`)),
+        REQUEST_TIMEOUT_MS,
+      )),
     ])
 
     if (catalogueResult.error) {
@@ -438,7 +406,6 @@ async function searchExternalSupabaseSource(
       products.forEach((product, index) => {
         for (const keyName of productIdentityKeys(product)) stockIndex.set(keyName, index)
       })
-
       for (const catalogueProduct of catalogueProducts) {
         const match = productIdentityKeys(catalogueProduct)
           .map((keyName) => stockIndex.get(keyName))
@@ -454,19 +421,42 @@ async function searchExternalSupabaseSource(
     }
   }
 
-  console.info('[catalog search] external Supabase results:', {
-    sourceId: source.id,
-    sourceName: source.name,
-    schema,
-    table,
-    variantsTable: mapping.variantsTable || null,
-    catalogTable: mapping.catalogTable || null,
-    brandsTable: mapping.brandsTable || null,
-    query: input.query,
-    normalizedCount: products.length,
-  })
-
   return products.slice(0, input.limit)
+}
+
+async function hydrateCanonicalVariants(
+  db: WacrmSupabaseClient,
+  accountId: string,
+  productIds: readonly string[],
+): Promise<Map<string, CatalogProductVariant[]>> {
+  if (productIds.length === 0) return new Map()
+  const { data, error } = await db
+    .from('catalog_product_variants')
+    .select('id, product_id, size, color, stock_quantity, image_url')
+    .eq('account_id', accountId)
+    .eq('is_active', true)
+    .in('product_id', productIds)
+  if (error) {
+    // Rolling deploy compatibility: a failed variant hydration must not remove
+    // otherwise valid canonical products from customer search.
+    console.warn('[catalog search] canonical variant hydration failed:', error.message)
+    return new Map()
+  }
+
+  const byProduct = new Map<string, CatalogProductVariant[]>()
+  for (const row of data ?? []) {
+    const productId = String(row.product_id)
+    const current = byProduct.get(productId) ?? []
+    current.push({
+      id: String(row.id),
+      size: row.size,
+      color: row.color,
+      stockQuantity: row.stock_quantity,
+      imageUrl: row.image_url,
+    })
+    byProduct.set(productId, current)
+  }
+  return byProduct
 }
 
 async function searchInternal(
@@ -490,7 +480,7 @@ async function searchInternal(
 
   const { data, error } = await db
     .from('catalog_products')
-    .select('id, name, description, color, price, currency, image_url, product_url, category, stock_quantity')
+    .select('id, source_id, offering_type_id, name, description, color, price, currency, image_url, product_url, category, stock_quantity')
     .eq('account_id', accountId)
     .eq('is_active', true)
     .or(filters)
@@ -498,13 +488,11 @@ async function searchInternal(
 
   if (error) throw new Error(`Internal catalogue search failed: ${error.message}`)
   if (!data) return []
+  const canonicalVariants = await hydrateCanonicalVariants(db, accountId, data.map((row) => String(row.id)))
 
   return data.map((row) => ({
     id: row.id,
     name: row.name,
-    // The colour lives in its own column (editable in the catalogue UI);
-    // fold it into the description text here so the agent's tool result
-    // and text search both see it, without duplicating it in storage.
     description: row.color
       ? `Cor: ${row.color}.${row.description ? ` ${row.description}` : ''}`
       : row.description,
@@ -514,7 +502,10 @@ async function searchInternal(
     productUrl: row.product_url,
     category: row.category,
     stockQuantity: row.stock_quantity,
+    variants: canonicalVariants.get(String(row.id)),
     sourceName: 'Catálogo interno',
+    sourceType: 'internal',
+    offeringTypeId: row.offering_type_id,
   }))
 }
 
@@ -532,17 +523,14 @@ export async function searchCatalogues(
     .eq('account_id', accountId)
     .in('source_type', ['external_rest', 'external_supabase'])
     .eq('is_active', true)
-
   if (sourcesError) throw new Error(`External catalogue source lookup failed: ${sourcesError.message}`)
 
-  const sources = (sourceRows ?? []) as CatalogSourceRow[]
+  const sources = ((sourceRows ?? []) as CatalogSourceRow[]).filter(shouldQueryCatalogueSourceLive)
   const variants = buildSearchVariants(input.query, input.categoryGroups, input.colorGroups)
   const externalQueries = variants.length > 0 ? variants.slice(0, 4) : [input.query]
 
   const tasks = sources.flatMap((source) => {
-    if (source.source_type === 'external_supabase') {
-      return [searchExternalSupabaseSource(source, input)]
-    }
+    if (source.source_type === 'external_supabase') return [searchExternalSupabaseSource(source, input)]
     return externalQueries.map((query) => searchExternalRestSource(source, { ...input, query }))
   })
 
@@ -558,6 +546,5 @@ export async function searchCatalogues(
     const key = `${product.sourceName}:${product.id}`
     if (!unique.has(key)) unique.set(key, product)
   }
-
   return Array.from(unique.values()).slice(0, input.limit)
 }
