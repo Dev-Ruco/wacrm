@@ -45,7 +45,9 @@ create table if not exists wacrm.catalog_attribute_options (
     on delete cascade,
   constraint catalog_attribute_options_definition_value_unique
     unique (definition_id, canonical_value),
-  constraint catalog_attribute_options_id_account_unique unique (id, account_id)
+  constraint catalog_attribute_options_id_account_unique unique (id, account_id),
+  constraint catalog_attribute_options_id_definition_account_unique
+    unique (id, definition_id, account_id)
 );
 
 create table if not exists wacrm.catalog_category_attributes (
@@ -90,8 +92,8 @@ create table if not exists wacrm.catalog_product_attribute_values (
     references wacrm.catalog_attribute_definitions(id, account_id)
     on delete cascade,
   constraint catalog_product_attribute_values_option_fk
-    foreign key (option_id, account_id)
-    references wacrm.catalog_attribute_options(id, account_id)
+    foreign key (option_id, definition_id, account_id)
+    references wacrm.catalog_attribute_options(id, definition_id, account_id)
     on delete restrict,
   constraint catalog_product_attribute_values_unique
     unique (product_id, definition_id, value_key)
