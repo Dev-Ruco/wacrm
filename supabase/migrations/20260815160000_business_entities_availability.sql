@@ -33,9 +33,12 @@ create table if not exists wacrm.business_entities (
     foreign key (entity_type_id, account_id)
     references wacrm.business_entity_types(id, account_id)
     on delete restrict,
-  constraint business_entities_id_account_unique unique (id, account_id),
-  constraint business_entities_external_ref_unique unique nulls not distinct (account_id, entity_type_id, external_ref)
+  constraint business_entities_id_account_unique unique (id, account_id)
 );
+
+create unique index if not exists business_entities_external_ref_unique_idx
+  on wacrm.business_entities (account_id, entity_type_id, external_ref)
+  where external_ref is not null;
 
 -- `offering_id` points at the current canonical offering representation in
 -- catalog_products. The relation key is tenant vocabulary: provided_by,
@@ -74,7 +77,7 @@ create table if not exists wacrm.availability_windows (
   weekday smallint not null check (weekday between 0 and 6),
   start_time time not null,
   end_time time not null,
-  timezone text not null default 'Africa/Maputo' check (char_length(timezone) between 1 and 80),
+  timezone text not null default 'UTC' check (char_length(timezone) between 1 and 80),
   capacity integer check (capacity is null or capacity >= 1),
   valid_from date,
   valid_until date,
@@ -137,9 +140,94 @@ create index if not exists availability_windows_offering_idx
 create index if not exists availability_windows_entity_idx
   on wacrm.availability_windows (account_id, entity_id, weekday, enabled);
 create index if not exists availability_exceptions_offering_idx
-  on wacrm.availability_exceptions (account_id, offering_id, starts_at, ends_at) where enabled = true;
+  on wacrm.availability_exceptions (account_id, offering_id, starts_at, ends_at)
+  where enabled = true;
 create index if not exists availability_exceptions_entity_idx
-  on wacrm.availability_exceptions (account_id, entity_id, starts_at, ends_at) where enabled = true;
+  on wacrm.availability_exceptions (account_id, entity_id, starts_at, ends_at)
+  where enabled = true;
 
 -- updated_at triggers
-for each?;
+drop trigger if exists set_updated_at on wacrm.business_entity_types;
+create trigger set_updated_at before update on wacrm.business_entity_types
+for each row execute function wacrm.update_updated_at_column();
+
+drop trigger if exists set_updated_at on wacrm.business_entities;
+create trigger set_updated_at before update on wacrm.business_entities
+for each row execute function wacrm.update_updated_at_column();
+
+drop trigger if exists set_updated_at on wacrm.offering_entity_links;
+create trigger set_updated_at before update on wacrm.offering_entity_links
+for each row execute function wacrm.update_updated_at_column();
+
+drop trigger if exists set_updated_at on wacrm.availability_windows;
+create trigger set_updated_at before update on wacrm.availability_windows
+for each row execute function wacrm.update_updated_at_column();
+
+drop trigger if exists set_updated_at on wacrm.availability_exceptions;
+create trigger set_updated_at before update on wacrm.availability_exceptions
+for each row execute function wacrm.update_updated_at_column();
+
+alter table wacrm.business_entity_types enable row level security;
+alter table wacrm.business_entities enable row level security;
+alter table wacrm.offering_entity_links enable row level security;
+alter table wacrm.availability_windows enable row level security;
+alter table wacrm.availability_exceptions enable row level security;
+
+revoke all on table wacrm.business_entity_types from public, anon;
+revoke all on table wacrm.business_entities from public, anon;
+revoke all on table wacrm.offering_entity_links from public, anon;
+revoke all on table wacrm.availability_windows from public, anon;
+revoke all on table wacrm.availability_exceptions from public, anon;
+
+grant select, insert, update, delete on table wacrm.business_entity_types to authenticated;
+grant select, insert, update, delete on table wacrm.business_entities to authenticated;
+grant select, insert, update, delete on table wacrm.offering_entity_links to authenticated;
+grant select, insert, update, delete on table wacrm.availability_windows to authenticated;
+grant select, insert, update, delete on table wacrm.availability_exceptions to authenticated;
+grant all on table wacrm.business_entity_types to service_role;
+grant all on table wacrm.business_entities to service_role;
+grant all on table wacrm.offering_entity_links to service_role;
+grant all on table wacrm.availability_windows to service_role;
+grant all on table wacrm.availability_exceptions to service_role;
+
+-- All account members can inspect operational knowledge; administrators own
+-- configuration mutations. Runtime service-role access remains explicit.
+drop policy if exists business_entity_types_select on wacrm.business_entity_types;
+create policy business_entity_types_select on wacrm.business_entity_types
+for select to authenticated using (wacrm.is_account_member(account_id));
+drop policy if exists business_entity_types_write on wacrm.business_entity_types;
+create policy business_entity_types_write on wacrm.business_entity_types
+for all to authenticated using (wacrm.is_account_member(account_id, 'admin'::wacrm.account_role_enum))
+with check (wacrm.is_account_member(account_id, 'admin'::wacrm.account_role_enum));
+
+drop policy if exists business_entities_select on wacrm.business_entities;
+create policy business_entities_select on wacrm.business_entities
+for select to authenticated using (wacrm.is_account_member(account_id));
+drop policy if exists business_entities_write on wacrm.business_entities;
+create policy business_entities_write on wacrm.business_entities
+for all to authenticated using (wacrm.is_account_member(account_id, 'admin'::wacrm.account_role_enum))
+with check (wacrm.is_account_member(account_id, 'admin'::wacrm.account_role_enum));
+
+drop policy if exists offering_entity_links_select on wacrm.offering_entity_links;
+create policy offering_entity_links_select on wacrm.offering_entity_links
+for select to authenticated using (wacrm.is_account_member(account_id));
+drop policy if exists offering_entity_links_write on wacrm.offering_entity_links;
+create policy offering_entity_links_write on wacrm.offering_entity_links
+for all to authenticated using (wacrm.is_account_member(account_id, 'admin'::wacrm.account_role_enum))
+with check (wacrm.is_account_member(account_id, 'admin'::wacrm.account_role_enum));
+
+drop policy if exists availability_windows_select on wacrm.availability_windows;
+create policy availability_windows_select on wacrm.availability_windows
+for select to authenticated using (wacrm.is_account_member(account_id));
+drop policy if exists availability_windows_write on wacrm.availability_windows;
+create policy availability_windows_write on wacrm.availability_windows
+for all to authenticated using (wacrm.is_account_member(account_id, 'admin'::wacrm.account_role_enum))
+with check (wacrm.is_account_member(account_id, 'admin'::wacrm.account_role_enum));
+
+drop policy if exists availability_exceptions_select on wacrm.availability_exceptions;
+create policy availability_exceptions_select on wacrm.availability_exceptions
+for select to authenticated using (wacrm.is_account_member(account_id));
+drop policy if exists availability_exceptions_write on wacrm.availability_exceptions;
+create policy availability_exceptions_write on wacrm.availability_exceptions
+for all to authenticated using (wacrm.is_account_member(account_id, 'admin'::wacrm.account_role_enum))
+with check (wacrm.is_account_member(account_id, 'admin'::wacrm.account_role_enum));
