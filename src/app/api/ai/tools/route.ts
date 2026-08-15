@@ -55,7 +55,7 @@ export async function GET() {
     const { supabase, accountId } = await requireRole('agent')
     const agentId = await resolveAgentId(supabase, accountId)
     const registered = await loadToolDefinitions(supabase)
-    const definitions = registered.length > 0 ? registered : fallbackDefinitions()
+    const definitions = registered ?? fallbackDefinitions()
     const registeredKeys = new Set(definitions.map((definition) => definition.key))
 
     if (!agentId) {
@@ -157,11 +157,11 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'instructions deve ser texto ou nulo.' }, { status: 400 })
     }
 
-    // When the registry is available it is authoritative for which implemented
-    // capabilities are exposed. Empty means a pre-migration deployment, where
-    // the static handler list remains the compatibility fallback.
+    // null means only that the migration is not readable yet. An empty array is
+    // an authoritative registry with no enabled capabilities and must not fall
+    // back to the static handler list.
     const registered = await loadToolDefinitions(supabase)
-    if (registered.length > 0 && !registered.some((definition) => definition.key === toolKey)) {
+    if (registered !== null && !registered.some((definition) => definition.key === toolKey)) {
       return NextResponse.json({ error: 'Ferramenta não registada ou desactivada.' }, { status: 400 })
     }
 
