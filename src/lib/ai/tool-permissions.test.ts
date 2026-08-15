@@ -39,6 +39,10 @@ describe('DEFAULT_AGENT_TOOLS', () => {
   it('does not enable get_style_opinion by default (fashion-specific, opt-in like other business-specific tools)', () => {
     expect(DEFAULT_AGENT_TOOLS.get_style_opinion).toBe(false)
   })
+
+  it('does not enable compose_solution before a tenant configures composition semantics', () => {
+    expect(DEFAULT_AGENT_TOOLS.compose_solution).toBe(false)
+  })
 })
 
 describe('loadAgentToolPermissions', () => {
@@ -53,6 +57,7 @@ describe('loadAgentToolPermissions', () => {
       dbReturning({
         agentTools: [
           { tool_key: 'get_style_opinion', enabled: true, instructions: null },
+          { tool_key: 'compose_solution', enabled: true, instructions: '  Use apenas os templates configurados.  ' },
           { tool_key: 'schedule_visit', enabled: true, instructions: '  Nesta conta, não agendamos aos domingos.  ' },
           { tool_key: 'create_deal', enabled: false, instructions: '' },
         ],
@@ -61,9 +66,11 @@ describe('loadAgentToolPermissions', () => {
       'agent-1',
     )
     expect(result.permissions.get_style_opinion).toBe(true)
+    expect(result.permissions.compose_solution).toBe(true)
     expect(result.permissions.schedule_visit).toBe(true)
     expect(result.permissions.create_deal).toBe(false)
     expect(result.instructions).toEqual({
+      compose_solution: 'Use apenas os templates configurados.',
       schedule_visit: 'Nesta conta, não agendamos aos domingos.',
     })
   })
@@ -74,6 +81,7 @@ describe('loadAgentToolPermissions', () => {
         registry: [{ key: 'search_knowledge', default_enabled: true }],
         agentTools: [
           { tool_key: 'search_catalog', enabled: true, instructions: 'stale' },
+          { tool_key: 'compose_solution', enabled: true, instructions: 'stale composition' },
           { tool_key: 'search_knowledge', enabled: true, instructions: null },
         ],
       }),
@@ -84,7 +92,9 @@ describe('loadAgentToolPermissions', () => {
     expect(result.permissions.search_knowledge).toBe(true)
     expect(result.permissions.search_catalog).toBe(false)
     expect(result.permissions.send_product).toBe(false)
+    expect(result.permissions.compose_solution).toBe(false)
     expect(result.instructions.search_catalog).toBeUndefined()
+    expect(result.instructions.compose_solution).toBeUndefined()
   })
 
   it('treats a readable empty registry as authoritative instead of restoring static defaults', async () => {
