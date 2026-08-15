@@ -352,7 +352,7 @@ export async function searchCatalogForAgent(
     .filter((product) => {
       if (structuredConstraints.length === 0) return true
       if (!isInternalCatalogProduct(product)) return false
-      return productMatchesOfferingAttributeConstraints(product.id, null, attributeValues, structuredConstraints)
+      return productMatchesOfferingAttributeConstraints(product.id, undefined, attributeValues, structuredConstraints)
     })
     .map((product) => ({ product, sizeMatch: productSizeMatch(product, input.size) }))
     .filter(({ sizeMatch }) => sizeMatch !== 'mismatch')
