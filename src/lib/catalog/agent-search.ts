@@ -1,4 +1,13 @@
 import type { WacrmSupabaseClient } from '@/lib/supabase/types'
+import {
+  catalogAttributeConstraintSearchTerms,
+  loadCatalogAttributeDefinitions,
+  loadCatalogProductAttributeValues,
+  normalizeCatalogAttributeConstraints,
+  productMatchesCatalogAttributeConstraints,
+  type CatalogAttributeConstraint,
+  type CatalogAttributeScalar,
+} from './attributes'
 import { searchCatalogues } from './search'
 import { loadCatalogTaxonomy, type CatalogTaxonomyGroups } from './taxonomy'
 import type { CatalogProduct } from './types'
@@ -10,6 +19,8 @@ export interface AgentCatalogSearchInput {
   category?: string | null
   color?: string | null
   size?: string | null
+  /** Tenant-defined hard constraints. Unknown keys/values never silently pass. */
+  attributes?: Record<string, CatalogAttributeScalar>
   limit: number
   mode: AgentCatalogSearchMode
   excludeProductKeys?: string[]
@@ -20,10 +31,13 @@ export interface RankedAgentCatalogProduct {
   productKey: string
   score: number
   sizeMatch: 'match' | 'unknown' | 'mismatch'
+  matchedAttributes?: Record<string, string>
 }
 
 const MAX_CANDIDATES = 60
 const CANDIDATE_MULTIPLIER = 8
+const MAX_RETRIEVAL_QUERIES = 12
+const INTERNAL_SOURCE_NAME = 'Catálogo interno'
 
 function normalize(value: string | null | undefined): string {
   return (value ?? '')
@@ -202,11 +216,59 @@ function uniqueProducts(products: CatalogProduct[]): CatalogProduct[] {
   return Array.from(unique.values())
 }
 
-function retrievalQueries(input: AgentCatalogSearchInput): string[] {
-  const candidates = [input.query, input.category, input.color]
-    .map((value) => value?.trim() ?? '')
-    .filter(Boolean)
-  return Array.from(new Set(candidates)).slice(0, 3)
+function addAliasTerms(
+  output: string[],
+  requested: string | null | undefined,
+  groups: readonly (readonly string[])[],
+  maxAliases: number,
+): void {
+  const wanted = normalize(requested)
+  if (!wanted) return
+  const group = bestAliasGroup(wanted, groups)
+  if (!group) return
+
+  // The taxonomy loader keeps canonical_value first. Always include it, then
+  // include a small set of alternative aliases distinct from the model token.
+  const aliases = [group[0], ...group.filter((alias) => alias !== wanted)].filter(Boolean)
+  output.push(...aliases.slice(0, maxAliases))
+}
+
+/**
+ * Build a bounded set of source queries from the model request and the current
+ * tenant vocabulary. Category and colour get independent alias budgets so one
+ * group can never crowd the other out (e.g. `white` must still reach a source
+ * that stores the configured equivalent in another language).
+ */
+export function buildAgentCatalogRetrievalQueries(
+  input: AgentCatalogSearchInput,
+  taxonomy: CatalogTaxonomyGroups,
+  attributeConstraints: readonly CatalogAttributeConstraint[] = [],
+): string[] {
+  const candidates: string[] = [input.query]
+  if (input.category) candidates.push(input.category)
+  addAliasTerms(candidates, input.category, taxonomy.categoryGroups, 3)
+  if (input.color) candidates.push(input.color)
+  addAliasTerms(candidates, input.color, taxonomy.colorGroups, 4)
+  candidates.push(...catalogAttributeConstraintSearchTerms(attributeConstraints).slice(0, 4))
+
+  const unique = new Map<string, string>()
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim() ?? ''
+    const key = normalize(trimmed)
+    if (key && !unique.has(key)) unique.set(key, trimmed)
+  }
+  return Array.from(unique.values()).slice(0, MAX_RETRIEVAL_QUERIES)
+}
+
+function isInternalCatalogProduct(product: CatalogProduct): boolean {
+  return product.sourceType === 'internal' || product.sourceName === INTERNAL_SOURCE_NAME
+}
+
+function matchedAttributeEvidence(
+  constraints: readonly CatalogAttributeConstraint[],
+): Record<string, string> | undefined {
+  if (constraints.length === 0) return undefined
+  return Object.fromEntries(constraints.map((constraint) => [constraint.key, constraint.canonicalValue]))
 }
 
 /**
@@ -214,11 +276,17 @@ function retrievalQueries(input: AgentCatalogSearchInput): string[] {
  *
  * The legacy search layer is intentionally kept as a broad source adapter.
  * This layer fetches a wider candidate pool, applies explicit category/colour
- * constraints as AND conditions, removes products already shown by the live
- * conversation state, rejects strong name/category conflicts using only the
- * tenant taxonomy, then ranks and limits. A known size mismatch is also
- * excluded; products with no size data stay eligible but are marked unknown
- * so the agent can be honest. It never sends WhatsApp media.
+ * and tenant-defined attribute constraints as AND conditions, removes products
+ * already shown by the live conversation state, rejects strong name/category
+ * conflicts using only the tenant taxonomy, then ranks and limits. A known size
+ * mismatch is also excluded; products with no size data stay eligible but are
+ * marked unknown so the agent can be honest. It never sends WhatsApp media.
+ *
+ * Generic structured attributes are currently authoritative on the canonical
+ * internal catalogue only. External connector rows stay eligible for legacy
+ * fields, but cannot satisfy a generic hard constraint until synchronised into
+ * canonical product attribute values. This prevents inferred/unknown facts from
+ * being presented as verified catalogue facts.
  */
 export async function searchCatalogForAgent(
   db: WacrmSupabaseClient,
@@ -229,10 +297,32 @@ export async function searchCatalogForAgent(
     MAX_CANDIDATES,
     Math.max(20, input.limit * CANDIDATE_MULTIPLIER),
   )
-  const queries = retrievalQueries(input)
-  if (queries.length === 0) return []
 
   const taxonomy = await loadCatalogTaxonomy(db, accountId)
+  const requestedAttributes = input.attributes && Object.keys(input.attributes).length > 0
+    ? input.attributes
+    : null
+
+  const definitions = requestedAttributes
+    ? await loadCatalogAttributeDefinitions(db, accountId)
+    : []
+  const normalizedAttributes = normalizeCatalogAttributeConstraints(definitions, requestedAttributes)
+
+  // Hard constraints that are unknown to the tenant schema must not be ignored.
+  if (normalizedAttributes.unknownKeys.length > 0) {
+    console.info('[agent catalog search] unknown attribute constraints:', {
+      accountId,
+      keys: normalizedAttributes.unknownKeys,
+    })
+    return []
+  }
+
+  const queries = buildAgentCatalogRetrievalQueries(
+    input,
+    taxonomy,
+    normalizedAttributes.constraints,
+  )
+  if (queries.length === 0) return []
 
   const settled = await Promise.allSettled(
     queries.map((query) =>
@@ -252,12 +342,25 @@ export async function searchCatalogForAgent(
     }),
   )
 
+  const structuredConstraints = normalizedAttributes.constraints
+  const internalProductIds = structuredConstraints.length > 0
+    ? candidates.filter(isInternalCatalogProduct).map((product) => product.id)
+    : []
+  const attributeValues = structuredConstraints.length > 0
+    ? await loadCatalogProductAttributeValues(db, accountId, internalProductIds)
+    : []
+
   const excluded = new Set(input.excludeProductKeys ?? [])
   return candidates
     .filter((product) => !excluded.has(catalogProductKey(product)))
     .filter((product) => !catalogNameConflictsWithRequestedCategory(product.name, input.category, taxonomy.categoryGroups))
     .filter((product) => categoryMatches(product, input.category, taxonomy))
     .filter((product) => colorMatches(product, input.color, taxonomy))
+    .filter((product) => {
+      if (structuredConstraints.length === 0) return true
+      if (!isInternalCatalogProduct(product)) return false
+      return productMatchesCatalogAttributeConstraints(product.id, attributeValues, structuredConstraints)
+    })
     .map((product) => ({ product, sizeMatch: productSizeMatch(product, input.size) }))
     .filter(({ sizeMatch }) => sizeMatch !== 'mismatch')
     .map(({ product, sizeMatch }) => ({
@@ -265,6 +368,7 @@ export async function searchCatalogForAgent(
       productKey: catalogProductKey(product),
       score: relevanceScore(product, input, taxonomy),
       sizeMatch,
+      matchedAttributes: matchedAttributeEvidence(structuredConstraints),
     }))
     .sort((a, b) => b.score - a.score || a.product.name.localeCompare(b.product.name, 'pt'))
     .slice(0, input.limit)
