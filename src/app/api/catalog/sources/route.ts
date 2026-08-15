@@ -17,12 +17,16 @@ function validateHttpsUrl(raw: string): string {
   return url.toString()
 }
 
+function syncMode(value: unknown): 'live' | 'mirror' {
+  return value === 'mirror' ? 'mirror' : 'live'
+}
+
 export async function GET() {
   try {
     const { supabase, accountId } = await requireRole('admin')
     const { data, error } = await supabase
       .from('catalog_sources')
-      .select('id, name, source_type, is_active, base_url, search_path, auth_type, auth_header, field_mapping, meta_feed_token, created_at, updated_at')
+      .select('id, name, source_type, is_active, base_url, search_path, sync_path, sync_mode, last_synced_at, last_sync_status, last_sync_error, auth_type, auth_header, field_mapping, meta_feed_token, created_at, updated_at')
       .eq('account_id', accountId)
       .order('created_at', { ascending: false })
     if (error) throw error
@@ -71,6 +75,14 @@ export async function POST(request: Request) {
       }
     }
 
+    const requestedSyncMode = syncMode(input.sync_mode)
+    if (requestedSyncMode === 'mirror' && sourceType !== 'external_supabase') {
+      return NextResponse.json(
+        { error: 'O modo espelho canónico está disponível actualmente para fontes Supabase externas.' },
+        { status: 400 },
+      )
+    }
+
     const { data, error } = await supabase
       .from('catalog_sources')
       .insert({
@@ -80,12 +92,14 @@ export async function POST(request: Request) {
         is_active: input.is_active !== false,
         base_url: validateHttpsUrl(baseUrlRaw),
         search_path: sourceType === 'external_rest' ? text(input.search_path, 2000) : null,
+        sync_path: sourceType === 'external_rest' ? text(input.sync_path, 2000) : null,
+        sync_mode: requestedSyncMode,
         auth_type: authType,
         auth_header: sourceType === 'external_rest' ? text(input.auth_header, 200) : 'apikey',
         auth_secret_encrypted: secret ? encrypt(secret) : null,
         field_mapping: mapping,
       })
-      .select('id, name, source_type, is_active, base_url, search_path, auth_type, auth_header, field_mapping, meta_feed_token')
+      .select('id, name, source_type, is_active, base_url, search_path, sync_path, sync_mode, last_synced_at, last_sync_status, last_sync_error, auth_type, auth_header, field_mapping, meta_feed_token')
       .single()
     if (error) throw error
     return NextResponse.json({ source: data }, { status: 201 })
