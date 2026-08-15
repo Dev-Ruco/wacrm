@@ -248,14 +248,19 @@ function valueCandidates(row: OfferingAttributeValue): string[] {
 
 function alternativeAppliesToProduct(
   alternative: OfferingAttributeConstraintAlternative,
-  productOfferingTypeId: string | null,
+  productOfferingTypeId: string | null | undefined,
 ): boolean {
+  // undefined means the caller has not hydrated the product type. This path is
+  // safe because the database trigger guarantees a type-scoped value can only
+  // exist on a product of that same type. Explicit null means a genuinely
+  // untyped offering, so only global definitions apply.
+  if (productOfferingTypeId === undefined) return true
   return alternative.offeringTypeId === null || alternative.offeringTypeId === productOfferingTypeId
 }
 
 export function productMatchesOfferingAttributeConstraints(
   productId: string,
-  productOfferingTypeId: string | null,
+  productOfferingTypeId: string | null | undefined,
   values: readonly OfferingAttributeValue[],
   constraints: readonly OfferingAttributeConstraint[],
 ): boolean {
