@@ -24,66 +24,44 @@ interface ToolConfig {
   instructions: string | null
 }
 
+interface ToolDefinition {
+  key: string
+  label: string
+  description: string | null
+  actionClass: 'read' | 'communication' | 'mutation' | 'handoff'
+  reversible: boolean
+  externalImpact: boolean
+  defaultEnabled: boolean
+  sortOrder: number
+}
+
 interface ToolState {
   configured: boolean
   agent_id: string | null
-  tools: {
-    search_catalog: ToolConfig
-    send_product: ToolConfig
-    search_knowledge: ToolConfig
-    add_tag: ToolConfig
-    create_deal: ToolConfig
-    schedule_visit: ToolConfig
-    get_style_opinion: ToolConfig
-    handoff_human: ToolConfig
-  }
-  last_used_at?: Partial<Record<ToolKey, string>>
-  used_by_skills?: Partial<Record<ToolKey, string[]>>
+  definitions: ToolDefinition[]
+  tools: Record<string, ToolConfig>
+  last_used_at?: Record<string, string>
+  used_by_skills?: Record<string, string[]>
 }
 
-type ToolKey = keyof ToolState['tools']
+type ToolKey = string
 
-const TOOL_COPY: Record<ToolKey, { title: string; description: string; icon: typeof Boxes }> = {
-  search_catalog: {
-    title: 'Consultar catálogo',
-    description: 'Permite ao agente pesquisar produtos, preços, stock e ligações no catálogo interno e nas APIs externas activas.',
-    icon: Boxes,
-  },
-  send_product: {
-    title: 'Enviar produtos',
-    description: 'Permite ao agente enviar pelo WhatsApp a fotografia de um produto encontrado no catálogo.',
-    icon: Image,
-  },
-  search_knowledge: {
-    title: 'Consultar conhecimento',
-    description: 'Permite ao agente pesquisar documentos, FAQs, políticas e informação interna da empresa.',
-    icon: BookOpen,
-  },
-  add_tag: {
-    title: 'Adicionar tag ao contacto',
-    description: 'Permite ao agente aplicar ao contacto uma tag já existente nesta conta.',
-    icon: Tags,
-  },
-  create_deal: {
-    title: 'Criar negócio no pipeline',
-    description: 'Permite ao agente captar uma oportunidade e criar um negócio na primeira etapa do pipeline.',
-    icon: BriefcaseBusiness,
-  },
-  schedule_visit: {
-    title: 'Agendar visita à loja',
-    description: 'Permite ao agente marcar uma data e hora para o cliente visitar a loja ou local físico, e avisar a equipa.',
-    icon: CalendarClock,
-  },
-  get_style_opinion: {
-    title: 'Opinião de estilo',
-    description: 'Permite ao agente olhar para as fotos reais dos produtos e dizer se combinam com o que a cliente descreveu sobre si (corpo, altura, estilo).',
-    icon: Sparkles,
-  },
-  handoff_human: {
-    title: 'Encaminhar para atendimento humano',
-    description: 'Permite ao agente suspender a resposta automática e registar um motivo estruturado para a equipa.',
-    icon: UserRoundCheck,
-  },
+const TOOL_ICONS: Record<string, typeof Boxes> = {
+  search_catalog: Boxes,
+  send_product: Image,
+  search_knowledge: BookOpen,
+  add_tag: Tags,
+  create_deal: BriefcaseBusiness,
+  schedule_visit: CalendarClock,
+  get_style_opinion: Sparkles,
+  handoff_human: UserRoundCheck,
+}
+
+function actionClassLabel(actionClass: ToolDefinition['actionClass']) {
+  if (actionClass === 'mutation') return 'Executa uma acção'
+  if (actionClass === 'communication') return 'Comunica com o cliente'
+  if (actionClass === 'handoff') return 'Transfere o atendimento'
+  return 'Consulta informação'
 }
 
 export function AgentTools() {
@@ -114,9 +92,13 @@ export function AgentTools() {
 
   const toggle = async (toolKey: ToolKey, enabled: boolean) => {
     if (!state || saving) return
-    setSaving(toolKey)
     const previous = state.tools[toolKey]
-    setState((current) => (current ? { ...current, tools: { ...current.tools, [toolKey]: { ...previous, enabled } } } : current))
+    if (!previous) return
+    setSaving(toolKey)
+    setState((current) => (current ? {
+      ...current,
+      tools: { ...current.tools, [toolKey]: { ...previous, enabled } },
+    } : current))
     try {
       const response = await fetch('/api/ai/tools', {
         method: 'PATCH',
@@ -127,7 +109,10 @@ export function AgentTools() {
       if (!response.ok) throw new Error(data.error ?? 'Não foi possível actualizar a ferramenta.')
       toast.success(enabled ? 'Ferramenta activada.' : 'Ferramenta desactivada.')
     } catch (error) {
-      setState((current) => (current ? { ...current, tools: { ...current.tools, [toolKey]: previous } } : current))
+      setState((current) => (current ? {
+        ...current,
+        tools: { ...current.tools, [toolKey]: previous },
+      } : current))
       toast.error(error instanceof Error ? error.message : 'Não foi possível actualizar a ferramenta.')
     } finally {
       setSaving(null)
@@ -135,9 +120,10 @@ export function AgentTools() {
   }
 
   function startEdit(toolKey: ToolKey) {
-    setDraft(state?.tools[toolKey].instructions ?? '')
+    setDraft(state?.tools[toolKey]?.instructions ?? '')
     setEditingKey(toolKey)
   }
+
   function cancelEdit() {
     setEditingKey(null)
     setDraft('')
@@ -145,8 +131,9 @@ export function AgentTools() {
 
   const saveInstructions = async (toolKey: ToolKey) => {
     if (!state || saving) return
-    setSaving(toolKey)
     const previous = state.tools[toolKey]
+    if (!previous) return
+    setSaving(toolKey)
     const instructions = draft.trim() || null
     try {
       const response = await fetch('/api/ai/tools', {
@@ -156,7 +143,10 @@ export function AgentTools() {
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.error ?? 'Não foi possível guardar as instruções.')
-      setState((current) => (current ? { ...current, tools: { ...current.tools, [toolKey]: { ...previous, instructions } } } : current))
+      setState((current) => (current ? {
+        ...current,
+        tools: { ...current.tools, [toolKey]: { ...previous, instructions } },
+      } : current))
       toast.success('Instruções guardadas.')
       cancelEdit()
     } catch (error) {
@@ -195,11 +185,16 @@ export function AgentTools() {
       )}
 
       <div className="space-y-3">
-        {(Object.keys(TOOL_COPY) as ToolKey[]).map((toolKey) => {
-          const item = TOOL_COPY[toolKey]
-          const Icon = item.icon
-          const tool = state.tools[toolKey]
-          const dependencyBlocked = toolKey === 'send_product' && !state.tools.search_catalog.enabled
+        {state.definitions.map((definition) => {
+          const toolKey = definition.key
+          const Icon = TOOL_ICONS[toolKey] ?? Wrench
+          const tool = state.tools[toolKey] ?? {
+            enabled: definition.defaultEnabled,
+            instructions: null,
+          }
+          // send_product depends on a catalogue result in the current runtime.
+          // This is an execution dependency, not a platform-wide tool allow-list.
+          const dependencyBlocked = toolKey === 'send_product' && !state.tools.search_catalog?.enabled
           const rowDisabled = !canEdit || !state.configured || dependencyBlocked
           const editing = editingKey === toolKey
 
@@ -218,7 +213,7 @@ export function AgentTools() {
                   checked={tool.enabled}
                   disabled={!canEdit || !state.configured || saving !== null || dependencyBlocked}
                   onCheckedChange={(enabled) => void toggle(toolKey, enabled)}
-                  aria-label={item.title}
+                  aria-label={definition.label}
                 />
               }
               header={
@@ -227,22 +222,34 @@ export function AgentTools() {
                     <Icon className="h-4 w-4" />
                   </div>
                   <div className="min-w-0">
-                    <p className="font-medium">{item.title}</p>
+                    <p className="font-medium">{definition.label}</p>
                     <p className="truncate text-xs text-muted-foreground">
                       {dependencyBlocked
                         ? 'Active primeiro "Consultar catálogo".'
                         : state.last_used_at?.[toolKey]
                           ? `Última utilização: ${new Date(state.last_used_at[toolKey]!).toLocaleString('pt-PT')}`
                           : 'Ainda sem utilização registada'}
-                      {state.used_by_skills?.[toolKey]?.length ? ` · Usada por: ${state.used_by_skills[toolKey]!.join(', ')}` : ''}
+                      {state.used_by_skills?.[toolKey]?.length
+                        ? ` · Usada por: ${state.used_by_skills[toolKey]!.join(', ')}`
+                        : ''}
                     </p>
                   </div>
                 </div>
               }
             >
-              <p className="text-sm text-muted-foreground">{item.description}</p>
+              <div className="space-y-1">
+                {definition.description && (
+                  <p className="text-sm text-muted-foreground">{definition.description}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {actionClassLabel(definition.actionClass)}
+                  {definition.externalImpact ? ' · Pode ter impacto externo' : ''}
+                </p>
+              </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Instruções extra para esta ferramenta (opcional)</label>
+                <label className="text-xs font-medium text-muted-foreground">
+                  Instruções extra para esta ferramenta (opcional)
+                </label>
                 <Textarea
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}

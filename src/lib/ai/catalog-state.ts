@@ -48,6 +48,25 @@ function safeFilterText(value: unknown): string | null {
   return trimmed ? trimmed.slice(0, 120) : null
 }
 
+function safeAttributeFilters(value: unknown): Array<[string, string]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+  const entries: Array<[string, string]> = []
+  for (const [rawKey, rawValue] of Object.entries(value as Record<string, unknown>)) {
+    const key = rawKey.trim().slice(0, 80)
+    if (!key) continue
+    if (
+      typeof rawValue !== 'string' &&
+      typeof rawValue !== 'number' &&
+      typeof rawValue !== 'boolean'
+    ) continue
+    const printable = String(rawValue).trim().slice(0, 120)
+    if (!printable) continue
+    entries.push([key, printable])
+    if (entries.length >= 12) break
+  }
+  return entries
+}
+
 /**
  * Small operational context block for the model. Product keys and media keys
  * stay server-side; the model only needs the human-readable selected product
@@ -60,8 +79,9 @@ export function conversationCatalogStatePrompt(
   const category = safeFilterText(state.lastFilters.category)
   const color = safeFilterText(state.lastFilters.color)
   const size = safeFilterText(state.lastFilters.size)
+  const attributes = safeAttributeFilters(state.lastFilters.attributes)
   const hasContext = Boolean(
-    state.selectedProductName || state.lastQuery || category || color || size,
+    state.selectedProductName || state.lastQuery || category || color || size || attributes.length,
   )
   if (!hasContext) return null
 
@@ -76,6 +96,7 @@ export function conversationCatalogStatePrompt(
     category ? `category=${JSON.stringify(category)}` : null,
     color ? `color=${JSON.stringify(color)}` : null,
     size ? `size=${JSON.stringify(size)}` : null,
+    ...attributes.map(([key, value]) => `attribute.${key}=${JSON.stringify(value)}`),
   ].filter(Boolean)
   if (filters.length > 0) lines.push(`Last explicit filters: ${filters.join(', ')}.`)
   if (state.shownProductKeys.length > 0) {

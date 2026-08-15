@@ -18,19 +18,27 @@ describe('conversationCatalogStatePrompt', () => {
 
   it('keeps selected product and structured filters without exposing internal keys', () => {
     const prompt = conversationCatalogStatePrompt({
-      lastQuery: 'legging',
-      lastFilters: { category: 'legging', color: 'preto', size: 'M', mode: 'browse' },
+      lastQuery: 'modelo familiar',
+      lastFilters: {
+        category: 'SUV',
+        color: 'preto',
+        size: null,
+        attributes: { seats: 7, automatic: true, fuel: 'diesel' },
+        mode: 'browse',
+      },
       shownProductKeys: ['internal:secret-product-id'],
       shownMediaKeys: ['internal:secret-product-id#1'],
       rejectedProductKeys: [],
       selectedProductKey: 'internal:secret-product-id',
-      selectedProductName: 'Legging Cintura Alta',
+      selectedProductName: 'Modelo Familiar',
     })
 
-    expect(prompt).toContain('Legging Cintura Alta')
-    expect(prompt).toContain('category="legging"')
+    expect(prompt).toContain('Modelo Familiar')
+    expect(prompt).toContain('category="SUV"')
     expect(prompt).toContain('color="preto"')
-    expect(prompt).toContain('size="M"')
+    expect(prompt).toContain('attribute.seats="7"')
+    expect(prompt).toContain('attribute.automatic="true"')
+    expect(prompt).toContain('attribute.fuel="diesel"')
     expect(prompt).toContain('1 product(s) have already been shown')
     expect(prompt).not.toContain('secret-product-id')
   })

@@ -22,6 +22,8 @@ export interface CatalogProduct {
   sourceName: string
   /** Stable source capability marker. Do not infer internal/external from a UI label. */
   sourceType?: CatalogProductSourceType
+  /** Generic tenant-defined offering type. External rows remain unknown until canonicalised. */
+  offeringTypeId?: string | null
 }
 
 export interface CatalogSearchInput {

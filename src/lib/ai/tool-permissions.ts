@@ -1,4 +1,5 @@
 import type { WacrmSupabaseClient } from '@/lib/supabase/types'
+import { loadOfferingAttributeDefinitions } from '@/lib/offerings/attributes'
 
 export const AGENT_TOOL_KEYS = [
   'search_catalog',
@@ -69,34 +70,142 @@ export interface AgentToolPermissions {
   instructions: Partial<Record<AgentToolKey, string>>
 }
 
+interface RegisteredToolRow {
+  key: string
+  default_enabled: boolean
+}
+
+const MAX_OFFERING_GUIDANCE_CHARS = 6_000
+const MAX_OFFERING_GUIDANCE_DEFINITIONS = 24
+const MAX_OFFERING_GUIDANCE_OPTIONS = 12
+
+function appendInstruction(
+  instructions: Partial<Record<AgentToolKey, string>>,
+  key: AgentToolKey,
+  value: string,
+) {
+  const current = instructions[key]?.trim()
+  instructions[key] = current ? `${current}\n\n${value}` : value
+}
+
+async function appendOfferingFilterGuidance(
+  db: WacrmSupabaseClient,
+  accountId: string,
+  instructions: Partial<Record<AgentToolKey, string>>,
+) {
+  try {
+    const definitions = (await loadOfferingAttributeDefinitions(db, accountId))
+      .filter((definition) => definition.enabled && definition.isFilterable)
+    if (definitions.length === 0) return
+
+    const lines: string[] = []
+    let usedChars = 0
+    for (const definition of definitions.slice(0, MAX_OFFERING_GUIDANCE_DEFINITIONS)) {
+      const options = definition.valueType === 'enum'
+        ? definition.options
+            .filter((option) => option.enabled)
+            .slice(0, MAX_OFFERING_GUIDANCE_OPTIONS)
+            .map((option) => {
+              const aliases = option.aliases.length > 0 ? ` [aliases: ${option.aliases.join(', ')}]` : ''
+              return `${option.value}=${option.label}${aliases}`
+            })
+            .join('; ')
+        : ''
+      const line = `- ${definition.key}: ${definition.label} (${definition.valueType}${definition.unit ? `, ${definition.unit}` : ''})${options ? `; opções: ${options}` : ''}`
+      if (usedChars + line.length > MAX_OFFERING_GUIDANCE_CHARS) break
+      lines.push(line)
+      usedChars += line.length
+    }
+    if (lines.length === 0) return
+
+    appendInstruction(
+      instructions,
+      'search_catalog',
+      [
+        'Filtros estruturados configurados por esta empresa:',
+        ...lines,
+        'Quando o cliente declarar claramente um destes factos, envie-o em attributes usando exactamente a chave acima. Estes são filtros obrigatórios: não invente valores, não crie chaves novas e não os use quando o cliente não os declarou ou o contexto não os tornou inequívocos.',
+      ].join('\n'),
+    )
+  } catch (error) {
+    // A deployment may briefly run before the Business Offering migration.
+    // Catalogue search keeps its legacy fields in that case.
+    console.warn('[ai tools] offering filter guidance unavailable:', error)
+  }
+}
+
+async function loadRuntimeRegistryDefaults(
+  db: WacrmSupabaseClient,
+): Promise<Map<AgentToolKey, boolean> | null> {
+  try {
+    const { data, error } = await db
+      .from('tool_definitions')
+      .select('key, default_enabled')
+      .eq('enabled', true)
+    if (error) throw error
+
+    const registry = new Map<AgentToolKey, boolean>()
+    for (const row of (data ?? []) as RegisteredToolRow[]) {
+      if (AGENT_TOOL_KEYS.includes(row.key as AgentToolKey)) {
+        registry.set(row.key as AgentToolKey, Boolean(row.default_enabled))
+      }
+    }
+    return registry
+  } catch (error) {
+    // Rolling-deploy compatibility: application code may arrive before the
+    // registry migration. Null means use the static implemented-handler
+    // defaults exactly as earlier deployments did.
+    console.warn('[ai tools] runtime registry unavailable; using handler defaults:', error)
+    return null
+  }
+}
+
 export async function loadAgentToolPermissions(
   db: WacrmSupabaseClient,
   accountId: string,
   agentId: string,
 ): Promise<AgentToolPermissions> {
-  const { data, error } = await db
-    .from('agent_tools')
-    .select('tool_key, enabled, instructions')
-    .eq('account_id', accountId)
-    .eq('agent_id', agentId)
+  const [toolRows, registry] = await Promise.all([
+    db
+      .from('agent_tools')
+      .select('tool_key, enabled, instructions')
+      .eq('account_id', accountId)
+      .eq('agent_id', agentId),
+    loadRuntimeRegistryDefaults(db),
+  ])
 
-  if (error) {
+  if (toolRows.error) {
     // Backwards-compatible fallback while a deployment is waiting for the
-    // agent_tools migration. This preserves the behaviour that existed before
-    // permissions became explicit.
-    console.warn('[ai tools] permission lookup failed; using legacy defaults:', error.message)
-    return { permissions: { ...DEFAULT_AGENT_TOOLS }, instructions: {} }
+    // agent_tools migration. Registry-level disables still win when available.
+    console.warn('[ai tools] permission lookup failed; using defaults:', toolRows.error.message)
+    const fallback = { ...DEFAULT_AGENT_TOOLS }
+    if (registry) {
+      for (const key of AGENT_TOOL_KEYS) fallback[key] = registry.get(key) ?? false
+    }
+    return { permissions: fallback, instructions: {} }
   }
 
   const permissions = { ...DEFAULT_AGENT_TOOLS }
+  if (registry) {
+    // A missing/disabled registry entry is not an executable capability, even
+    // if stale tenant configuration still has agent_tools.enabled=true.
+    for (const key of AGENT_TOOL_KEYS) permissions[key] = registry.get(key) ?? false
+  }
+
   const instructions: Partial<Record<AgentToolKey, string>> = {}
-  for (const row of data ?? []) {
-    if (AGENT_TOOL_KEYS.includes(row.tool_key as AgentToolKey)) {
-      const key = row.tool_key as AgentToolKey
+  for (const row of toolRows.data ?? []) {
+    if (!AGENT_TOOL_KEYS.includes(row.tool_key as AgentToolKey)) continue
+    const key = row.tool_key as AgentToolKey
+    if (!registry || registry.has(key)) {
       permissions[key] = Boolean(row.enabled)
       const rowInstructions = (row as { instructions?: string | null }).instructions
       if (rowInstructions && rowInstructions.trim()) instructions[key] = rowInstructions.trim()
     }
   }
+
+  if (permissions.search_catalog) {
+    await appendOfferingFilterGuidance(db, accountId, instructions)
+  }
+
   return { permissions, instructions }
 }

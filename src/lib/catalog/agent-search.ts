@@ -1,13 +1,14 @@
 import type { WacrmSupabaseClient } from '@/lib/supabase/types'
 import {
-  catalogAttributeConstraintSearchTerms,
-  loadCatalogAttributeDefinitions,
-  loadCatalogProductAttributeValues,
-  normalizeCatalogAttributeConstraints,
-  productMatchesCatalogAttributeConstraints,
-  type CatalogAttributeConstraint,
-  type CatalogAttributeScalar,
-} from './attributes'
+  loadOfferingAttributeDefinitions,
+  loadOfferingAttributeValues,
+  normalizeOfferingAttributeConstraints,
+  offeringAttributeConstraintSearchTerms,
+  offeringAttributeEvidence,
+  productMatchesOfferingAttributeConstraints,
+  type OfferingAttributeConstraint,
+  type OfferingAttributeScalar,
+} from '@/lib/offerings/attributes'
 import { searchCatalogues } from './search'
 import { loadCatalogTaxonomy, type CatalogTaxonomyGroups } from './taxonomy'
 import type { CatalogProduct } from './types'
@@ -20,7 +21,7 @@ export interface AgentCatalogSearchInput {
   color?: string | null
   size?: string | null
   /** Tenant-defined hard constraints. Unknown keys/values never silently pass. */
-  attributes?: Record<string, CatalogAttributeScalar>
+  attributes?: Record<string, OfferingAttributeScalar>
   limit: number
   mode: AgentCatalogSearchMode
   excludeProductKeys?: string[]
@@ -242,14 +243,14 @@ function addAliasTerms(
 export function buildAgentCatalogRetrievalQueries(
   input: AgentCatalogSearchInput,
   taxonomy: CatalogTaxonomyGroups,
-  attributeConstraints: readonly CatalogAttributeConstraint[] = [],
+  attributeConstraints: readonly OfferingAttributeConstraint[] = [],
 ): string[] {
   const candidates: string[] = [input.query]
   if (input.category) candidates.push(input.category)
   addAliasTerms(candidates, input.category, taxonomy.categoryGroups, 3)
   if (input.color) candidates.push(input.color)
   addAliasTerms(candidates, input.color, taxonomy.colorGroups, 4)
-  candidates.push(...catalogAttributeConstraintSearchTerms(attributeConstraints).slice(0, 4))
+  candidates.push(...offeringAttributeConstraintSearchTerms(attributeConstraints).slice(0, 4))
 
   const unique = new Map<string, string>()
   for (const candidate of candidates) {
@@ -264,29 +265,21 @@ function isInternalCatalogProduct(product: CatalogProduct): boolean {
   return product.sourceType === 'internal' || product.sourceName === INTERNAL_SOURCE_NAME
 }
 
-function matchedAttributeEvidence(
-  constraints: readonly CatalogAttributeConstraint[],
-): Record<string, string> | undefined {
-  if (constraints.length === 0) return undefined
-  return Object.fromEntries(constraints.map((constraint) => [constraint.key, constraint.canonicalValue]))
-}
-
 /**
  * Agent-facing catalogue retrieval.
  *
  * The legacy search layer is intentionally kept as a broad source adapter.
  * This layer fetches a wider candidate pool, applies explicit category/colour
- * and tenant-defined attribute constraints as AND conditions, removes products
- * already shown by the live conversation state, rejects strong name/category
- * conflicts using only the tenant taxonomy, then ranks and limits. A known size
- * mismatch is also excluded; products with no size data stay eligible but are
- * marked unknown so the agent can be honest. It never sends WhatsApp media.
+ * and tenant-defined Business Offering constraints as AND conditions, removes
+ * products already shown by the live conversation state, rejects strong
+ * name/category conflicts using only tenant taxonomy, then ranks and limits.
+ * A known size mismatch is also excluded; products with no size data stay
+ * eligible but are marked unknown so the agent can be honest.
  *
- * Generic structured attributes are currently authoritative on the canonical
- * internal catalogue only. External connector rows stay eligible for legacy
- * fields, but cannot satisfy a generic hard constraint until synchronised into
- * canonical product attribute values. This prevents inferred/unknown facts from
- * being presented as verified catalogue facts.
+ * Structured Business Offering attributes are authoritative on the canonical
+ * internal catalogue only. External connector rows cannot satisfy a generic
+ * hard constraint until synchronised into canonical offering facts. Unknown
+ * facts therefore never become invented product claims.
  */
 export async function searchCatalogForAgent(
   db: WacrmSupabaseClient,
@@ -304,13 +297,13 @@ export async function searchCatalogForAgent(
     : null
 
   const definitions = requestedAttributes
-    ? await loadCatalogAttributeDefinitions(db, accountId)
+    ? await loadOfferingAttributeDefinitions(db, accountId)
     : []
-  const normalizedAttributes = normalizeCatalogAttributeConstraints(definitions, requestedAttributes)
+  const normalizedAttributes = normalizeOfferingAttributeConstraints(definitions, requestedAttributes)
 
   // Hard constraints that are unknown to the tenant schema must not be ignored.
   if (normalizedAttributes.unknownKeys.length > 0) {
-    console.info('[agent catalog search] unknown attribute constraints:', {
+    console.info('[agent catalog search] unknown offering attribute constraints:', {
       accountId,
       keys: normalizedAttributes.unknownKeys,
     })
@@ -347,7 +340,7 @@ export async function searchCatalogForAgent(
     ? candidates.filter(isInternalCatalogProduct).map((product) => product.id)
     : []
   const attributeValues = structuredConstraints.length > 0
-    ? await loadCatalogProductAttributeValues(db, accountId, internalProductIds)
+    ? await loadOfferingAttributeValues(db, accountId, internalProductIds)
     : []
 
   const excluded = new Set(input.excludeProductKeys ?? [])
@@ -359,7 +352,7 @@ export async function searchCatalogForAgent(
     .filter((product) => {
       if (structuredConstraints.length === 0) return true
       if (!isInternalCatalogProduct(product)) return false
-      return productMatchesCatalogAttributeConstraints(product.id, attributeValues, structuredConstraints)
+      return productMatchesOfferingAttributeConstraints(product.id, undefined, attributeValues, structuredConstraints)
     })
     .map((product) => ({ product, sizeMatch: productSizeMatch(product, input.size) }))
     .filter(({ sizeMatch }) => sizeMatch !== 'mismatch')
@@ -368,7 +361,7 @@ export async function searchCatalogForAgent(
       productKey: catalogProductKey(product),
       score: relevanceScore(product, input, taxonomy),
       sizeMatch,
-      matchedAttributes: matchedAttributeEvidence(structuredConstraints),
+      matchedAttributes: offeringAttributeEvidence(structuredConstraints),
     }))
     .sort((a, b) => b.score - a.score || a.product.name.localeCompare(b.product.name, 'pt'))
     .slice(0, input.limit)
