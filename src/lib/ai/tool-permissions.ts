@@ -1,4 +1,5 @@
 import type { WacrmSupabaseClient } from '@/lib/supabase/types'
+import { loadOfferingAttributeDefinitions } from '@/lib/offerings/attributes'
 
 export const AGENT_TOOL_KEYS = [
   'search_catalog',
@@ -69,6 +70,55 @@ export interface AgentToolPermissions {
   instructions: Partial<Record<AgentToolKey, string>>
 }
 
+function appendInstruction(
+  instructions: Partial<Record<AgentToolKey, string>>,
+  key: AgentToolKey,
+  value: string,
+) {
+  const current = instructions[key]?.trim()
+  instructions[key] = current ? `${current}\n\n${value}` : value
+}
+
+async function appendOfferingFilterGuidance(
+  db: WacrmSupabaseClient,
+  accountId: string,
+  instructions: Partial<Record<AgentToolKey, string>>,
+) {
+  try {
+    const definitions = (await loadOfferingAttributeDefinitions(db, accountId))
+      .filter((definition) => definition.enabled && definition.isFilterable)
+    if (definitions.length === 0) return
+
+    const lines = definitions.slice(0, 40).map((definition) => {
+      const options = definition.valueType === 'enum'
+        ? definition.options
+            .filter((option) => option.enabled)
+            .slice(0, 25)
+            .map((option) => {
+              const aliases = option.aliases.length > 0 ? ` [aliases: ${option.aliases.join(', ')}]` : ''
+              return `${option.value}=${option.label}${aliases}`
+            })
+            .join('; ')
+        : ''
+      return `- ${definition.key}: ${definition.label} (${definition.valueType}${definition.unit ? `, ${definition.unit}` : ''})${options ? `; opções: ${options}` : ''}`
+    })
+
+    appendInstruction(
+      instructions,
+      'search_catalog',
+      [
+        'Filtros estruturados configurados por esta empresa:',
+        ...lines,
+        'Quando o cliente declarar claramente um destes factos, envie-o em attributes usando exactamente a chave acima. Estes são filtros obrigatórios: não invente valores, não crie chaves novas e não os use quando o cliente não os declarou ou o contexto não os tornou inequívocos.',
+      ].join('\n'),
+    )
+  } catch (error) {
+    // A deployment may briefly run before the Business Offering migration.
+    // Catalogue search keeps its legacy fields in that case.
+    console.warn('[ai tools] offering filter guidance unavailable:', error)
+  }
+}
+
 export async function loadAgentToolPermissions(
   db: WacrmSupabaseClient,
   accountId: string,
@@ -98,5 +148,10 @@ export async function loadAgentToolPermissions(
       if (rowInstructions && rowInstructions.trim()) instructions[key] = rowInstructions.trim()
     }
   }
+
+  if (permissions.search_catalog) {
+    await appendOfferingFilterGuidance(db, accountId, instructions)
+  }
+
   return { permissions, instructions }
 }
