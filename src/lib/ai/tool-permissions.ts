@@ -4,6 +4,7 @@ import { loadOfferingAttributeDefinitions } from '@/lib/offerings/attributes'
 export const AGENT_TOOL_KEYS = [
   'search_catalog',
   'send_product',
+  'compose_solution',
   'search_knowledge',
   'add_tag',
   'create_deal',
@@ -26,6 +27,7 @@ export type AgentToolKey = (typeof AGENT_TOOL_KEYS)[number]
 export const PREVIEW_SAFE_TOOL_KEYS: readonly AgentToolKey[] = [
   'search_catalog',
   'send_product',
+  'compose_solution',
   'search_knowledge',
   'get_style_opinion',
 ]
@@ -47,6 +49,8 @@ export function restrictToPreviewSafe(
 export const DEFAULT_AGENT_TOOLS: Record<AgentToolKey, boolean> = {
   search_catalog: true,
   send_product: true,
+  // Composition is opt-in until a tenant configures templates/relations.
+  compose_solution: false,
   search_knowledge: true,
   // CRM mutations require an explicit administrator opt-in.
   add_tag: false,

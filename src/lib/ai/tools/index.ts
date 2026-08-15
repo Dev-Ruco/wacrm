@@ -1,6 +1,10 @@
 import type { WacrmSupabaseClient } from '@/lib/supabase/types'
 import { buildCatalogueMediaProxyUrl } from '@/lib/catalog/media-proxy'
 import { catalogProductKey, searchCatalogForAgent } from '@/lib/catalog/agent-search'
+import {
+  composeCatalogSolution,
+  compositionResultToState,
+} from '@/lib/catalog/composition'
 import type { CatalogProduct } from '@/lib/catalog/types'
 import { parseOfferingAttributeToolInput } from '@/lib/offerings/tool-input'
 import { addContactTagIfAbsent } from '@/lib/contacts/tag-write'
@@ -8,6 +12,7 @@ import { engineSendMedia } from '@/lib/flows/meta-send'
 import {
   loadConversationCatalogState,
   rememberCatalogSearch,
+  rememberComposition,
   rememberProductsShown,
   rememberSelectedProduct,
 } from '../catalog-state'
@@ -135,7 +140,7 @@ const SEARCH_CATALOG_TOOL: AgentToolDefinition = {
 const SEND_PRODUCT_TOOL: AgentToolDefinition = {
   name: 'send_product',
   description:
-    'Queue one product photograph for WhatsApp after search_catalog returned it. search_catalog only retrieves candidates; YOU decide which results are worth showing and then call this tool for those exact product_ref values. ' +
+    'Queue one product photograph for WhatsApp after search_catalog or compose_solution returned it. Retrieval/composition never sends WhatsApp media by itself; YOU decide which exact product_ref photographs are worth showing. ' +
     'For a browsing turn, normally send at most three relevant products. If the customer asks for another photo of the same product, search it with mode=lookup first, then call send_product again; when image_index is omitted the server prefers a photograph of that product not yet shown in this conversation. ' +
     'Set selected=true only when the customer has explicitly chosen or requested this specific product, not when merely presenting alternatives.',
   parameters: {
@@ -144,7 +149,7 @@ const SEND_PRODUCT_TOOL: AgentToolDefinition = {
     properties: {
       product_ref: {
         type: 'string',
-        description: 'The exact temporary product_ref returned by search_catalog in the current agent run.',
+        description: 'The exact temporary product_ref returned by search_catalog or compose_solution in the current agent run.',
       },
       image_index: {
         type: 'integer',
@@ -158,6 +163,46 @@ const SEND_PRODUCT_TOOL: AgentToolDefinition = {
       },
     },
     required: ['product_ref'],
+  },
+}
+
+const COMPOSE_SOLUTION_TOOL: AgentToolDefinition = {
+  name: 'compose_solution',
+  description:
+    'Build or revise a configured multi-offering solution using the canonical catalogue, tenant composition slots and the product relation graph. This tool is domain-neutral: a solution may be an outfit, bundle, compatible equipment set, package or another tenant-defined composition. It NEVER sends media. ' +
+    'Use anchor_product_ref only for a catalogue result obtained in the CURRENT agent run. For a later turn, use the persisted active composition and keep_slots/replace_slots. If template_key is omitted, the server uses the only active template or returns the configured choices. ' +
+    'When the customer says to keep one part and change another, put preserved slot keys in keep_slots and changed slot keys in replace_slots. Never invent slot keys.',
+  parameters: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      template_key: {
+        type: 'string',
+        description: 'Optional exact configured composition template key. Omit when unknown; the server will resolve a single template or return the available choices.',
+      },
+      anchor_product_ref: {
+        type: 'string',
+        description: 'Optional temporary product_ref from search_catalog in this current agent run to use as an anchor for relation-graph selection.',
+      },
+      keep_slots: {
+        type: 'array',
+        maxItems: 12,
+        items: { type: 'string' },
+        description: 'Configured slot keys whose current selections must be kept when revising an active composition.',
+      },
+      replace_slots: {
+        type: 'array',
+        maxItems: 12,
+        items: { type: 'string' },
+        description: 'Configured slot keys to replace while other explicitly kept slots stay unchanged.',
+      },
+      max_per_slot: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 5,
+        description: 'Maximum number of selections per slot. Defaults to 1.',
+      },
+    },
   },
 }
 
@@ -275,6 +320,7 @@ const HANDOFF_HUMAN_TOOL: AgentToolDefinition = {
 const TOOL_DEFINITIONS: Record<AgentToolKey, AgentToolDefinition> = {
   search_catalog: SEARCH_CATALOG_TOOL,
   send_product: SEND_PRODUCT_TOOL,
+  compose_solution: COMPOSE_SOLUTION_TOOL,
   search_knowledge: SEARCH_KNOWLEDGE_TOOL,
   add_tag: ADD_TAG_TOOL,
   create_deal: CREATE_DEAL_TOOL,
@@ -332,6 +378,18 @@ function parseCatalogSearchInput(input: Record<string, unknown>) {
     mode: input.mode === 'lookup' ? ('lookup' as const) : ('browse' as const),
     limit: Math.min(10, Math.max(1, requestedLimit)),
   }
+}
+
+function parseStringList(input: Record<string, unknown>, key: string, maxItems: number): string[] {
+  const raw = input[key]
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw)) throw new Error(`${key} must be an array.`)
+  const values = raw
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean)
+  if (values.length !== raw.length) throw new Error(`${key} must contain only non-empty strings.`)
+  return Array.from(new Set(values)).slice(0, maxItems)
 }
 
 function requiredText(
@@ -623,6 +681,117 @@ export function createAutoReplyTools(args: {
       })
     }
 
+    if (call.name === COMPOSE_SOLUTION_TOOL.name) {
+      const requestedTemplateKey = optionalText(input, 'template_key', 80)
+      let templateKey = requestedTemplateKey
+      if (!templateKey) {
+        const { data: templates, error: templateError } = await db
+          .from('composition_templates')
+          .select('key, label, description')
+          .eq('account_id', accountId)
+          .eq('enabled', true)
+          .order('sort_order')
+          .order('key')
+          .limit(20)
+        if (templateError) throw new Error('Composition templates could not be loaded.')
+        if (!templates?.length) {
+          return JSON.stringify({
+            ok: true,
+            configured: false,
+            instruction: 'This business has no active composition template. Do not invent a composition; continue with ordinary catalogue search or explain that this capability is not configured.',
+          })
+        }
+        if (templates.length > 1) {
+          return JSON.stringify({
+            ok: true,
+            configured: true,
+            needs_template: true,
+            templates,
+            instruction: 'Choose the genuinely relevant configured template key from this list, then call compose_solution again. Do not invent a template or slot.',
+          })
+        }
+        templateKey = templates[0].key
+      }
+
+      const anchorRef = optionalText(input, 'anchor_product_ref', 120)
+      const anchorProduct = anchorRef ? availableProducts.get(anchorRef) : null
+      if (anchorRef && !anchorProduct) {
+        throw new Error('Unknown or expired anchor_product_ref. Call search_catalog in this turn first, or revise the persisted active composition without an anchor ref.')
+      }
+      if (anchorProduct && anchorProduct.sourceType !== 'internal') {
+        throw new Error('Composition anchors must be canonical internal catalogue offerings. Re-run search after the source is synchronised into the canonical catalogue.')
+      }
+
+      const keepSlots = parseStringList(input, 'keep_slots', 12)
+      const replaceSlots = parseStringList(input, 'replace_slots', 12)
+      const requestedMax =
+        typeof input.max_per_slot === 'number' && Number.isFinite(input.max_per_slot)
+          ? Math.floor(input.max_per_slot)
+          : 1
+      const state = await loadConversationCatalogState({ db, accountId, conversationId })
+      const result = await composeCatalogSolution(db, accountId, {
+        templateKey,
+        anchorProductId: anchorProduct?.id ?? null,
+        existingState: state.compositionState,
+        keepSlots,
+        replaceSlots,
+        maxPerSlot: Math.min(5, Math.max(1, requestedMax)),
+      })
+      if (!result) {
+        return JSON.stringify({
+          ok: true,
+          configured: false,
+          template_key: templateKey,
+          instruction: 'The requested composition template is not active for this business. Do not invent it; use an available configured template or ordinary catalogue search.',
+        })
+      }
+
+      const referencedSlots = result.slots.map(({ slot, selections, complete }) => ({
+        key: slot.key,
+        label: slot.label,
+        required: slot.required,
+        complete,
+        products: selections.map((selection) => {
+          productRefSequence += 1
+          const productRef = `composition_result_${productRefSequence}`
+          availableProducts.set(productRef, selection.product)
+          const images = resolveProductImages(selection.product)
+          return {
+            product_ref: productRef,
+            product_key: catalogProductKey(selection.product),
+            name: selection.product.name,
+            category: selection.product.category,
+            price: selection.product.price,
+            currency: selection.product.currency,
+            stock_quantity: selection.product.stockQuantity,
+            media_count: images.length,
+            reason: selection.reason,
+            relation: selection.relation,
+          }
+        }),
+      }))
+      catalogueVerified = referencedSlots.some((slot) => slot.products.length > 0)
+
+      await rememberComposition({
+        db,
+        accountId,
+        conversationId,
+        templateId: result.template.id,
+        composition: compositionResultToState(result),
+      })
+
+      return JSON.stringify({
+        ok: true,
+        configured: true,
+        template: result.template,
+        complete: result.complete,
+        slots: referencedSlots,
+        instruction: result.complete
+          ? 'This is a server-built composition over active canonical offerings. Relation evidence identifies graph-backed selections; eligible_fallback means the item satisfies the configured slot type but no graph relation was asserted. No media was sent. Call send_product only for photographs that help answer the customer, normally at most three.'
+          : 'The composition is incomplete because one or more required configured slots have no eligible active offering. Do not invent missing items or silently substitute another slot. Explain the limitation or ask whether the customer wants to relax the request.',
+      })
+    }
+
     if (call.name === SEND_PRODUCT_TOOL.name) {
       const productRef =
         typeof input.product_ref === 'string' ? input.product_ref.trim() : ''
@@ -637,7 +806,7 @@ export function createAutoReplyTools(args: {
       const product = availableProducts.get(productRef)
       if (!product) {
         throw new Error(
-          'Unknown or expired product_ref. Call search_catalog in this turn before send_product.',
+          'Unknown or expired product_ref. Call search_catalog or compose_solution in this turn before send_product.',
         )
       }
       const images = resolveProductImages(product)
@@ -1003,8 +1172,8 @@ export function createAutoReplyTools(args: {
       let failed = 0
 
       // Only send products the model explicitly selected with send_product.
-      // Search is retrieval-only; this queue is therefore the single media
-      // presentation path for the agent.
+      // Search/composition is retrieval-only; this queue is therefore the
+      // single media presentation path for the agent.
       for (const item of pendingProductSends.splice(0)) {
         console.info('[ai send_product] sending product image:', {
           productRef: item.productRef,
