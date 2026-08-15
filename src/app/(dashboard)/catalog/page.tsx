@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ExternalIntegrationsTab, type Source } from '@/components/catalog/external-integrations-tab'
+import { OfferingSchemaManager } from '@/components/catalog/offering-schema-manager'
 import { ProductsTab } from '@/components/catalog/products-tab'
 import { TaxonomyManager } from '@/components/catalog/taxonomy-manager'
 import type { Product } from '@/components/catalog/product-card'
@@ -68,7 +69,7 @@ export default function CatalogPage() {
             <PackageSearch className="h-6 w-6 text-primary" />
             <h1 className="text-2xl font-bold">Catálogo</h1>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">Produtos, categorias e cores usados pelo agente no WhatsApp.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Ofertas, estrutura comercial e fontes de dados usadas pelo agente no WhatsApp.</p>
         </div>
         <Button variant="outline" onClick={() => void loadData()} disabled={loading}>
           {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
@@ -137,6 +138,7 @@ export default function CatalogPage() {
       <Tabs defaultValue="products">
         <TabsList>
           <TabsTrigger value="products">Produtos</TabsTrigger>
+          <TabsTrigger value="offerings">Estrutura da oferta</TabsTrigger>
           <TabsTrigger value="taxonomy">Categorias</TabsTrigger>
           <TabsTrigger value="external">
             Integrações externas{externalSourceCount ? ` (${externalSourceCount})` : ''}
@@ -144,6 +146,9 @@ export default function CatalogPage() {
         </TabsList>
         <TabsContent value="products" className="mt-4">
           <ProductsTab products={products} setProducts={setProducts} />
+        </TabsContent>
+        <TabsContent value="offerings" className="mt-4">
+          <OfferingSchemaManager products={products} />
         </TabsContent>
         <TabsContent value="taxonomy" className="mt-4">
           <TaxonomyManager />
