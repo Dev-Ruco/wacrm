@@ -70,6 +70,11 @@ export interface AgentToolPermissions {
   instructions: Partial<Record<AgentToolKey, string>>
 }
 
+interface RegisteredToolRow {
+  key: string
+  default_enabled: boolean
+}
+
 function appendInstruction(
   instructions: Partial<Record<AgentToolKey, string>>,
   key: AgentToolKey,
@@ -119,30 +124,69 @@ async function appendOfferingFilterGuidance(
   }
 }
 
+async function loadRuntimeRegistryDefaults(
+  db: WacrmSupabaseClient,
+): Promise<Map<AgentToolKey, boolean> | null> {
+  try {
+    const { data, error } = await db
+      .from('tool_definitions')
+      .select('key, default_enabled')
+      .eq('enabled', true)
+    if (error) throw error
+
+    const registry = new Map<AgentToolKey, boolean>()
+    for (const row of (data ?? []) as RegisteredToolRow[]) {
+      if (AGENT_TOOL_KEYS.includes(row.key as AgentToolKey)) {
+        registry.set(row.key as AgentToolKey, Boolean(row.default_enabled))
+      }
+    }
+    return registry
+  } catch (error) {
+    // Rolling-deploy compatibility: application code may arrive before the
+    // registry migration. Null means use the static implemented-handler
+    // defaults exactly as earlier deployments did.
+    console.warn('[ai tools] runtime registry unavailable; using handler defaults:', error)
+    return null
+  }
+}
+
 export async function loadAgentToolPermissions(
   db: WacrmSupabaseClient,
   accountId: string,
   agentId: string,
 ): Promise<AgentToolPermissions> {
-  const { data, error } = await db
-    .from('agent_tools')
-    .select('tool_key, enabled, instructions')
-    .eq('account_id', accountId)
-    .eq('agent_id', agentId)
+  const [toolRows, registry] = await Promise.all([
+    db
+      .from('agent_tools')
+      .select('tool_key, enabled, instructions')
+      .eq('account_id', accountId)
+      .eq('agent_id', agentId),
+    loadRuntimeRegistryDefaults(db),
+  ])
 
-  if (error) {
+  if (toolRows.error) {
     // Backwards-compatible fallback while a deployment is waiting for the
-    // agent_tools migration. This preserves the behaviour that existed before
-    // permissions became explicit.
-    console.warn('[ai tools] permission lookup failed; using legacy defaults:', error.message)
-    return { permissions: { ...DEFAULT_AGENT_TOOLS }, instructions: {} }
+    // agent_tools migration. Registry-level disables still win when available.
+    console.warn('[ai tools] permission lookup failed; using defaults:', toolRows.error.message)
+    const fallback = { ...DEFAULT_AGENT_TOOLS }
+    if (registry) {
+      for (const key of AGENT_TOOL_KEYS) fallback[key] = registry.get(key) ?? false
+    }
+    return { permissions: fallback, instructions: {} }
   }
 
   const permissions = { ...DEFAULT_AGENT_TOOLS }
+  if (registry) {
+    // A missing/disabled registry entry is not an executable capability, even
+    // if stale tenant configuration still has agent_tools.enabled=true.
+    for (const key of AGENT_TOOL_KEYS) permissions[key] = registry.get(key) ?? false
+  }
+
   const instructions: Partial<Record<AgentToolKey, string>> = {}
-  for (const row of data ?? []) {
-    if (AGENT_TOOL_KEYS.includes(row.tool_key as AgentToolKey)) {
-      const key = row.tool_key as AgentToolKey
+  for (const row of toolRows.data ?? []) {
+    if (!AGENT_TOOL_KEYS.includes(row.tool_key as AgentToolKey)) continue
+    const key = row.tool_key as AgentToolKey
+    if (!registry || registry.has(key)) {
       permissions[key] = Boolean(row.enabled)
       const rowInstructions = (row as { instructions?: string | null }).instructions
       if (rowInstructions && rowInstructions.trim()) instructions[key] = rowInstructions.trim()
