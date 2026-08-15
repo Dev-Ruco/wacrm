@@ -26,12 +26,14 @@ create table if not exists wacrm.catalog_product_variants (
   constraint catalog_product_variants_source_fk
     foreign key (source_id, account_id)
     references wacrm.catalog_sources(id, account_id)
-    on delete set null
+    on delete set null,
+  -- A full UNIQUE constraint (rather than a partial unique index) lets
+  -- PostgREST/Supabase infer ON CONFLICT(source_id, external_id) during sync.
+  -- PostgreSQL still permits multiple rows when either nullable column is NULL.
+  constraint catalog_product_variants_source_external_unique
+    unique (source_id, external_id)
 );
 
-create unique index if not exists catalog_product_variants_source_external_unique_idx
-  on wacrm.catalog_product_variants (source_id, external_id)
-  where source_id is not null and external_id is not null;
 create index if not exists catalog_product_variants_product_idx
   on wacrm.catalog_product_variants (account_id, product_id, is_active);
 create index if not exists catalog_product_variants_source_idx
