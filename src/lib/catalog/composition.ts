@@ -29,7 +29,7 @@ export interface CompositionEvidence {
 
 export interface CompositionSelection {
   product: CatalogProduct
-  reason: 'kept' | 'relation' | 'eligible_fallback'
+  reason: 'kept' | 'anchor' | 'relation' | 'eligible_fallback'
   relation: CompositionEvidence | null
 }
 
@@ -346,6 +346,15 @@ export async function composeCatalogSolution(
     if (!validSlots.has(key)) throw new Error(`Unknown composition slot: ${key}`)
   }
 
+  // A partial revision should be safe even if the model only names the slot
+  // to replace. Preserve every other populated slot automatically; explicit
+  // keep_slots remains useful when the user wants a smaller retained subset.
+  if (replace.size > 0) {
+    for (const [slotKey, items] of Object.entries(existing)) {
+      if (validSlots.has(slotKey) && items.length > 0 && !replace.has(slotKey)) keep.add(slotKey)
+    }
+  }
+
   const existingIds = unique(Object.values(existing).flat().map((item) => item.productId))
   const keptIds = unique(template.slots.flatMap((slot) =>
     keep.has(slot.key) && !replace.has(slot.key)
@@ -355,7 +364,8 @@ export async function composeCatalogSolution(
   const initialIds = unique([...existingIds, ...keptIds, ...(input.anchorProductId ? [input.anchorProductId] : [])])
   const initialProducts = await loadProducts(db, accountId, initialIds)
   const products = new Map(initialProducts.map((product) => [product.id, product]))
-  if (input.anchorProductId && !products.has(input.anchorProductId)) {
+  const anchorProduct = input.anchorProductId ? products.get(input.anchorProductId) ?? null : null
+  if (input.anchorProductId && !anchorProduct) {
     throw new Error('The anchor offering is not an active canonical catalogue item.')
   }
 
@@ -367,11 +377,13 @@ export async function composeCatalogSolution(
 
   const used = new Set<string>()
   const dynamicAnchors = new Set(initialAnchors)
-  const maxPerSlot = Math.min(5, Math.max(1, Math.floor(input.maxPerSlot ?? 1)))
+  const requestedMaxPerSlot = Math.min(5, Math.max(1, Math.floor(input.maxPerSlot ?? 1)))
   const results: CompositionResult['slots'] = []
 
   for (const slot of template.slots) {
-    const target = Math.min(slot.maxItems, maxPerSlot)
+    // A configured minimum is a business constraint, so a caller's display
+    // preference cannot force a required slot below min_items.
+    const target = Math.min(slot.maxItems, Math.max(slot.minItems, requestedMaxPerSlot))
     const selections: CompositionSelection[] = []
 
     if (keep.has(slot.key) && !replace.has(slot.key)) {
@@ -383,6 +395,20 @@ export async function composeCatalogSolution(
         dynamicAnchors.add(product.id)
         if (selections.length >= target) break
       }
+    }
+
+    // The anchor is not merely ranking context: when it fits a configured
+    // slot it must be part of the resulting solution. Otherwise an outfit,
+    // kit or bundle could silently replace the very item the customer chose.
+    if (
+      selections.length < target &&
+      anchorProduct &&
+      !used.has(anchorProduct.id) &&
+      eligible(anchorProduct, slot)
+    ) {
+      selections.push({ product: anchorProduct, reason: 'anchor', relation: null })
+      used.add(anchorProduct.id)
+      dynamicAnchors.add(anchorProduct.id)
     }
 
     if (selections.length < target && dynamicAnchors.size) {
