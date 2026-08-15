@@ -195,26 +195,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return NextResponse.json({ error: `${missingRequired.label} é obrigatório.` }, { status: 400 })
     }
 
-    const { error: productError } = await supabase
-      .from('catalog_products')
-      .update({ offering_type_id: offeringTypeId, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .eq('account_id', accountId)
-    if (productError) throw productError
-
-    const { error: deleteError } = await supabase
-      .from('offering_attribute_values')
-      .delete()
-      .eq('account_id', accountId)
-      .eq('product_id', id)
-    if (deleteError) throw deleteError
-
-    if (rows.length > 0) {
-      const { error: insertError } = await supabase
-        .from('offering_attribute_values')
-        .insert(rows)
-      if (insertError) throw insertError
-    }
+    const { error: saveError } = await supabase.rpc('replace_product_offering_attributes', {
+      p_account_id: accountId,
+      p_product_id: id,
+      p_offering_type_id: offeringTypeId,
+      p_values: rows,
+    })
+    if (saveError) throw saveError
 
     return NextResponse.json({
       ok: true,
