@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CatalogHealthPanel } from '@/components/catalog/catalog-health-panel'
-import { CompositionManager } from '@/components/catalog/composition-manager'
+import { CompositionManagerPanel } from '@/components/catalog/composition-manager-panel'
 import { ExternalIntegrationsTab, type Source } from '@/components/catalog/external-integrations-tab'
 import { OfferingSchemaManager } from '@/components/catalog/offering-schema-manager'
 import { ProductsTab } from '@/components/catalog/products-tab'
@@ -155,7 +155,7 @@ export default function CatalogPage() {
           <OfferingSchemaManager products={products} />
         </TabsContent>
         <TabsContent value="compositions" className="mt-4">
-          <CompositionManager products={products} />
+          <CompositionManagerPanel products={products} />
         </TabsContent>
         <TabsContent value="taxonomy" className="mt-4">
           <TaxonomyManager />
