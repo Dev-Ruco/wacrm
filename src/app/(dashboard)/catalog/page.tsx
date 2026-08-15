@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { CatalogHealthPanel } from '@/components/catalog/catalog-health-panel'
 import { ExternalIntegrationsTab, type Source } from '@/components/catalog/external-integrations-tab'
 import { OfferingSchemaManager } from '@/components/catalog/offering-schema-manager'
 import { ProductsTab } from '@/components/catalog/products-tab'
@@ -140,6 +141,7 @@ export default function CatalogPage() {
           <TabsTrigger value="products">Produtos</TabsTrigger>
           <TabsTrigger value="offerings">Estrutura da oferta</TabsTrigger>
           <TabsTrigger value="taxonomy">Categorias</TabsTrigger>
+          <TabsTrigger value="health">Saúde</TabsTrigger>
           <TabsTrigger value="external">
             Integrações externas{externalSourceCount ? ` (${externalSourceCount})` : ''}
           </TabsTrigger>
@@ -152,6 +154,9 @@ export default function CatalogPage() {
         </TabsContent>
         <TabsContent value="taxonomy" className="mt-4">
           <TaxonomyManager />
+        </TabsContent>
+        <TabsContent value="health" className="mt-4">
+          <CatalogHealthPanel />
         </TabsContent>
         <TabsContent value="external" className="mt-4">
           <ExternalIntegrationsTab sources={sources} setSources={setSources} />
