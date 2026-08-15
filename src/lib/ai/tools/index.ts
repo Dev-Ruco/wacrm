@@ -2,6 +2,7 @@ import type { WacrmSupabaseClient } from '@/lib/supabase/types'
 import { buildCatalogueMediaProxyUrl } from '@/lib/catalog/media-proxy'
 import { catalogProductKey, searchCatalogForAgent } from '@/lib/catalog/agent-search'
 import type { CatalogProduct } from '@/lib/catalog/types'
+import { parseOfferingAttributeToolInput } from '@/lib/offerings/tool-input'
 import { addContactTagIfAbsent } from '@/lib/contacts/tag-write'
 import { engineSendMedia } from '@/lib/flows/meta-send'
 import {
@@ -72,21 +73,21 @@ const SEARCH_KNOWLEDGE_TOOL: AgentToolDefinition = {
 const SEARCH_CATALOG_TOOL: AgentToolDefinition = {
   name: 'search_catalog',
   description:
-    'Search active product catalogues and return ranked, real product candidates. This tool NEVER sends WhatsApp media by itself. ' +
-    'Use structured category/colour/size fields whenever the customer stated them; explicit category and colour constraints are enforced together, not treated as loose alternatives. ' +
-    'For browsing, mode=browse excludes products already shown in this conversation. Use mode=lookup when the customer refers to a specific product already shown, asks its price/stock, or asks for another photo of that same product. ' +
-    'After searching, choose only the genuinely relevant products and call send_product for each product you actually want the customer to see.',
+    'Search active business offerings in the configured catalogues and return ranked, real candidates. This tool NEVER sends WhatsApp media by itself. ' +
+    'Use structured category/colour/size fields whenever the customer stated them, and use attributes only for tenant-defined filters listed in the account-specific guidance. Explicit hard constraints are enforced together, not treated as loose alternatives. ' +
+    'For browsing, mode=browse excludes offerings already shown in this conversation. Use mode=lookup when the customer refers to a specific offering already shown, asks its price/stock, or asks for another photo of that same offering. ' +
+    'After searching, choose only the genuinely relevant results and call send_product for each product photograph you actually want the customer to see.',
   parameters: {
     type: 'object',
     additionalProperties: false,
     properties: {
       query: {
         type: 'string',
-        description: 'Concise free-text product query, preferably a product name/type rather than the whole customer sentence.',
+        description: 'Concise free-text offering query, preferably a product/service name or type rather than the whole customer sentence.',
       },
       category: {
         type: 'string',
-        description: 'Optional explicit product category, e.g. legging, top, camisola, macacão. Use when the customer stated or clearly requested a category.',
+        description: 'Optional explicit category configured by this business. Use only when the customer stated or clearly requested a category.',
       },
       color: {
         type: 'string',
@@ -96,10 +97,29 @@ const SEARCH_CATALOG_TOOL: AgentToolDefinition = {
         type: 'string',
         description: 'Optional requested size. Size is verified against variants when the catalogue provides size data; unknown size data must never be presented as confirmed.',
       },
+      attributes: {
+        type: 'array',
+        maxItems: 12,
+        description: 'Optional tenant-defined hard constraints. Use only exact attribute keys listed in the account-specific guidance and only values explicitly stated or made unambiguous by the customer context.',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            key: {
+              type: 'string',
+              description: 'Exact configured Business Offering attribute key.',
+            },
+            value: {
+              description: 'Scalar attribute value: text, number or boolean. For configured option fields, use one configured value or alias.',
+            },
+          },
+          required: ['key', 'value'],
+        },
+      },
       mode: {
         type: 'string',
         enum: ['browse', 'lookup'],
-        description: 'browse for new alternatives; lookup for a specific product already discussed. Defaults to browse.',
+        description: 'browse for new alternatives; lookup for a specific offering already discussed. Defaults to browse.',
       },
       limit: {
         type: 'integer',
@@ -308,6 +328,7 @@ function parseCatalogSearchInput(input: Record<string, unknown>) {
     category: textOrNull('category', 120),
     color: textOrNull('color', 80),
     size: textOrNull('size', 40),
+    attributes: parseOfferingAttributeToolInput(input.attributes),
     mode: input.mode === 'lookup' ? ('lookup' as const) : ('browse' as const),
     limit: Math.min(10, Math.max(1, requestedLimit)),
   }
@@ -518,7 +539,7 @@ export function createAutoReplyTools(args: {
         ...search,
         excludeProductKeys: excluded,
       })
-      const referencedProducts = ranked.map(({ product, productKey, sizeMatch }) => {
+      const referencedProducts = ranked.map(({ product, productKey, sizeMatch, matchedAttributes }) => {
         productRefSequence += 1
         const productRef = `catalog_result_${productRefSequence}`
         availableProducts.set(productRef, product)
@@ -542,6 +563,7 @@ export function createAutoReplyTools(args: {
             new Set((product.variants ?? []).map((variant) => variant.color).filter(Boolean)),
           ),
           requested_size_match: sizeMatch,
+          matched_attributes: matchedAttributes ?? null,
         }
       })
       catalogueVerified = referencedProducts.length > 0
@@ -555,6 +577,7 @@ export function createAutoReplyTools(args: {
           category: search.category,
           color: search.color,
           size: search.size,
+          attributes: search.attributes ?? null,
           mode: search.mode,
         },
       })
@@ -565,6 +588,7 @@ export function createAutoReplyTools(args: {
         category: search.category,
         color: search.color,
         size: search.size,
+        attributes: search.attributes ?? null,
         mode: search.mode,
         excludedCount: excluded.length,
         returned: referencedProducts.map((product) => ({
@@ -572,6 +596,7 @@ export function createAutoReplyTools(args: {
           productKey: product.product_key,
           name: product.name,
           category: product.category,
+          matchedAttributes: product.matched_attributes,
           mediaCount: product.media_count,
         })),
       })
@@ -583,6 +608,7 @@ export function createAutoReplyTools(args: {
           category: search.category,
           color: search.color,
           size: search.size,
+          attributes: search.attributes ?? null,
           mode: search.mode,
         },
         products: referencedProducts,
@@ -590,10 +616,10 @@ export function createAutoReplyTools(args: {
         excluded_previously_shown: search.mode === 'browse' ? excluded.length : 0,
         instruction:
           referencedProducts.length > 0
-            ? 'Retrieval only: no product has been sent to the customer. Select only the genuinely relevant results and call send_product for each photograph you want to show (normally at most three). Do not send an item merely because it was returned. For a previously shown specific product use mode=lookup.'
+            ? 'Retrieval only: no product has been sent to the customer. Structured matched_attributes are server-validated eligibility evidence, not model guesses. Select only the genuinely relevant results and call send_product for each photograph you want to show (normally at most three). Do not send an item merely because it was returned. For a previously shown specific product use mode=lookup.'
             : search.mode === 'browse' && excluded.length > 0
-              ? 'No unseen product matched these constraints. Do not resend earlier products automatically. Say honestly that there are no new matching options, or ask whether the customer wants to change a constraint.'
-              : 'No matching product was found with these constraints. Do not substitute a different category silently; explain that no exact match was found and ask whether alternatives are acceptable.',
+              ? 'No unseen offering matched these constraints. Do not resend earlier results automatically. Say honestly that there are no new matching options, or ask whether the customer wants to change a constraint.'
+              : 'No offering was found with these hard constraints. Do not silently remove or substitute a constraint; explain that no exact match was found and ask whether alternatives are acceptable.',
       })
     }
 
