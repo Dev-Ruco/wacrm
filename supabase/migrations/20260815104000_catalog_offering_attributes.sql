@@ -92,7 +92,7 @@ create table if not exists wacrm.catalog_product_attribute_values (
   constraint catalog_product_attribute_values_option_fk
     foreign key (option_id, account_id)
     references wacrm.catalog_attribute_options(id, account_id)
-    on delete set null,
+    on delete restrict,
   constraint catalog_product_attribute_values_unique
     unique (product_id, definition_id, value_key)
 );
@@ -107,9 +107,6 @@ create index if not exists catalog_product_attribute_values_product_idx
   on wacrm.catalog_product_attribute_values (account_id, product_id, definition_id);
 create index if not exists catalog_product_attribute_values_lookup_idx
   on wacrm.catalog_product_attribute_values (account_id, definition_id, value_key);
-
-for_each_table: begin
-end;
 
 -- Keep updated_at semantics aligned with the existing catalogue/taxonomy tables.
 drop trigger if exists set_updated_at on wacrm.catalog_attribute_definitions;
