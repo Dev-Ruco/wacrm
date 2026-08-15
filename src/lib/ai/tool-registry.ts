@@ -37,9 +37,14 @@ export function isImplementedAgentToolKey(value: string): value is AgentToolKey 
   return AGENT_TOOL_KEYS.includes(value as AgentToolKey)
 }
 
+/**
+ * null means the registry table could not be read (typically a rolling deploy
+ * before the migration); [] means the registry was read successfully and has
+ * no enabled implemented capabilities. Callers must not confuse those states.
+ */
 export async function loadToolDefinitions(
   db: WacrmSupabaseClient,
-): Promise<ToolDefinition[]> {
+): Promise<ToolDefinition[] | null> {
   const { data, error } = await db
     .from('tool_definitions')
     .select('key, label, description, action_class, reversible, external_impact, default_enabled, input_schema, sort_order')
@@ -48,11 +53,8 @@ export async function loadToolDefinitions(
     .order('label', { ascending: true })
 
   if (error) {
-    // Deployments may briefly run application code before the registry migration
-    // is applied. Returning an empty list lets callers fall back to the static
-    // implemented-handler defaults instead of breaking all AI configuration.
     console.warn('[ai tools] registry lookup failed:', error.message)
-    return []
+    return null
   }
 
   return ((data ?? []) as ToolDefinitionRow[])
@@ -76,5 +78,5 @@ export async function loadToolDefinition(
 ): Promise<ToolDefinition | null> {
   if (!isImplementedAgentToolKey(key)) return null
   const definitions = await loadToolDefinitions(db)
-  return definitions.find((definition) => definition.key === key) ?? null
+  return definitions?.find((definition) => definition.key === key) ?? null
 }
