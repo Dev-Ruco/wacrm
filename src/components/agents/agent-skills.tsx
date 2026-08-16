@@ -16,6 +16,7 @@ import { AGENT_TOOL_KEYS, type AgentToolKey } from '@/lib/ai/tool-permissions'
 
 const TOOL_LABELS: Record<AgentToolKey, string> = {
   search_catalog: 'Consultar catálogo',
+  compose_solution: 'Compor solução',
   send_product: 'Enviar produtos',
   search_knowledge: 'Consultar conhecimento',
   add_tag: 'Adicionar tag',
