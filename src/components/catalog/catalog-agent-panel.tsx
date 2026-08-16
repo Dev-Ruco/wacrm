@@ -7,10 +7,12 @@ import {
   Database,
   ImageOff,
   Loader2,
+  MessageCircleWarning,
   RefreshCw,
   SearchCheck,
   Sparkles,
   Tags,
+  UserRoundCheck,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -69,9 +71,20 @@ function severityLabel(severity: Severity) {
   return 'Informação';
 }
 
-function originLabel(origin: StewardSuggestion['created_by']) {
-  if (origin === 'ai') return 'IA';
-  if (origin === 'import') return 'Importação';
+function evidenceNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : 0;
+}
+
+function isLiveLearningSuggestion(suggestion: StewardSuggestion): boolean {
+  return suggestion.evidence?.source === 'live_conversation';
+}
+
+function originLabel(suggestion: StewardSuggestion) {
+  if (isLiveLearningSuggestion(suggestion)) return 'Aprendido do atendimento';
+  if (suggestion.created_by === 'ai') return 'IA';
+  if (suggestion.created_by === 'import') return 'Importação';
   return 'Auditoria automática';
 }
 
@@ -119,6 +132,21 @@ export function CatalogAgentPanel({ onOpenOffers }: { onOpenOffers: () => void }
       info: issues.filter((issue) => issue.severity === 'info').length,
     };
   }, [health]);
+
+  const liveLearning = useMemo(() => {
+    const live = suggestions.filter(isLiveLearningSuggestion);
+    return {
+      gaps: live.length,
+      occurrences: live.reduce(
+        (sum, suggestion) => sum + Math.max(1, evidenceNumber(suggestion.evidence.occurrences)),
+        0,
+      ),
+      handoffs: live.reduce(
+        (sum, suggestion) => sum + evidenceNumber(suggestion.evidence.handoff_count),
+        0,
+      ),
+    };
+  }, [suggestions]);
 
   async function runScan() {
     if (!canEdit || scanning) return;
@@ -220,6 +248,26 @@ export function CatalogAgentPanel({ onOpenOffers }: { onOpenOffers: () => void }
         </div>
       </section>
 
+      <section className="border-border overflow-hidden rounded-xl border bg-card">
+        <div className="border-border/80 flex flex-col gap-2 border-b px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <MessageCircleWarning className="text-primary size-4" />
+              <h2 className="text-card-title">Aprendizado com o atendimento real</h2>
+            </div>
+            <p className="text-muted-foreground mt-1 text-xs">
+              Quando o agente tenta consultar ofertas e não consegue verificar uma solução, a lacuna é registada para revisão — sem alterar factos automaticamente.
+            </p>
+          </div>
+          <span className="text-muted-foreground text-xs">Actualiza durante conversas automáticas</span>
+        </div>
+        <div className="grid grid-cols-3 divide-x divide-border">
+          <LearningMetric label="Lacunas abertas" value={liveLearning.gaps} icon={MessageCircleWarning} />
+          <LearningMetric label="Ocorrências reais" value={liveLearning.occurrences} icon={SearchCheck} />
+          <LearningMetric label="Handoffs associados" value={liveLearning.handoffs} icon={UserRoundCheck} />
+        </div>
+      </section>
+
       <section className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
         <div className="border-border rounded-xl border bg-card">
           <div className="border-border/80 border-b px-4 py-3.5">
@@ -288,6 +336,9 @@ export function CatalogAgentPanel({ onOpenOffers }: { onOpenOffers: () => void }
             <div className="max-h-[480px] divide-y divide-border overflow-y-auto">
               {suggestions.map((suggestion) => {
                 const busy = reviewingId === suggestion.id;
+                const live = isLiveLearningSuggestion(suggestion);
+                const occurrences = Math.max(1, evidenceNumber(suggestion.evidence.occurrences));
+                const handoffs = evidenceNumber(suggestion.evidence.handoff_count);
                 return (
                   <div key={suggestion.id} className="px-4 py-3.5">
                     <div className="flex items-start gap-3">
@@ -305,11 +356,16 @@ export function CatalogAgentPanel({ onOpenOffers }: { onOpenOffers: () => void }
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                           <p className="text-sm font-semibold text-foreground">{suggestion.title}</p>
                           <span className="text-muted-foreground text-[10px] font-medium uppercase tracking-wide">
-                            {severityLabel(suggestion.severity)} · {originLabel(suggestion.created_by)}
+                            {severityLabel(suggestion.severity)} · {originLabel(suggestion)}
                           </span>
                         </div>
                         {suggestion.description ? (
                           <p className="text-muted-foreground mt-1 text-xs leading-relaxed">{suggestion.description}</p>
+                        ) : null}
+                        {live ? (
+                          <p className="text-muted-foreground mt-1.5 text-[11px]">
+                            Observado {occurrences} vez(es) em atendimento{handoffs > 0 ? ` · ${handoffs} handoff(s)` : ''}.
+                          </p>
                         ) : null}
                         {canEdit ? (
                           <div className="mt-2.5 flex flex-wrap gap-2">
@@ -376,6 +432,26 @@ function Metric({
         <p className="text-xs font-medium">{label}</p>
       </div>
       <p className="mt-3 text-2xl font-semibold tabular-nums text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function LearningMetric({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: number;
+  icon: typeof MessageCircleWarning;
+}) {
+  return (
+    <div className="min-w-0 px-4 py-3.5">
+      <div className="flex items-center gap-1.5 text-muted-foreground">
+        <Icon className="size-3.5 shrink-0" />
+        <p className="truncate text-xs font-medium">{label}</p>
+      </div>
+      <p className="mt-2 text-xl font-semibold tabular-nums text-foreground">{value}</p>
     </div>
   );
 }
