@@ -10,17 +10,10 @@ import {
 } from 'lucide-react';
 
 /**
- * Single source of truth for the top-level navigation and its
- * per-area contextual submenus. Replaces the old flat sidebar
- * `navItems` array and the header's separate (and previously
- * stale) path→title map — both the active-area highlight and the
- * page title now derive from this one config.
- *
- * Submenu entries only ever point at routes that already exist and
- * render real content on their own — the shell never introduces a
- * link a page can't yet serve (e.g. Catálogo's other five internal
- * tabs stay inside that page's own `Tabs` until it's rebuilt to read
- * a URL param, so they aren't listed here yet).
+ * Single source of truth for the top-level navigation and the areas that need
+ * one shared contextual submenu. Modules that already provide a purpose-built
+ * workspace rail (currently Agents and Catalog) deliberately have no shell
+ * submenu so users never see two local navigation systems at once.
  */
 
 export interface NavSubItem {
@@ -79,10 +72,6 @@ export const NAV_AREAS: NavArea[] = [
     labelKey: 'catalogo',
     icon: PackageSearch,
     matchPrefixes: ['/catalog', '/operations'],
-    submenu: [
-      { href: '/catalog', labelKey: 'products' },
-      { href: '/operations', labelKey: 'operations' },
-    ],
   },
   {
     key: 'automacao',
