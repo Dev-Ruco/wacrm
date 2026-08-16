@@ -30,7 +30,25 @@ interface TaxonomyTerm {
   canonical_value: string
 }
 
-export function ProductsTab({ products, setProducts }: { products: Product[]; setProducts: (updater: (current: Product[]) => Product[]) => void }) {
+interface AiEnrichmentResponse {
+  name?: string | null
+  price?: number | null
+  currency?: string | null
+  category?: string | null
+  color?: string | null
+  description?: string | null
+  error?: string
+}
+
+export function ProductsTab({
+  products,
+  setProducts,
+  catalogId,
+}: {
+  products: Product[]
+  setProducts: (updater: (current: Product[]) => Product[]) => void
+  catalogId?: string
+}) {
   const [productForm, setProductForm] = useState(initialProduct)
   const [savingProduct, setSavingProduct] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -105,7 +123,7 @@ export function ProductsTab({ products, setProducts }: { products: Product[]; se
       const r = await fetch('/api/catalog/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(productForm),
+        body: JSON.stringify({ ...productForm, catalog_id: catalogId }),
       })
       const b = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(b.error ?? 'Não foi possível criar o produto.')
@@ -141,7 +159,15 @@ export function ProductsTab({ products, setProducts }: { products: Product[]; se
     else toast.error(b.error ?? 'Não foi possível actualizar o produto.')
   }
 
-  async function saveProductEdits(p: Product, patch: { category?: string | null; color?: string | null; description?: string | null }) {
+  async function saveProductEdits(
+    p: Product,
+    patch: {
+      name?: string
+      category?: string | null
+      color?: string | null
+      description?: string | null
+    },
+  ) {
     const r = await fetch(`/api/catalog/products/${p.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -181,23 +207,52 @@ export function ProductsTab({ products, setProducts }: { products: Product[]; se
       const r = await fetch('/api/catalog/upload', { method: 'POST', body: form })
       const b = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(b.error ?? 'Falha no carregamento.')
-      setBulkItems((current) => current.map((x) => (x.id === item.id ? { ...x, imageUrl: b.url, uploading: false, classifying: true } : x)))
+      setBulkItems((current) =>
+        current.map((x) =>
+          x.id === item.id
+            ? { ...x, imageUrl: b.url, uploading: false, classifying: true }
+            : x,
+        ),
+      )
+
       const cr = await fetch('/api/catalog/classify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image_url: b.url }),
       })
-      const cb = await cr.json().catch(() => ({}))
+      const cb = (await cr.json().catch(() => ({}))) as AiEnrichmentResponse
+
       setBulkItems((current) =>
         current.map((x) =>
           x.id === item.id
-            ? { ...x, classifying: false, category: cr.ok ? cb.category : null, color: cr.ok ? cb.color : null, description: cr.ok ? cb.description ?? '' : '' }
+            ? {
+                ...x,
+                classifying: false,
+                name: cr.ok && cb.name ? cb.name : x.name,
+                price:
+                  cr.ok && typeof cb.price === 'number' && Number.isFinite(cb.price)
+                    ? String(cb.price)
+                    : x.price,
+                category: cr.ok ? cb.category ?? null : null,
+                color: cr.ok ? cb.color ?? null : null,
+                description: cr.ok ? cb.description ?? '' : '',
+                error: cr.ok ? undefined : cb.error ?? 'A IA não conseguiu organizar esta fotografia.',
+              }
             : x,
         ),
       )
     } catch (e) {
       setBulkItems((current) =>
-        current.map((x) => (x.id === item.id ? { ...x, uploading: false, classifying: false, error: e instanceof Error ? e.message : 'Erro.' } : x)),
+        current.map((x) =>
+          x.id === item.id
+            ? {
+                ...x,
+                uploading: false,
+                classifying: false,
+                error: e instanceof Error ? e.message : 'Erro.',
+              }
+            : x,
+        ),
       )
     }
   }
@@ -205,6 +260,7 @@ export function ProductsTab({ products, setProducts }: { products: Product[]; se
   function updateBulkItem(id: string, patch: Partial<BulkItem>) {
     setBulkItems((current) => current.map((x) => (x.id === id ? { ...x, ...patch } : x)))
   }
+
   function removeBulkItem(id: string) {
     setBulkItems((current) => {
       const item = current.find((x) => x.id === id)
@@ -216,7 +272,7 @@ export function ProductsTab({ products, setProducts }: { products: Product[]; se
   async function saveAllBulk() {
     const ready = bulkItems.filter(isBulkItemComplete)
     if (ready.length === 0) {
-      toast.error('Preenche nome e preço de pelo menos um produto.')
+      toast.error('Confirma nome e preço de pelo menos um produto.')
       return
     }
     setBulkSaving(true)
@@ -226,7 +282,15 @@ export function ProductsTab({ products, setProducts }: { products: Product[]; se
         const r = await fetch('/api/catalog/products', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: item.name, price: item.price, image_url: item.imageUrl, description: item.description, category: item.category, color: item.color }),
+          body: JSON.stringify({
+            catalog_id: catalogId,
+            name: item.name,
+            price: item.price,
+            image_url: item.imageUrl,
+            description: item.description,
+            category: item.category,
+            color: item.color,
+          }),
         })
         const b = await r.json().catch(() => ({}))
         if (!r.ok) throw new Error(b.error ?? 'Erro ao gravar.')
@@ -265,12 +329,22 @@ export function ProductsTab({ products, setProducts }: { products: Product[]; se
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ image_url: p.image_url }),
         })
-        const cb = await cr.json().catch(() => ({}))
+        const cb = (await cr.json().catch(() => ({}))) as AiEnrichmentResponse
         if (!cr.ok) throw new Error(cb.error ?? 'Erro ao classificar.')
 
-        const patch: { category?: string | null; color?: string | null; description?: string | null } =
+        const patch: {
+          name?: string
+          category?: string | null
+          color?: string | null
+          description?: string | null
+        } =
           mode === 'review_all'
-            ? { category: cb.category ?? null, color: cb.color ?? null, description: cb.description || null }
+            ? {
+                name: cb.name || undefined,
+                category: cb.category ?? null,
+                color: cb.color ?? null,
+                description: cb.description || null,
+              }
             : {
                 category: p.category ? undefined : cb.category ?? null,
                 color: p.color ? undefined : cb.color ?? null,
@@ -285,10 +359,11 @@ export function ProductsTab({ products, setProducts }: { products: Product[]; se
             body: JSON.stringify(patch),
           })
           const b = await r.json().catch(() => ({}))
-          if (r.ok) setProducts((current) => current.map((x) => (x.id === p.id ? b.product : x)))
+          if (!r.ok) throw new Error(b.error ?? 'Não foi possível guardar a organização.')
+          setProducts((current) => current.map((x) => (x.id === p.id ? b.product : x)))
         }
 
-        if (!cb.category || !cb.color) needsReview += 1
+        if (!cb.category || !cb.description || (mode === 'review_all' && !cb.name)) needsReview += 1
         else classified += 1
       } catch (e) {
         failed += 1
@@ -309,7 +384,7 @@ export function ProductsTab({ products, setProducts }: { products: Product[]; se
       <Card>
         <CardHeader>
           <CardTitle>Adicionar produto rápido</CardTitle>
-          <CardDescription>Nome e preço são obrigatórios.</CardDescription>
+          <CardDescription>Nome e preço são obrigatórios; os restantes campos ajudam o agente a vender melhor.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={submitProduct} className="grid gap-4 md:grid-cols-2">
@@ -352,7 +427,7 @@ export function ProductsTab({ products, setProducts }: { products: Product[]; se
               <Input type="url" value={productForm.product_url} onChange={(e) => setProductForm({ ...productForm, product_url: e.target.value })} />
             </div>
             <div className="space-y-2 md:col-span-2">
-              <Label>Descrição</Label>
+              <Label>Descrição comercial</Label>
               <Textarea value={productForm.description} onChange={(e) => setProductForm({ ...productForm, description: e.target.value })} />
             </div>
             <div className="md:col-span-2">
@@ -368,7 +443,9 @@ export function ProductsTab({ products, setProducts }: { products: Product[]; se
       <Card>
         <CardHeader>
           <CardTitle>Adicionar vários produtos de uma vez</CardTitle>
-          <CardDescription>Arrasta várias fotos — a IA sugere categoria, cor e descrição para cada uma; tu só confirmas nome e preço antes de gravar.</CardDescription>
+          <CardDescription>
+            Arrasta várias fotografias. A IA prepara nome comercial, categoria e descrição para cada item e só preenche o preço quando o valor estiver claramente visível na própria imagem. Revê os dados antes de guardar.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <BulkUploadDropzone onFiles={addBulkFiles} disabled={bulkSaving} />
@@ -398,17 +475,17 @@ export function ProductsTab({ products, setProducts }: { products: Product[]; se
       </Card>
 
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Produtos</h2>
+        <h2 className="text-lg font-semibold">Itens do catálogo</h2>
         <Button variant="outline" onClick={openReclassify} disabled={targetCount === 0}>
           <Sparkles />
-          Organizar produtos com IA
+          Organizar com IA
         </Button>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {products.length === 0 ? (
           <Card className="sm:col-span-2 xl:col-span-3">
-            <CardContent className="py-10 text-center text-muted-foreground">Sem produtos.</CardContent>
+            <CardContent className="py-10 text-center text-muted-foreground">Este catálogo ainda não tem itens.</CardContent>
           </Card>
         ) : (
           products.map((p) => (
