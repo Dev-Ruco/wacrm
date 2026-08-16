@@ -67,8 +67,7 @@ export function ReclassifyDialog({
                 Organizar produtos com IA
               </DialogTitle>
               <DialogDescription>
-                A IA vai rever <strong>{totalCount}</strong> produto{totalCount === 1 ? '' : 's'} com fotografia e vai
-                sugerir categoria, cor e descrição para cada um, usando as categorias e cores que já configuraste.
+                A IA vai rever <strong>{totalCount}</strong> produto{totalCount === 1 ? '' : 's'} com fotografia. Vai preparar nomes comerciais, categorias e descrições úteis para venda e pesquisa, sem inventar preço ou especificações.
               </DialogDescription>
             </DialogHeader>
             <RadioGroup value={mode} onValueChange={(value) => onModeChange(value as ReclassifyMode)} className="space-y-3">
@@ -77,7 +76,7 @@ export function ReclassifyDialog({
                 <span className="text-sm">
                   <span className="font-medium">Preencher apenas campos vazios</span>
                   <span className="block text-muted-foreground">
-                    Categoria, cor ou descrição já preenchidas por uma pessoa não são alteradas.
+                    Mantém os dados já preenchidos e usa a IA apenas onde falta contexto comercial.
                   </span>
                 </span>
               </label>
@@ -86,7 +85,7 @@ export function ReclassifyDialog({
                 <span className="text-sm">
                   <span className="font-medium">Rever todos os produtos</span>
                   <span className="block text-muted-foreground">
-                    A IA substitui categoria, cor e descrição de todos os produtos, mesmo os já preenchidos.
+                    A IA pode substituir nome, categoria, cor e descrição para tornar o catálogo mais consistente.
                   </span>
                 </span>
               </label>
@@ -94,7 +93,7 @@ export function ReclassifyDialog({
             {mode === 'review_all' ? (
               <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-800 dark:text-amber-300">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                Dados já preenchidos manualmente podem ser substituídos pela sugestão da IA.
+                Dados editoriais já preenchidos podem ser substituídos. Preço, stock e outros factos operacionais não são alterados por esta acção.
               </div>
             ) : null}
             <DialogFooter>
@@ -138,7 +137,7 @@ export function ReclassifyDialog({
             <DialogHeader>
               <DialogTitle>Organização concluída</DialogTitle>
               <DialogDescription>
-                {result.classified} classificado{result.classified === 1 ? '' : 's'}
+                {result.classified} organizado{result.classified === 1 ? '' : 's'}
                 {result.needsReview > 0 ? `, ${result.needsReview} precisam de revisão` : ''}
                 {result.failed > 0 ? `, ${result.failed} falharam` : ''}.
               </DialogDescription>
