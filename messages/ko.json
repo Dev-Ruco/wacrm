@@ -57,6 +57,39 @@
     "menuSettings": "설정",
     "menuSignOut": "로그아웃"
   },
+  "Nav": {
+    "areas": {
+      "dashboard": "대시보드",
+      "conversas": "대화",
+      "contactos": "연락처",
+      "vendas": "영업",
+      "catalogo": "카탈로그",
+      "automacao": "자동화",
+      "campanhas": "캠페인"
+    },
+    "submenu": {
+      "pipeline": "파이프라인",
+      "visits": "예약된 방문",
+      "products": "제품",
+      "operations": "가용성 및 운영",
+      "rules": "규칙",
+      "flows": "플로우",
+      "aiAgents": "AI 에이전트"
+    },
+    "beta": "베타",
+    "openMenu": "메뉴 열기",
+    "closeMenu": "메뉴 닫기",
+    "notifications": "알림",
+    "viewAllNotifications": "모든 알림 보기",
+    "unreadConversations": "읽지 않은 대화 {count}건",
+    "unreadNotifications": "읽지 않은 알림 {count}건",
+    "openAccountMenu": "계정 메뉴 열기",
+    "defaultUser": "사용자",
+    "defaultAvatar": "아바타",
+    "menuProfile": "프로필",
+    "menuSettings": "설정",
+    "menuSignOut": "로그아웃"
+  },
   "ModeToggle": {
     "switchMode": "{mode} 모드로 전환"
   },

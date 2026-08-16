@@ -1,0 +1,452 @@
+<title>WACRM Blueprint</title>
+<style>
+  :root{
+    --navy:#0f172a; --navy-soft:#1c2c42;
+    --ink:#0b1220; --ink-soft:#4b5768; --ink-faint:#8492a6;
+    --paper:#fdfefe; --paper-sunken:#f4f6f8; --paper-recessed:#eceff3; --paper-card:#ffffff;
+    --line:#e4e9ed; --line-strong:#ccd4dc;
+    --brand:#1fb855; --brand-deep:#128c7e; --brand-soft:#e7f8ec; --brand-ink:#0d6b30;
+    --warning:#b6740a; --warning-soft:#fbeed7; --danger:#c53434; --danger-soft:#fbe4e2; --info:#1c6fb8; --info-soft:#e3eefa;
+    --radius-sm:6px; --radius-md:9px; --radius-lg:14px;
+    --shadow-sm:0 1px 3px rgba(11,18,32,.06); --shadow-md:0 6px 20px rgba(11,18,32,.08);
+    --font: ui-sans-serif,"Inter","Segoe UI",system-ui,-apple-system,sans-serif;
+    --font-mono: ui-monospace,"SF Mono","Cascadia Code",Consolas,monospace;
+    --measure:74ch;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ink:#eef2f6; --ink-soft:#a7b3c4; --ink-faint:#6b7688;
+      --paper:#0b121c; --paper-sunken:#0e1622; --paper-recessed:#141e2c; --paper-card:#111a27;
+      --line:#22303f; --line-strong:#2c3c50;
+      --brand-soft:#0f2b1c; --brand-ink:#5fd889;
+      --warning-soft:#3a2a10; --danger-soft:#3a1a17; --info-soft:#12233a;
+      --shadow-sm:0 1px 3px rgba(0,0,0,.3); --shadow-md:0 6px 20px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ink:#eef2f6; --ink-soft:#a7b3c4; --ink-faint:#6b7688;
+    --paper:#0b121c; --paper-sunken:#0e1622; --paper-recessed:#141e2c; --paper-card:#111a27;
+    --line:#22303f; --line-strong:#2c3c50;
+    --brand-soft:#0f2b1c; --brand-ink:#5fd889;
+    --warning-soft:#3a2a10; --danger-soft:#3a1a17; --info-soft:#12233a;
+    --shadow-sm:0 1px 3px rgba(0,0,0,.3); --shadow-md:0 6px 20px rgba(0,0,0,.4);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased;}
+  code, .mono{font-family:var(--font-mono);}
+  h1,h2,h3,h4{text-wrap:balance;letter-spacing:-.01em;}
+  a{color:var(--brand-ink);}
+  .wrap{display:flex;max-width:1240px;margin:0 auto;}
+
+  /* top bar */
+  .topbar{position:sticky;top:0;z-index:40;background:linear-gradient(180deg,var(--navy),#0b1220);color:#fff;padding:14px 28px;display:flex;align-items:center;gap:14px;}
+  .topbar .mark{width:26px;height:26px;border-radius:7px;background:var(--brand);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:#06210f;flex-shrink:0;}
+  .topbar strong{font-size:14.5px;letter-spacing:.01em;}
+  .topbar .status{margin-left:auto;font-size:11.5px;font-weight:700;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.14);padding:5px 12px;border-radius:99px;color:rgba(255,255,255,.85);}
+  .topbar .status .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#f5b942;margin-right:6px;}
+
+  nav.toc{width:210px;flex-shrink:0;padding:28px 14px;position:sticky;top:54px;align-self:flex-start;height:calc(100vh - 54px);overflow-y:auto;}
+  nav.toc a{display:block;font-size:12.5px;font-weight:600;color:var(--ink-soft);text-decoration:none;padding:6px 10px;border-radius:var(--radius-sm);margin-bottom:1px;}
+  nav.toc a:hover{background:var(--paper-recessed);color:var(--ink);}
+  nav.toc .g{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-faint);font-weight:800;margin:16px 10px 6px;}
+  nav.toc .g:first-child{margin-top:0;}
+
+  main{flex:1;min-width:0;padding:32px 40px 90px;}
+  section{margin-bottom:56px;scroll-margin-top:70px;}
+  .eyebrow{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:var(--brand-ink);margin-bottom:6px;}
+  h1.title{font-size:30px;font-weight:800;margin:0 0 10px;}
+  .lede{font-size:15.5px;color:var(--ink-soft);max-width:var(--measure);margin:0 0 4px;}
+  h2.sec{font-size:21px;font-weight:800;margin:0 0 6px;display:flex;align-items:center;gap:10px;}
+  h2.sec .n{font-size:12px;font-weight:800;color:#fff;background:var(--navy);width:24px;height:24px;border-radius:7px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .sec-sub{font-size:13.5px;color:var(--ink-soft);margin:0 0 22px;max-width:var(--measure);}
+  p{max-width:var(--measure);}
+  .card{background:var(--paper-card);border:1px solid var(--line);border-radius:var(--radius-lg);padding:20px;box-shadow:var(--shadow-sm);}
+
+  /* findings */
+  .finding{display:flex;gap:14px;padding:14px 0;border-bottom:1px solid var(--line);}
+  .finding:last-child{border-bottom:none;}
+  .sev{flex-shrink:0;width:76px;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:3px 0;text-align:center;border-radius:99px;height:20px;line-height:14px;}
+  .sev.high{background:var(--danger-soft);color:var(--danger);} .sev.med{background:var(--warning-soft);color:var(--warning);} .sev.low{background:var(--info-soft);color:var(--info);}
+  .finding h4{margin:0 0 3px;font-size:13.5px;}
+  .finding p{margin:0;font-size:12.8px;color:var(--ink-soft);}
+  .finding code{font-size:11.5px;background:var(--paper-recessed);padding:1px 5px;border-radius:4px;}
+
+  /* trees */
+  .tree-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+  @media (max-width:900px){.tree-grid{grid-template-columns:1fr;}}
+  .tree{background:var(--navy);color:#dbe4ee;border-radius:var(--radius-lg);padding:18px 20px;font-family:var(--font-mono);font-size:12px;line-height:1.8;overflow-x:auto;box-shadow:var(--shadow-md);}
+  .tree .h{color:#7dd3a8;font-weight:700;font-family:var(--font);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;}
+  .tree .dim{color:#7f8ca0;}
+  .tree .flag{color:#f5b942;}
+  .tree .new{color:#7dd3a8;}
+
+  figure{margin:22px 0 0;}
+  figure svg{max-width:100%;height:auto;display:block;}
+  figcaption{font-size:12px;color:var(--ink-faint);margin-top:10px;max-width:var(--measure);}
+
+  table.map{width:100%;border-collapse:collapse;font-size:13px;margin-top:18px;}
+  table.map th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);padding:7px 10px;border-bottom:1px solid var(--line-strong);}
+  table.map td{padding:10px 10px;border-bottom:1px solid var(--line);vertical-align:top;}
+  table.map td.old{color:var(--ink-faint);}
+  table.map td.arrow{width:24px;color:var(--ink-faint);text-align:center;}
+
+  /* design system */
+  .swatch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;}
+  .swatch{border:1px solid var(--line);border-radius:var(--radius-md);overflow:hidden;}
+  .swatch .chip{height:52px;}
+  .swatch .meta{padding:8px 10px;background:var(--paper-card);}
+  .swatch .meta .name{font-size:11.5px;font-weight:700;}
+  .swatch .meta .val{font-size:10.5px;color:var(--ink-faint);font-family:var(--font-mono);}
+
+  .type-row{display:flex;align-items:baseline;gap:16px;padding:12px 0;border-bottom:1px solid var(--line);}
+  .type-row:last-child{border-bottom:none;}
+  .type-row .lbl{width:120px;flex-shrink:0;font-size:11px;color:var(--ink-faint);font-family:var(--font-mono);}
+  .type-row .sample{font-weight:700;}
+
+  .spacing-row{display:flex;align-items:center;gap:14px;padding:7px 0;}
+  .spacing-row .box{background:var(--brand);height:14px;border-radius:3px;}
+  .spacing-row .lbl{width:70px;font-family:var(--font-mono);font-size:11.5px;color:var(--ink-soft);flex-shrink:0;}
+
+  .comp-row{display:flex;gap:20px;flex-wrap:wrap;align-items:center;padding:14px 0;border-bottom:1px solid var(--line);}
+  .comp-row:last-child{border-bottom:none;}
+  .comp-row .lbl{width:100px;flex-shrink:0;font-size:11px;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.04em;}
+  .btn-demo{font-size:12.5px;font-weight:700;padding:8px 14px;border-radius:var(--radius-md);border:none;cursor:default;}
+  .btn-demo.primary{background:var(--brand);color:#06210f;} .btn-demo.outline{background:transparent;border:1px solid var(--line-strong);color:var(--ink);}
+  .btn-demo.ghost{background:var(--paper-recessed);color:var(--ink-soft);}
+  .badge-demo{font-size:11px;font-weight:700;padding:3px 10px;border-radius:99px;}
+  .badge-demo.wait{background:var(--warning-soft);color:var(--warning);} .badge-demo.open{background:var(--info-soft);color:var(--info);} .badge-demo.won{background:var(--brand-soft);color:var(--brand-ink);}
+
+  /* templates gallery */
+  .tpl-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
+  @media (max-width:1000px){.tpl-grid{grid-template-columns:1fr;}}
+  .tpl-card{border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-sm);display:flex;flex-direction:column;}
+  .tpl-preview{height:130px;position:relative;overflow:hidden;}
+  .tpl-preview .bar{position:absolute;top:0;left:0;right:0;height:22px;}
+  .tpl-preview .row{position:absolute;left:10px;right:10px;height:8px;border-radius:3px;}
+  .tpl-body{padding:16px;flex:1;display:flex;flex-direction:column;}
+  .tpl-body h3{margin:0 0 6px;font-size:15px;}
+  .tpl-body p{margin:0 0 12px;font-size:12.5px;color:var(--ink-soft);flex:1;}
+  .tpl-body .tags{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;}
+  .tpl-body .tags span{font-size:10.5px;font-weight:700;background:var(--paper-recessed);color:var(--ink-soft);padding:2px 8px;border-radius:99px;}
+  .tpl-body a.open{font-size:12.5px;font-weight:800;color:#fff;background:var(--navy);text-align:center;padding:9px;border-radius:var(--radius-md);text-decoration:none;}
+  .tpl-body a.open:hover{background:var(--brand-deep);}
+
+  table.compare{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:22px;}
+  table.compare th, table.compare td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top;}
+  table.compare th{background:var(--paper-recessed);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);}
+  table.compare td:first-child{font-weight:700;color:var(--ink-soft);width:150px;}
+
+  .callout{background:var(--brand-soft);border:1px solid color-mix(in srgb, var(--brand) 30%, transparent);border-radius:var(--radius-lg);padding:20px 22px;margin-top:26px;}
+  .callout h3{margin:0 0 8px;font-size:16px;color:var(--brand-ink);}
+  .callout p{margin:0 0 10px;font-size:13.5px;}
+  .callout .ask{font-weight:800;font-size:14.5px;margin-top:12px;}
+
+  .footline{margin-top:70px;padding-top:20px;border-top:1px solid var(--line);font-size:11.5px;color:var(--ink-faint);}
+</style>
+
+<div class="topbar">
+  <div class="mark">W</div>
+  <strong>WACRM Blueprint — Redesign visual &amp; UX</strong>
+  <div class="status"><span class="dot"></span>Fase 1 · Descoberta — a aguardar aprovação</div>
+</div>
+
+<div class="wrap">
+  <nav class="toc">
+    <div class="g">Diagnóstico</div>
+    <a href="#auditoria">A · Auditoria</a>
+    <a href="#atual">B · Arquitectura actual</a>
+    <a href="#proposta">C · Arquitectura proposta</a>
+    <div class="g">Sistema</div>
+    <a href="#design-system">D · Design system</a>
+    <div class="g">Conceitos</div>
+    <a href="#templates">E · Três templates</a>
+    <a href="#comparacao">Comparação</a>
+    <a href="#recomendacao">Recomendação</a>
+  </nav>
+
+  <main>
+    <section id="intro">
+      <div class="eyebrow">Descoberta — nenhuma alteração feita à aplicação real</div>
+      <h1 class="title">Redesign visual e de UX do WACRM</h1>
+      <p class="lede">Auditoria completa da IA, navegação e sistema visual actuais do WACRM (repositório <code>Dev-Ruco/wacrm</code>), seguida de uma arquitectura proposta e três protótipos genuinamente distintos. Tudo o que se segue foi derivado do código real — 3 agentes de investigação leram as rotas, os componentes e as migrações Supabase; nada aqui foi inventado.</p>
+    </section>
+
+    <section id="auditoria">
+      <h2 class="sec"><span class="n">A</span>Auditoria</h2>
+      <p class="sec-sub">Onze problemas concretos encontrados no código, por ordem de impacto na experiência.</p>
+      <div class="card">
+        <div class="finding">
+          <div class="sev high">Alto</div>
+          <div><h4>A rota <code>/operations</code> está completamente órfã</h4>
+          <p>Gere tipos de entidade, ligações oferta↔entidade e disponibilidade semanal — mas não existe nenhum link, item de menu ou botão que lhe chegue em toda a aplicação. Só é acessível escrevendo o URL directamente. <code>src/app/(dashboard)/operations/page.tsx</code></p></div>
+        </div>
+        <div class="finding">
+          <div class="sev high">Alto</div>
+          <div><h4>O título no topo da página está errado em 5 rotas</h4>
+          <p>O mapa caminho→título do <code>Header</code> só tem 8 entradas; em <code>/catalog</code>, <code>/visits</code>, <code>/flows</code>, <code>/agents</code> e <code>/operations</code> o topo mostra sempre "Dashboard", mesmo com o menu lateral a marcar correctamente a página activa. <code>src/components/layout/header.tsx:21-38</code></p></div>
+        </div>
+        <div class="finding">
+          <div class="sev med">Médio</div>
+          <div><h4>Menu de conta duplicado</h4>
+          <p>O mesmo dropdown Perfil/Definições/Sair existe simultaneamente no rodapé da sidebar e no header — ambos visíveis ao mesmo tempo em ecrã de desktop.</p></div>
+        </div>
+        <div class="finding">
+          <div class="sev med">Médio</div>
+          <div><h4>Dois padrões de "submenu contextual" reinventados de forma independente</h4>
+          <p>Definições (<code>settings-rail.tsx</code>, estado no URL) e Agentes IA (<code>agent-builder-shell.tsx</code>, estado local) resolvem o mesmo problema — uma coluna vertical agrupada que colapsa para scroll horizontal — com estruturas de dados e persistência diferentes. É exactamente o padrão que a Fase 3 vai unificar.</p></div>
+        </div>
+        <div class="finding">
+          <div class="sev med">Médio</div>
+          <div><h4>Título duplicado em quase todas as páginas</h4>
+          <p>Cada página renderiza o seu próprio <code>&lt;h1&gt;</code> além do que o <code>Header</code> já mostra no topo — dois títulos empilhados com o mesmo texto.</p></div>
+        </div>
+        <div class="finding">
+          <div class="sev med">Médio</div>
+          <div><h4>Inbox e Notificações competem pela mesma atenção</h4>
+          <p>Duas superfícies de "não lido" adjacentes na sidebar, com hooks e páginas separadas — candidatas a fundir sob um único sino de notificações no header.</p></div>
+        </div>
+        <div class="finding">
+          <div class="sev low">Baixo</div>
+          <div><h4>Inconsistência visual entre "cards"</h4>
+          <p>Componentes de página usam o primitivo <code>Card</code> do shadcn (<code>rounded-xl</code>, <code>p-4</code>), mas os widgets do dashboard reimplementam o mesmo visual à mão com valores diferentes (<code>rounded-lg</code>/<code>p-5</code>, sombras ad-hoc em ~10 componentes).</p></div>
+        </div>
+        <div class="finding">
+          <div class="sev low">Baixo</div>
+          <div><h4>Cores hardcoded quebram os 6 temas de acento</h4>
+          <p>Chips de papel ("owner") usam <code>amber-500</code> em bruto em vez do token semântico — não repinta correctamente ao mudar de tema. <code>src/components/layout/sidebar.tsx:51-67</code></p></div>
+        </div>
+        <div class="finding">
+          <div class="sev low">Baixo</div>
+          <div><h4><code>--font-mono</code> aponta para uma variável nunca definida</h4>
+          <p>Referencia <code>--font-geist-mono</code>, mas o pacote Geist nunca foi importado — todo texto <code>font-mono</code> (chaves de API, números) cai silenciosamente na fonte monoespaçada genérica do browser.</p></div>
+        </div>
+        <div class="finding">
+          <div class="sev low">Baixo</div>
+          <div><h4>Texto em português hardcoded fora do <code>next-intl</code></h4>
+          <p>Catálogo, Visitas, Agentes IA e vários painéis mais recentes têm strings PT fixas — nunca traduzem para EN/KO apesar de existirem os 3 locales.</p></div>
+        </div>
+        <div class="finding">
+          <div class="sev low">Baixo</div>
+          <div><h4>O sistema já tem um tema "WhatsApp" — só não é o padrão</h4>
+          <p>Existe um tema de acento <code>whatsapp</code> completo em <code>globals.css</code> com o verde real <code>#25D366</code> e tokens dedicados a bolhas de chat — mas o tema por omissão é <code>violet</code>. É uma base pronta a promover, não a construir de raiz.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="atual">
+      <h2 class="sec"><span class="n">B</span>Arquitectura actual</h2>
+      <p class="sec-sub">13 áreas reais em <code>src/app/(dashboard)/</code> — mais que os "exemplos" habituais de CRM: há um sistema de agentes de IA e um motor de catálogo/ofertas dedicados. Navegação: sidebar vertical fixa (240px), 11 itens + Definições separada por uma linha.</p>
+      <div class="tree">
+<span class="h">src/app/(dashboard)/ — sidebar plana, 1 nível</span>
+Dashboard        <span class="dim">métricas, gráficos, feed de actividade</span>
+Inbox            <span class="dim">caixa partilhada · badge de não lidas</span>
+Notifications    <span class="dim">badge numérico — sobreposto ao Inbox</span>
+Contacts         <span class="dim">lista + dialog criar/editar + sheet detalhe</span>
+Pipelines        <span class="dim">kanban de negócios · selector de pipeline</span>
+Catálogo         <span class="flag">label PT hardcoded</span> <span class="dim">6 tabs internas</span>
+Visitas          <span class="flag">label PT hardcoded</span>
+Broadcasts       <span class="dim">lista → wizard 4 passos → relatório</span>
+Automations      <span class="dim">regras trigger→passos</span>
+Flows            <span class="flag">BETA</span> <span class="dim">chatbot com grafo de estados</span>
+Agentes de IA    <span class="flag">label PT hardcoded</span> <span class="dim">12 secções internas</span>
+─────────────────
+Settings         <span class="dim">rail com 12 secções, 3 grupos</span>
+
+<span class="flag">/operations — 0 links, acessível só por URL directo</span>
+      </div>
+    </section>
+
+    <section id="proposta">
+      <h2 class="sec"><span class="n">C</span>Arquitectura proposta</h2>
+      <p class="sec-sub">7 áreas principais no header — todas as 13 áreas reais mantidas, nenhuma inventada, nenhuma removida. Agrupamentos derivados directamente dos achados da auditoria (ver mapeamento abaixo).</p>
+
+      <figure role="img" aria-label="Diagrama da pilha de layout: cabeçalho fixo no topo, área principal seleccionada, submenu contextual à esquerda quando aplicável, e workspace ocupando o resto do ecrã">
+        <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg">
+          <rect x="20" y="16" width="680" height="40" rx="8" fill="none" stroke="currentColor" stroke-opacity=".7" stroke-width="1.5"/>
+          <text x="360" y="40" text-anchor="middle" font-size="12.5" fill="currentColor">Menu superior — logótipo · 7 áreas · pesquisa · + Novo · alertas · WhatsApp · conta</text>
+
+          <rect x="20" y="72" width="150" height="168" rx="8" fill="none" stroke="currentColor" stroke-opacity=".5" stroke-width="1.5" stroke-dasharray="4 3"/>
+          <text x="95" y="94" text-anchor="middle" font-size="11" fill="currentColor" opacity=".75">Submenu</text>
+          <text x="95" y="109" text-anchor="middle" font-size="11" fill="currentColor" opacity=".75">contextual</text>
+          <line x1="35" y1="126" x2="155" y2="126" stroke="currentColor" stroke-opacity=".35"/>
+          <line x1="35" y1="148" x2="155" y2="148" stroke="currentColor" stroke-opacity=".35"/>
+          <line x1="35" y1="170" x2="155" y2="170" stroke="currentColor" stroke-opacity=".35"/>
+          <text x="95" y="216" text-anchor="middle" font-size="9.5" fill="currentColor" opacity=".55">(some se a área</text>
+          <text x="95" y="228" text-anchor="middle" font-size="9.5" fill="currentColor" opacity=".55">não precisar)</text>
+
+          <rect x="188" y="72" width="512" height="168" rx="8" fill="#1fb855" fill-opacity=".08" stroke="#1fb855" stroke-width="1.5"/>
+          <text x="444" y="150" text-anchor="middle" font-size="13" fill="#1fb855" font-weight="700">Workspace</text>
+          <text x="444" y="168" text-anchor="middle" font-size="10.5" fill="currentColor" opacity=".6">conteúdo real da área activa</text>
+
+          <line x1="95" y1="56" x2="95" y2="72" stroke="currentColor" stroke-opacity=".4" marker-end="url(#arrA)"/>
+          <line x1="444" y1="56" x2="444" y2="72" stroke="currentColor" stroke-opacity=".4" marker-end="url(#arrA)"/>
+          <defs><marker id="arrA" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="currentColor" opacity=".5"/></marker></defs>
+        </svg>
+        <figcaption>A regra central da secção 5 do briefing: o header é fixo, o submenu é contextual e opcional por área, o workspace herda todo o espaço restante.</figcaption>
+      </figure>
+
+      <table class="map">
+        <thead><tr><th>Áreas actuais (sidebar)</th><th></th><th>Área no novo header</th><th>Submenu contextual proposto</th></tr></thead>
+        <tbody>
+          <tr><td class="old">Dashboard</td><td class="arrow">→</td><td><strong>Dashboard</strong></td><td class="old">— (sem submenu)</td></tr>
+          <tr><td class="old">Inbox</td><td class="arrow">→</td><td rowspan="1"><strong>Conversas</strong></td><td>Todas · Não lidas · Pendentes · Minhas · Arquivadas</td></tr>
+          <tr><td class="old">Notifications</td><td class="arrow">→</td><td>Sino no header <span class="old">(resolve achado #6)</span></td><td class="old">—</td></tr>
+          <tr><td class="old">Contacts</td><td class="arrow">→</td><td><strong>Contactos</strong></td><td class="old">— (filtros em página)</td></tr>
+          <tr><td class="old">Pipelines</td><td class="arrow">→</td><td rowspan="2"><strong>Vendas</strong></td><td>Pipeline</td></tr>
+          <tr><td class="old">Visitas</td><td class="arrow">→</td><td>Visitas agendadas</td></tr>
+          <tr><td class="old">Catálogo (6 tabs)</td><td class="arrow">→</td><td rowspan="2"><strong>Catálogo</strong></td><td>Produtos · Estrutura da oferta · Composições · Categorias · <strong>Disponibilidade &amp; Operações</strong> · Saúde · Integrações</td></tr>
+          <tr><td class="old">Operations <span class="old">(órfã)</span></td><td class="arrow">→</td><td class="old">fundida na tab acima <span class="old">(resolve achado #1)</span></td></tr>
+          <tr><td class="old">Automations</td><td class="arrow">→</td><td rowspan="3"><strong>Automação</strong></td><td>Regras</td></tr>
+          <tr><td class="old">Flows</td><td class="arrow">→</td><td>Fluxos</td></tr>
+          <tr><td class="old">Agentes de IA</td><td class="arrow">→</td><td>Agentes IA</td></tr>
+          <tr><td class="old">Broadcasts</td><td class="arrow">→</td><td><strong>Campanhas</strong></td><td class="old">— (lista + relatório)</td></tr>
+          <tr><td class="old">Settings</td><td class="arrow">→</td><td>Menu de conta no header <span class="old">(1 só menu, resolve achado #3)</span></td><td class="old">—</td></tr>
+        </tbody>
+      </table>
+      <p style="margin-top:16px;font-size:12.8px;color:var(--ink-soft);">Automação e Vendas agrupam sistemas que já hoje são tecnicamente distintos (regras vs. fluxos com estado vs. bot de IA; pipeline vs. visitas agendadas) mas partilham a mesma intenção comercial — exactamente o exemplo que o briefing deu para "Automação".</p>
+    </section>
+
+    <section id="design-system">
+      <h2 class="sec"><span class="n">D</span>Design system</h2>
+      <p class="sec-sub">Construído por cima dos tokens que já existem (oklch, 6 temas de acento) — não os substitui. Adiciona uma camada de marca fixa (navy de chrome, verde WhatsApp) e nomeia formalmente o que hoje está disperso pelo código.</p>
+
+      <h3 style="font-size:14px;margin:26px 0 12px;">Cor</h3>
+      <div class="swatch-grid">
+        <div class="swatch"><div class="chip" style="background:#0f172a"></div><div class="meta"><div class="name">--nav-navy</div><div class="val">#0F172A</div></div></div>
+        <div class="swatch"><div class="chip" style="background:#25D366"></div><div class="meta"><div class="name">--brand-primary</div><div class="val">#25D366</div></div></div>
+        <div class="swatch"><div class="chip" style="background:#128C7E"></div><div class="meta"><div class="name">--brand-deep</div><div class="val">#128C7E</div></div></div>
+        <div class="swatch"><div class="chip" style="background:#075E54"></div><div class="meta"><div class="name">--brand-deepest</div><div class="val">#075E54</div></div></div>
+        <div class="swatch"><div class="chip" style="background:#F7F9FA;border-bottom:1px solid #e4e9ed"></div><div class="meta"><div class="name">--surface-muted</div><div class="val">#F7F9FA</div></div></div>
+        <div class="swatch"><div class="chip" style="background:#111B21"></div><div class="meta"><div class="name">--text-primary</div><div class="val">#111B21</div></div></div>
+        <div class="swatch"><div class="chip" style="background:#667781"></div><div class="meta"><div class="name">--text-secondary</div><div class="val">#667781</div></div></div>
+        <div class="swatch"><div class="chip" style="background:#E9EDEF;border-bottom:1px solid #cbd3dc"></div><div class="meta"><div class="name">--border</div><div class="val">#E9EDEF</div></div></div>
+        <div class="swatch"><div class="chip" style="background:#16A34A"></div><div class="meta"><div class="name">--success</div><div class="val">#16A34A</div></div></div>
+        <div class="swatch"><div class="chip" style="background:#B6740A"></div><div class="meta"><div class="name">--warning</div><div class="val">#B6740A</div></div></div>
+        <div class="swatch"><div class="chip" style="background:#C53434"></div><div class="meta"><div class="name">--danger</div><div class="val">#C53434</div></div></div>
+        <div class="swatch"><div class="chip" style="background:#1C6FB8"></div><div class="meta"><div class="name">--info</div><div class="val">#1C6FB8</div></div></div>
+      </div>
+      <p style="margin-top:12px;font-size:12.5px;color:var(--ink-faint);"><code>--success</code> é deliberadamente um verde diferente de <code>--brand-primary</code>: o verde da marca satura o chrome e as CTAs (identidade), o verde de sucesso fica reservado a estados (correcção da secção 9 — "não sobrecarregar o verde").</p>
+
+      <h3 style="font-size:14px;margin:30px 0 4px;">Tipografia</h3>
+      <p style="font-size:12.5px;color:var(--ink-soft);margin-bottom:14px;">Mantém Inter (já carregada via <code>next/font</code>) — não há motivo para trocar. Formaliza a escala que hoje varia por página.</p>
+      <div class="card">
+        <div class="type-row"><div class="lbl">display / 28·36</div><div class="sample" style="font-size:28px;">312.000 MZN</div></div>
+        <div class="type-row"><div class="lbl">h1 / 20·28 semibold</div><div class="sample" style="font-size:20px;font-weight:700;">Conversas</div></div>
+        <div class="type-row"><div class="lbl">h2 / 15·22 semibold</div><div class="sample" style="font-size:15px;font-weight:700;">Precisa da tua atenção</div></div>
+        <div class="type-row"><div class="lbl">body / 14·20</div><div class="sample" style="font-size:14px;font-weight:400;">Ainda têm o kit em tamanho M?</div></div>
+        <div class="type-row"><div class="lbl">small / 12·16</div><div class="sample" style="font-size:12px;color:var(--ink-faint);">há 6 min · Fátima Ussene</div></div>
+      </div>
+
+      <h3 style="font-size:14px;margin:30px 0 12px;">Espaçamento &amp; forma</h3>
+      <div class="card" style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+        <div>
+          <div class="spacing-row"><div class="lbl">4</div><div class="box" style="width:4px"></div></div>
+          <div class="spacing-row"><div class="lbl">8</div><div class="box" style="width:8px"></div></div>
+          <div class="spacing-row"><div class="lbl">12</div><div class="box" style="width:12px"></div></div>
+          <div class="spacing-row"><div class="lbl">16</div><div class="box" style="width:16px"></div></div>
+          <div class="spacing-row"><div class="lbl">24</div><div class="box" style="width:24px"></div></div>
+          <div class="spacing-row"><div class="lbl">32</div><div class="box" style="width:32px"></div></div>
+        </div>
+        <div>
+          <div class="spacing-row"><div class="lbl">radius sm</div><div class="box" style="width:28px;border-radius:6px;"></div></div>
+          <div class="spacing-row"><div class="lbl">radius md</div><div class="box" style="width:28px;border-radius:9px;"></div></div>
+          <div class="spacing-row"><div class="lbl">radius lg</div><div class="box" style="width:28px;border-radius:13px;"></div></div>
+          <div class="spacing-row"><div class="lbl">radius pill</div><div class="box" style="width:28px;border-radius:99px;"></div></div>
+          <div class="spacing-row"><div class="lbl">shadow sm</div><div class="box" style="width:28px;box-shadow:var(--shadow-sm);background:var(--paper-card);"></div></div>
+          <div class="spacing-row"><div class="lbl">shadow md</div><div class="box" style="width:28px;box-shadow:var(--shadow-md);background:var(--paper-card);"></div></div>
+        </div>
+      </div>
+
+      <h3 style="font-size:14px;margin:30px 0 12px;">Componentes base</h3>
+      <div class="card">
+        <div class="comp-row"><div class="lbl">Botões</div>
+          <button class="btn-demo primary">Enviar proposta</button>
+          <button class="btn-demo outline">Cancelar</button>
+          <button class="btn-demo ghost">Ver detalhes</button>
+        </div>
+        <div class="comp-row"><div class="lbl">Estados</div>
+          <span class="badge-demo wait">Aguardando</span>
+          <span class="badge-demo open">Não lida</span>
+          <span class="badge-demo won">Ganho</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="templates">
+      <h2 class="sec"><span class="n">E</span>Três templates</h2>
+      <p class="sec-sub">Protótipos reais, interactivos, isolados da aplicação — não afectam rotas, autenticação nem dados. Todos partilham a mesma pilha (header + submenu contextual + workspace) e o mesmo conjunto de dados fictícios (loja "LC Fitness", em MZN — grounded no <code>catalog_products.currency</code> real do schema). Clica em cada um para navegar entre Dashboard e Conversas.</p>
+
+      <div class="tpl-grid">
+        <div class="tpl-card">
+          <div class="tpl-preview" style="background:#eef1f4;">
+            <div class="bar" style="background:linear-gradient(180deg,#16293d,#0b1622);"></div>
+            <div class="row" style="top:34px;background:#1fb855;opacity:.15;height:16px;"></div>
+            <div class="row" style="top:56px;background:#cbd3dc;"></div>
+            <div class="row" style="top:70px;width:60%;background:#cbd3dc;"></div>
+            <div class="row" style="top:90px;width:40%;background:#cbd3dc;"></div>
+          </div>
+          <div class="tpl-body">
+            <h3>A · Commercial Clean</h3>
+            <div class="tags"><span>Navy + verde restrito</span><span>Denso</span><span>Operacional</span></div>
+            <p>Header navy sólido, verde só em CTA/estado/activo. Tabelas e listas dominantes. Home = Dashboard. O mais próximo de um SaaS B2B de operações.</p>
+            <a class="open" href="https://claude.ai/code/artifact/b9b59495-f824-4bb1-8465-99cb8c8096c7" target="_blank" rel="noopener">Abrir protótipo →</a>
+          </div>
+        </div>
+        <div class="tpl-card">
+          <div class="tpl-preview" style="background:#fff;">
+            <div class="bar" style="background:#fff;border-bottom:1px solid #e9edef;"></div>
+            <div class="row" style="top:30px;width:50%;background:#25D366;opacity:.25;border-radius:99px;height:14px;"></div>
+            <div class="row" style="top:56px;background:#eef2f1;"></div>
+            <div class="row" style="top:70px;width:70%;background:#eef2f1;"></div>
+            <div class="row" style="top:90px;width:45%;background:#d9fdd3;"></div>
+          </div>
+          <div class="tpl-body">
+            <h3>B · WhatsApp Productivity</h3>
+            <div class="tags"><span>Verde dominante</span><span>Conversacional</span><span>Pills</span></div>
+            <p>Header claro ao estilo WhatsApp Web, navegação em pills, bolhas de mensagem autênticas. Home = Conversas. O mais rápido de aprender.</p>
+            <a class="open" href="https://claude.ai/code/artifact/2773f124-f039-4632-9f71-d71d417b9747" target="_blank" rel="noopener">Abrir protótipo →</a>
+          </div>
+        </div>
+        <div class="tpl-card">
+          <div class="tpl-preview" style="background:#f2f4f7;">
+            <div class="bar" style="background:linear-gradient(180deg,#0f1a2c,#070d16);"></div>
+            <div class="row" style="top:34px;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.08);height:16px;"></div>
+            <div class="row" style="top:56px;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.08);"></div>
+            <div class="row" style="top:80px;width:55%;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.08);height:18px;"></div>
+          </div>
+          <div class="tpl-body">
+            <h3>C · Premium CRM</h3>
+            <div class="tags"><span>Navy + glow</span><span>Elevado</span><span>Rico em dados</span></div>
+            <p>Header navy com brilho verde subtil, cards elevados, sparklines cuidadas, rail de inteligência do cliente mais desenvolvido. Home = Dashboard.</p>
+            <a class="open" href="https://claude.ai/code/artifact/910334b9-ac23-4de3-9378-04feca65b13f" target="_blank" rel="noopener">Abrir protótipo →</a>
+          </div>
+        </div>
+      </div>
+
+      <table class="compare" id="comparacao">
+        <thead><tr><th>Dimensão</th><th>A · Commercial Clean</th><th>B · WhatsApp Productivity</th><th>C · Premium CRM</th></tr></thead>
+        <tbody>
+          <tr><td>Ecrã de entrada</td><td>Dashboard</td><td>Conversas</td><td>Dashboard</td></tr>
+          <tr><td>Uso do verde</td><td>Mínimo — só acção/estado</td><td>Dominante e controlado</td><td>Acento com glow, moderado</td></tr>
+          <tr><td>Densidade</td><td>Alta (tabelas)</td><td>Média (foco na conversa)</td><td>Média-alta (cards elevados)</td></tr>
+          <tr><td>Público mais óbvio</td><td>Equipas operacionais, ops/CS</td><td>PME que vive no WhatsApp</td><td>Empresas médias/grandes, gestão</td></tr>
+          <tr><td>Risco de implementação</td><td>Baixo — mais próximo do sistema actual</td><td>Médio — exige rigor no uso do verde</td><td>Médio-alto — mais componentes novos (sparklines, glow, rail)</td></tr>
+          <tr><td>Onde é mais forte</td><td>Vendas, Catálogo, Automação (dados)</td><td>Conversas, Contactos (relação)</td><td>Dashboard, apresentação a gestão/investidores</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="recomendacao">
+      <div class="callout">
+        <h3>Recomendação técnica</h3>
+        <p>As três cumprem o pedido, mas para um CRM cujo motor é o WhatsApp e cujo utilizador típico (PME moçambicana, dados em MZN, agente único a gerir várias conversas) valoriza velocidade sobre densidade analítica, o <strong>Template B (WhatsApp Productivity)</strong> é o ponto de partida mais forte — é o que melhor cumpre "simplicidade do WhatsApp + organização de CRM" do objectivo final. Uma combinação plausível: <strong>chrome e densidade de dados do Template A</strong> (Vendas, Catálogo, Automação) <strong>com a experiência de Conversas do Template B</strong> como ecrã de entrada — os dois principais já partilham o mesmo shell, pelo que combinar não implica recomeçar.</p>
+        <p class="ask">Os três conceitos estão preparados. Qual aprovas: A, B, C, ou uma combinação?</p>
+        <p style="font-size:12.5px;color:var(--ink-soft);margin-top:6px;">Não vou tocar na aplicação real até escreveres explicitamente que uma proposta está aprovada.</p>
+      </div>
+    </section>
+
+    <div class="footline">
+      Protótipos e este documento vivem em <code class="mono">docs/ui-prototypes/</code> — isolados de rotas, autenticação, Supabase e regras de negócio reais. Investigação: 3 agentes de leitura sobre <code class="mono">src/app</code>, <code class="mono">src/components</code>, <code class="mono">src/lib</code> e <code class="mono">supabase/migrations</code>.
+    </div>
+  </main>
+</div>

@@ -93,3 +93,33 @@ twice, turn it into a rule in `AGENTS.md` instead of a third log entry.
   any admin-configured JSON) key is read somewhere but the data looks
   wrong/missing, check whether the settings UI actually exposes that
   key before assuming the bug is in the code that reads it.
+
+- **This sandbox has no `.env.local` — every route 500s at
+  `src/middleware.ts` ("Your project's URL and Key are required to
+  create a Supabase client!") before it ever reaches a page.** There is
+  no seeded dev account either. That means `npm run dev` + Playwright
+  can prove a page *compiles*, but never that it *renders* for a real
+  signed-in user — don't claim visual/browser verification of any
+  `(dashboard)` route from this environment; say explicitly that only
+  typecheck/lint/build were possible, and ask the user to check
+  visually with their own `.env.local`.
+
+- **As of `bfa42d6` (2026-08-15/16), `main` does not build or pass
+  tests, independent of any other change** — `npm run build` fails
+  TypeScript on `src/lib/ai/tools/index.ts:733` (`templateKey` typed
+  `string | null` passed where `string` is expected), and `npm test`
+  has 15 pre-existing failures across `src/lib/ai/auto-reply.test.ts`,
+  `src/lib/ai/tools/index.test.ts`, plus a hard parse error in
+  `src/lib/ai/trace.test.ts:156`. All of it sits inside the
+  catalog-composition-engine subsystem added the same day (see the
+  "actively being designed" migration-churn note below) — reproduce
+  against a clean checkout before assuming a change caused these; as
+  of this writing they're already broken on `main` itself and someone
+  needs to fix `composeCatalogSolution`'s call site and the two test
+  files independently of any UI work.
+
+- **`package-lock.json` was out of sync with `package.json`** (`npm
+  ci` refused with "Missing: @swc/helpers@0.5.23 from lock file") —
+  `node_modules` isn't checked in, so a fresh clone needs `npm install`
+  (which repairs the lock file) rather than `npm ci` until someone
+  regenerates and commits a matching lockfile.
