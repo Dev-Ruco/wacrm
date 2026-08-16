@@ -23,6 +23,7 @@ import {
 } from './trace'
 import { loadAgentToolPermissions } from './tool-permissions'
 import { applySkillNarrowing, loadAgentSkills, skillsPrompt } from './skills'
+import { selectSkillsForTurn } from './skill-router'
 import { classifyIntent } from './route'
 import { cataloguePrefetchPrompt, prefetchCatalogueForConversation } from './catalog-prefetch'
 import {
@@ -271,21 +272,34 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
       return
     }
 
-    // Which tools the agent may call is decided ONLY by what the account
-    // itself configured — never narrowed further by intent classification.
-    // The model decides which of its available tools to use and when;
-    // that judgement call belongs to the model, not to a keyword list
-    // that can never anticipate an arbitrary tenant's own vocabulary
-    // (see route.ts's module doc for the live bug this replaced).
-    const [{ permissions, instructions: toolInstructions }, skills] = await Promise.all([
+    // Account tool configuration remains the hard permission boundary.
+    // Skills are routed semantically for THIS turn and may only narrow that
+    // boundary; a skill can never grant a tool the account did not enable.
+    // This avoids both tenant-specific keyword routing and the old bug where
+    // merely enabling any skill globally removed unrelated tools.
+    const [{ permissions, instructions: toolInstructions }, configuredSkills] = await Promise.all([
       loadAgentToolPermissions(db, accountId, config.agentId!),
       loadAgentSkills(db, accountId, config.agentId!),
     ])
-    // Skills only ever narrow what agent_tools already allows (handoff_human
-    // is exempt, see applySkillNarrowing) — an agent with zero skills
-    // configured gets `permissions` back unchanged, so this is a no-op for
-    // every account that hasn't opted into skills yet.
-    const effectivePermissions = applySkillNarrowing(permissions, skills)
+    const skillSelection = await selectSkillsForTurn({
+      skills: configuredSkills,
+      config,
+      messages,
+    })
+    const selectedSkills = skillSelection.skills
+
+    // The routing pass is a real provider call, so include it in usage/cost
+    // accounting independently of the customer-facing generation below.
+    void logAiUsage(db, {
+      accountId,
+      conversationId,
+      mode: 'auto_reply',
+      provider: config.provider,
+      model: config.model,
+      usage: skillSelection.usage,
+    })
+
+    const effectivePermissions = applySkillNarrowing(permissions, selectedSkills)
     const agentTools = createAutoReplyTools({
       db,
       accountId,
@@ -353,7 +367,7 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
     trace?.setMemoryMatchCount(memories.length)
     const memoryContext = contactMemoryPrompt(memories)
     const lessonsContext = lessonsPrompt(lessons)
-    const skillsContext = skillsPrompt(skills)
+    const skillsContext = skillsPrompt(selectedSkills)
 
     const baseSystemPrompt = buildSystemPrompt({
       userPrompt: config.systemPrompt,
@@ -378,7 +392,7 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
     console.info('[ai auto-reply] tools enabled:', {
       conversationId,
       provider: config.provider,
-      skills: skills.map((skill) => skill.name),
+      skills: selectedSkills.map((skill) => skill.name),
       tools: agentTools.tools.map((tool) => tool.name),
     })
 
