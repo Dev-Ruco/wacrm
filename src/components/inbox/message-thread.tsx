@@ -53,6 +53,11 @@ import { deleteAccountMedia } from "@/lib/storage/upload-media";
 import { TemplatePicker } from "./template-picker";
 import { AiThreadBanner } from "./ai-thread-banner";
 import { buildReplyPreview } from "./reply-quote";
+import {
+  cacheThreadMessages,
+  cacheThreadViewport,
+  getCachedThread,
+} from "@/lib/inbox/thread-memory";
 import { toast } from "sonner";
 
 interface ReplyDraft {
@@ -181,6 +186,7 @@ export function MessageThread({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showNewMessages, setShowNewMessages] = useState(false);
   const previousMessageCountRef = useRef(0);
+  const skipNextAutoFollowRef = useRef(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
@@ -217,6 +223,22 @@ export function MessageThread({
     messageId: string;
   } | null>(null);
 
+  const conversationId = conversation?.id;
+  const cachedThread = conversationId ? getCachedThread(conversationId) : null;
+  // The parent deliberately clears its message array when another thread is
+  // selected. Keep the last rendered snapshot for a visited conversation so
+  // returning to it is immediate; Supabase still revalidates in the background.
+  const visibleMessages =
+    messages.length > 0 ? messages : cachedThread?.messages ?? messages;
+
+  // Realtime/optimistic parent updates become the next instant snapshot. An
+  // empty array is written by the authoritative fetch below instead, so the
+  // parent's transient [] during navigation never destroys a useful cache.
+  useEffect(() => {
+    if (!conversationId || messages.length === 0) return;
+    cacheThreadMessages(conversationId, messages);
+  }, [conversationId, messages]);
+
   // Profiles are bounded by RLS to rows the current user is allowed to
   // see — today that's just the current user, but the dropdown keeps the
   // shape ready for shared-team workspaces without a refactor.
@@ -242,10 +264,10 @@ export function MessageThread({
 
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
-    if (!messages.length) return { expired: false, remaining: "" };
+    if (!visibleMessages.length) return { expired: false, remaining: "" };
 
     // Find last customer message
-    const lastCustomerMsg = [...messages]
+    const lastCustomerMsg = [...visibleMessages]
       .reverse()
       .find((m) => m.sender_type === "customer");
 
@@ -265,7 +287,7 @@ export function MessageThread({
         : tTimer("xmRemaining", { minutes: Math.floor(hoursLeft * 60) });
 
     return { expired, remaining };
-  }, [messages, tTimer]);
+  }, [visibleMessages, tTimer]);
 
   // Store latest callback in a ref so fetchMessages doesn't need to
   // depend on `onMessagesLoaded` — otherwise parent re-renders cause
@@ -279,7 +301,6 @@ export function MessageThread({
     onMessagesLoadedRef.current = onMessagesLoaded;
   });
 
-  const conversationId = conversation?.id;
   const hasUnread = (conversation?.unread_count ?? 0) > 0;
 
   const mediaMessageId =
@@ -319,7 +340,12 @@ export function MessageThread({
       if (error) {
         console.error("Failed to fetch messages:", error);
       } else {
-        onMessagesLoadedRef.current(data ?? []);
+        const loaded = (data ?? []) as Message[];
+        // This is the authoritative refresh, so even [] must replace an older
+        // snapshot. The visible cached thread stays on screen until this call
+        // causes the parent to render the fresh result.
+        cacheThreadMessages(conversationId, loaded);
+        onMessagesLoadedRef.current(loaded);
       }
 
       if (!cancelled) setLoading(false);
@@ -439,10 +465,27 @@ export function MessageThread({
 
   // Clear any in-progress reply draft when the active conversation changes —
   // a quote pulled from conversation A shouldn't bleed into conversation B.
+  // A visited thread restores its reading position instead of always jumping
+  // through a loading screen and back to the newest message.
   useEffect(() => {
     setReplyTo(null);
-    previousMessageCountRef.current = 0;
+    const cached = conversationId ? getCachedThread(conversationId) : null;
+    previousMessageCountRef.current = cached?.messages.length ?? 0;
+    skipNextAutoFollowRef.current = true;
     setShowNewMessages(false);
+
+    if (!conversationId) return;
+    const viewport = cached?.viewport ?? null;
+    requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (!el) return;
+      if (!viewport || viewport.atBottom) {
+        el.scrollTop = el.scrollHeight;
+      } else {
+        const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+        el.scrollTop = Math.min(viewport.scrollTop, maxScrollTop);
+      }
+    });
   }, [conversationId]);
 
   // Reset the server-side unread_count to 0 whenever an unread count
@@ -470,15 +513,27 @@ export function MessageThread({
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    if (conversationId) {
+      cacheThreadViewport(conversationId, {
+        scrollTop: el.scrollHeight,
+        atBottom: true,
+      });
+    }
     setShowNewMessages(false);
-  }, []);
+  }, [conversationId]);
 
   const handleThreadScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (conversationId) {
+      cacheThreadViewport(conversationId, {
+        scrollTop: el.scrollTop,
+        atBottom: distanceFromBottom < 80,
+      });
+    }
     if (distanceFromBottom < 80) setShowNewMessages(false);
-  }, []);
+  }, [conversationId]);
 
   // Follow the conversation only while the operator is already near the end.
   // If they are reading history, keep their position and show a compact
@@ -487,16 +542,33 @@ export function MessageThread({
     const el = scrollRef.current;
     if (!el) return;
 
+    // The conversation-change effect owns the first positioning pass. Without
+    // this guard, the generic "first messages => go to bottom" rule would
+    // immediately overwrite the restored scrollTop of a cached thread.
+    if (skipNextAutoFollowRef.current) {
+      skipNextAutoFollowRef.current = false;
+      previousMessageCountRef.current = visibleMessages.length;
+      return;
+    }
+
     const previousCount = previousMessageCountRef.current;
-    const hasNewMessages = messages.length > previousCount;
+    const hasNewMessages = visibleMessages.length > previousCount;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const shouldFollow = previousCount === 0 || distanceFromBottom < 160;
-    previousMessageCountRef.current = messages.length;
+    previousMessageCountRef.current = visibleMessages.length;
 
     if (shouldFollow) {
       requestAnimationFrame(() => {
         const current = scrollRef.current;
-        if (current) current.scrollTop = current.scrollHeight;
+        if (current) {
+          current.scrollTop = current.scrollHeight;
+          if (conversationId) {
+            cacheThreadViewport(conversationId, {
+              scrollTop: current.scrollTop,
+              atBottom: true,
+            });
+          }
+        }
       });
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowNewMessages(false);
@@ -504,7 +576,7 @@ export function MessageThread({
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowNewMessages(true);
     }
-  }, [messages]);
+  }, [visibleMessages, conversationId]);
 
   const handleSend = useCallback(
     async (text: string, replyToId?: string) => {
@@ -775,13 +847,16 @@ export function MessageThread({
   // an extra fetch — the thread already holds the full conversation.
   const messagesById = useMemo(() => {
     const map = new Map<string, Message>();
-    for (const m of messages) map.set(m.id, m);
+    for (const m of visibleMessages) map.set(m.id, m);
     return map;
-  }, [messages]);
+  }, [visibleMessages]);
 
   // Images + videos in the thread, in order — the set the media viewer
   // pages through with ← / →.
-  const mediaGallery = useMemo(() => collectMediaGallery(messages), [messages]);
+  const mediaGallery = useMemo(
+    () => collectMediaGallery(visibleMessages),
+    [visibleMessages],
+  );
 
   // Bucket reactions by their target message_id for O(1) per-bubble lookup.
   const reactionsByMessageId = useMemo(() => {
@@ -923,7 +998,7 @@ export function MessageThread({
   }
 
   const displayName = contact.name || contact.phone;
-  const messageGroups = groupMessagesByDate(messages);
+  const messageGroups = groupMessagesByDate(visibleMessages);
   const currentStatus = STATUS_OPTIONS.find(
     (s) => s.value === conversation.status
   );
@@ -1138,11 +1213,11 @@ export function MessageThread({
 
       {/* Messages Area */}
       <div ref={scrollRef} onScroll={handleThreadScroll} className="flex-1 overflow-y-auto px-3 py-3 sm:px-5 sm:py-4 lg:px-6">
-        {loading ? (
+        {loading && visibleMessages.length === 0 ? (
           <div className="flex items-center justify-center py-12">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
-        ) : messages.length === 0 ? (
+        ) : visibleMessages.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12">
             <p className="text-sm text-muted-foreground">{t("noMessagesYet")}</p>
             <p className="text-xs text-muted-foreground">
