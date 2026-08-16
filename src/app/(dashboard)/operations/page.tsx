@@ -318,9 +318,7 @@ export default function OperationsPage() {
       <div>
         <div className="flex items-center gap-2">
           <Building2 className="text-primary h-6 w-6" />
-          <h1 className="text-foreground text-2xl font-bold tracking-tight">
-            Operação
-          </h1>
+          <h1 className="text-page-title">Operação</h1>
         </div>
         <p className="text-muted-foreground mt-1 text-sm">
           Pessoas, locais, recursos e horários associados às ofertas da empresa.

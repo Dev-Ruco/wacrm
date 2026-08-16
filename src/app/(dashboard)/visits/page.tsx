@@ -50,12 +50,19 @@ export default function VisitsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/scheduled-visits', { cache: 'no-store' });
+      const response = await fetch('/api/scheduled-visits', {
+        cache: 'no-store',
+      });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? 'Não foi possível carregar as visitas.');
+      if (!response.ok)
+        throw new Error(data.error ?? 'Não foi possível carregar as visitas.');
       setVisits(data.visits ?? []);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível carregar as visitas.');
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível carregar as visitas.'
+      );
     } finally {
       setLoading(false);
     }
@@ -65,7 +72,10 @@ export default function VisitsPage() {
     void load();
   }, [load]);
 
-  const setStatus = async (id: string, status: 'completed' | 'cancelled' | 'no_show') => {
+  const setStatus = async (
+    id: string,
+    status: 'completed' | 'cancelled' | 'no_show'
+  ) => {
     setActing(id);
     try {
       const response = await fetch(`/api/scheduled-visits/${id}`, {
@@ -74,42 +84,53 @@ export default function VisitsPage() {
         body: JSON.stringify({ status }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error ?? 'Não foi possível actualizar a visita.');
-      setVisits((current) =>
-        current?.map((visit) => (visit.id === id ? { ...visit, status } : visit)) ?? null,
+      if (!response.ok)
+        throw new Error(data.error ?? 'Não foi possível actualizar a visita.');
+      setVisits(
+        (current) =>
+          current?.map((visit) =>
+            visit.id === id ? { ...visit, status } : visit
+          ) ?? null
       );
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Não foi possível actualizar a visita.');
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Não foi possível actualizar a visita.'
+      );
     } finally {
       setActing(null);
     }
   };
 
-  const upcoming = (visits ?? []).filter((visit) => visit.status === 'scheduled');
+  const upcoming = (visits ?? []).filter(
+    (visit) => visit.status === 'scheduled'
+  );
   const past = (visits ?? []).filter((visit) => visit.status !== 'scheduled');
 
   return (
     <div>
       <div className="flex items-center gap-2">
-        <CalendarClock className="h-6 w-6 text-primary" />
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">Visitas agendadas</h1>
+        <CalendarClock className="text-primary h-6 w-6" />
+        <h1 className="text-page-title">Visitas agendadas</h1>
       </div>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Visitas à loja marcadas pelo agente de IA (ferramenta &quot;Agendar visita&quot;) ou pela equipa.
+      <p className="text-muted-foreground mt-1 text-sm">
+        Visitas à loja marcadas pelo agente de IA (ferramenta &quot;Agendar
+        visita&quot;) ou pela equipa.
       </p>
 
       {loading ? (
         <div className="mt-8 flex min-h-32 items-center justify-center">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          <Loader2 className="text-muted-foreground h-5 w-5 animate-spin" />
         </div>
       ) : (
         <div className="mt-6 space-y-8">
           <section>
-            <h2 className="mb-2 text-sm font-medium text-foreground">
+            <h2 className="text-foreground mb-2 text-sm font-medium">
               Por vir ({upcoming.length})
             </h2>
             {upcoming.length === 0 ? (
-              <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+              <div className="border-border bg-muted/40 text-muted-foreground rounded-lg border px-3 py-2 text-sm">
                 Nenhuma visita marcada ainda.
               </div>
             ) : (
@@ -120,20 +141,26 @@ export default function VisitsPage() {
                     <TableHead>Data e hora</TableHead>
                     <TableHead>Notas</TableHead>
                     <TableHead>Estado</TableHead>
-                    {canManage && <TableHead className="text-right">Acções</TableHead>}
+                    {canManage && (
+                      <TableHead className="text-right">Acções</TableHead>
+                    )}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {upcoming.map((visit) => (
                     <TableRow key={visit.id}>
                       <TableCell>
-                        <p className="font-medium text-foreground">
+                        <p className="text-foreground font-medium">
                           {visit.contact?.name || 'Sem nome'}
                         </p>
-                        <p className="text-xs text-muted-foreground">{visit.contact?.phone}</p>
+                        <p className="text-muted-foreground text-xs">
+                          {visit.contact?.phone}
+                        </p>
                       </TableCell>
-                      <TableCell>{DATE_FORMATTER.format(new Date(visit.scheduled_at))}</TableCell>
-                      <TableCell className="max-w-xs truncate text-muted-foreground">
+                      <TableCell>
+                        {DATE_FORMATTER.format(new Date(visit.scheduled_at))}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground max-w-xs truncate">
                         {visit.notes || '—'}
                       </TableCell>
                       <TableCell>
@@ -148,7 +175,9 @@ export default function VisitsPage() {
                               size="sm"
                               variant="outline"
                               disabled={acting === visit.id}
-                              onClick={() => void setStatus(visit.id, 'completed')}
+                              onClick={() =>
+                                void setStatus(visit.id, 'completed')
+                              }
                             >
                               <Check className="h-3.5 w-3.5" /> Concluída
                             </Button>
@@ -156,7 +185,9 @@ export default function VisitsPage() {
                               size="sm"
                               variant="outline"
                               disabled={acting === visit.id}
-                              onClick={() => void setStatus(visit.id, 'cancelled')}
+                              onClick={() =>
+                                void setStatus(visit.id, 'cancelled')
+                              }
                             >
                               <X className="h-3.5 w-3.5" /> Cancelar
                             </Button>
@@ -172,7 +203,9 @@ export default function VisitsPage() {
 
           {past.length > 0 && (
             <section>
-              <h2 className="mb-2 text-sm font-medium text-foreground">Histórico</h2>
+              <h2 className="text-foreground mb-2 text-sm font-medium">
+                Histórico
+              </h2>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -185,10 +218,16 @@ export default function VisitsPage() {
                   {past.map((visit) => (
                     <TableRow key={visit.id}>
                       <TableCell>
-                        <p className="text-foreground">{visit.contact?.name || 'Sem nome'}</p>
-                        <p className="text-xs text-muted-foreground">{visit.contact?.phone}</p>
+                        <p className="text-foreground">
+                          {visit.contact?.name || 'Sem nome'}
+                        </p>
+                        <p className="text-muted-foreground text-xs">
+                          {visit.contact?.phone}
+                        </p>
                       </TableCell>
-                      <TableCell>{DATE_FORMATTER.format(new Date(visit.scheduled_at))}</TableCell>
+                      <TableCell>
+                        {DATE_FORMATTER.format(new Date(visit.scheduled_at))}
+                      </TableCell>
                       <TableCell>
                         <Badge variant={STATUS_META[visit.status].variant}>
                           {STATUS_META[visit.status].label}

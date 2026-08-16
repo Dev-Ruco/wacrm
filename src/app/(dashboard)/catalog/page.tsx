@@ -94,9 +94,7 @@ export default function CatalogPage() {
         <div>
           <div className="flex items-center gap-2">
             <PackageSearch className="text-primary h-6 w-6" />
-            <h1 className="text-foreground text-2xl font-bold tracking-tight">
-              Catálogo
-            </h1>
+            <h1 className="text-page-title">Catálogo</h1>
           </div>
           <p className="text-muted-foreground mt-1 text-sm">
             Ofertas, estrutura comercial e fontes de dados usadas pelo agente no
