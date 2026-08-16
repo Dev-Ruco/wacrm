@@ -10,7 +10,6 @@ import {
 import {
   Send,
   LayoutTemplate,
-  Paperclip,
   Image as ImageIcon,
   Video,
   FileText,
@@ -29,6 +28,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -216,9 +216,54 @@ export function MessageComposer({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    // Max 4 lines (~96px)
-    el.style.height = `${Math.min(el.scrollHeight, 96)}px`;
+    // Grow naturally, capped at roughly five lines.
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }, []);
+
+  const persistTextDraft = useCallback(
+    (value: string) => {
+      try {
+        const key = `wacrm:composer-draft:${conversationId}`;
+        if (value) sessionStorage.setItem(key, value);
+        else sessionStorage.removeItem(key);
+      } catch {
+        // Storage may be unavailable in hardened/private browser contexts.
+      }
+    },
+    [conversationId]
+  );
+
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem(`wacrm:composer-draft:${conversationId}`) ?? '';
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setText(saved);
+      requestAnimationFrame(adjustHeight);
+    } catch {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setText('');
+    }
+  }, [conversationId, adjustHeight]);
+
+  useEffect(() => {
+    const handleExternalDraft = (event: Event) => {
+      const detail = (event as CustomEvent<{ conversationId?: string; text?: string }>).detail;
+      if (detail?.conversationId !== conversationId || !detail.text) return;
+      setText(detail.text);
+      persistTextDraft(detail.text);
+      requestAnimationFrame(() => {
+        adjustHeight();
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(el.value.length, el.value.length);
+        }
+      });
+    };
+
+    window.addEventListener('wacrm:composer-draft', handleExternalDraft);
+    return () => window.removeEventListener('wacrm:composer-draft', handleExternalDraft);
+  }, [adjustHeight, conversationId, persistTextDraft]);
 
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
@@ -228,13 +273,14 @@ export function MessageComposer({
     try {
       onSend(trimmed, replyTo?.id);
       setText("");
+      persistTextDraft("");
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
       }
     } finally {
       setSending(false);
     }
-  }, [text, sending, sessionExpired, onSend, replyTo?.id]);
+  }, [text, sending, sessionExpired, onSend, replyTo?.id, persistTextDraft]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -249,9 +295,10 @@ export function MessageComposer({
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setText(e.target.value);
+      persistTextDraft(e.target.value);
       adjustHeight();
     },
-    [adjustHeight]
+    [adjustHeight, persistTextDraft]
   );
 
   // Ask the AI assistant for a suggested reply and drop it into the
@@ -281,6 +328,7 @@ export function MessageComposer({
         return;
       }
       setText(draftText);
+      persistTextDraft(draftText);
       // Let the textarea grow to fit and drop the cursor at the end so
       // the agent can tweak immediately.
       requestAnimationFrame(() => {
@@ -296,7 +344,7 @@ export function MessageComposer({
     } finally {
       setDrafting(false);
     }
-  }, [drafting, conversationId, adjustHeight]);
+  }, [drafting, conversationId, adjustHeight, persistTextDraft]);
 
   // ---- Interactive message + quick replies --------------------------
 
@@ -366,9 +414,11 @@ export function MessageComposer({
       const body = qr.content_text ?? "";
       // Separate the snippet from any existing draft with a newline so the
       // words don't run together ("Thanks" + "we'll…" → "Thankswe'll…").
-      setText((prev) =>
-        prev && !/\s$/.test(prev) ? `${prev}\n${body}` : `${prev}${body}`,
-      );
+      setText((prev) => {
+        const next = prev && !/\s$/.test(prev) ? `${prev}\n${body}` : `${prev}${body}`;
+        persistTextDraft(next);
+        return next;
+      });
       requestAnimationFrame(() => {
         adjustHeight();
         const el = textareaRef.current;
@@ -378,7 +428,7 @@ export function MessageComposer({
         }
       });
     },
-    [openInteractiveBuilder, adjustHeight],
+    [openInteractiveBuilder, adjustHeight, persistTextDraft],
   );
 
   // Upload a captured file to chat-media and stage it as a draft.
@@ -536,7 +586,7 @@ export function MessageComposer({
   // ---- Render --------------------------------------------------------
 
   return (
-    <div className="border-t border-border bg-card p-3">
+    <div className="border-border bg-card border-t px-3 py-2.5">
       {replyTo && (
         <div className="mb-2">
           <ReplyQuote
@@ -629,70 +679,50 @@ export function MessageComposer({
           </Button>
         </div>
       ) : (
-        <div className="flex items-end gap-2">
-          {/* Attach menu — photo / video / document / voice. */}
+        <div className="border-border bg-background focus-within:border-primary/40 focus-within:ring-primary/10 flex items-end gap-1.5 rounded-2xl border p-1.5 shadow-sm transition focus-within:ring-2">
+          {/* One action menu keeps attachments, templates and rich messages
+              discoverable without four competing icon buttons. */}
           <DropdownMenu>
             <DropdownMenuTrigger
-              disabled={inputsDisabled || busy}
-              title={
-                readOnly
-                  ? t("readOnlyTitle")
-                  : inputsDisabled
-                    ? undefined
-                    : t("attachMedia")
-              }
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={readOnly || busy}
+              title={readOnly ? t("readOnlyTitle") : t("moreActions")}
+              className="hover:bg-muted hover:text-foreground inline-flex size-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
               {busy ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="size-4 animate-spin" />
               ) : (
-                <Paperclip className="h-4 w-4" />
+                <Plus className="size-5" />
               )}
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="border-border bg-popover">
-              <DropdownMenuItem onClick={() => imageInputRef.current?.click()}>
-                <ImageIcon className="mr-2 h-4 w-4" />
+            <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuItem disabled={inputsDisabled} onClick={() => imageInputRef.current?.click()}>
+                <ImageIcon className="size-4" />
                 {t("photo")}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => videoInputRef.current?.click()}>
-                <Video className="mr-2 h-4 w-4" />
+              <DropdownMenuItem disabled={inputsDisabled} onClick={() => videoInputRef.current?.click()}>
+                <Video className="size-4" />
                 {t("video")}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => documentInputRef.current?.click()}>
-                <FileText className="mr-2 h-4 w-4" />
+              <DropdownMenuItem disabled={inputsDisabled} onClick={() => documentInputRef.current?.click()}>
+                <FileText className="size-4" />
                 {t("document")}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void startRecording()}>
-                <Mic className="mr-2 h-4 w-4" />
+              <DropdownMenuItem disabled={inputsDisabled} onClick={() => void startRecording()}>
+                <Mic className="size-4" />
                 {t("voiceNote")}
               </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {/* + menu — interactive messages + quick replies. Gated on the
-              24h window like free-form text (interactive requires it). */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              disabled={inputsDisabled}
-              title={
-                readOnly
-                  ? t("readOnlyTitle")
-                  : inputsDisabled
-                    ? undefined
-                    : t("moreActions")
-              }
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Plus className="h-4 w-4" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="border-border bg-popover">
-              <DropdownMenuItem onClick={() => openInteractiveBuilder()}>
-                <MessageSquareDashed className="mr-2 h-4 w-4" />
+              <DropdownMenuSeparator />
+              <DropdownMenuItem disabled={inputsDisabled} onClick={() => openInteractiveBuilder()}>
+                <MessageSquareDashed className="size-4" />
                 {t("interactiveMessage")}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setQuickReplyOpen(true)}>
-                <Zap className="mr-2 h-4 w-4" />
+              <DropdownMenuItem disabled={inputsDisabled} onClick={() => setQuickReplyOpen(true)}>
+                <Zap className="size-4" />
                 {t("quickReplies")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onOpenTemplates}>
+                <LayoutTemplate className="size-4" />
+                {t("templates")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -702,28 +732,17 @@ export function MessageComposer({
             size="sm"
             canAct={!readOnly}
             gateReason="send messages"
-            title={readOnly ? undefined : t("sendTemplate")}
-            className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground"
-            onClick={onOpenTemplates}
-          >
-            <LayoutTemplate className="h-4 w-4" />
-          </GatedButton>
-
-          <GatedButton
-            variant="ghost"
-            size="sm"
-            canAct={!readOnly}
-            gateReason="send messages"
-            disabled={drafting}
+            disabled={drafting || sessionExpired}
             title={readOnly ? undefined : t("draftWithAI")}
-            className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-primary"
+            className="hover:bg-primary/10 hover:text-primary h-10 shrink-0 gap-1.5 rounded-xl px-2.5 text-muted-foreground"
             onClick={handleDraft}
           >
             {drafting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="size-4 animate-spin" />
             ) : (
-              <Sparkles className="h-4 w-4" />
+              <Sparkles className="size-4" />
             )}
+            <span className="hidden text-xs font-medium sm:inline">IA</span>
           </GatedButton>
 
           <textarea
@@ -736,7 +755,7 @@ export function MessageComposer({
                 ? t("readOnlyPlaceholder")
                 : sessionExpired
                   ? t("sessionExpiredPlaceholder")
-                  : t("typeMessagePlaceholder")
+                  : t("typeMessagePlaceholder").split(" (")[0]
             }
             disabled={sessionExpired || readOnly}
             rows={1}
@@ -745,7 +764,7 @@ export function MessageComposer({
             // The placeholder text also surfaces the read-only state.
             title={readOnly ? t("readOnlyTitle") : undefined}
             className={cn(
-              "flex-1 resize-none rounded-xl border border-border bg-muted px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50",
+              "min-h-10 flex-1 resize-none border-0 bg-transparent px-2.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-0",
               (sessionExpired || readOnly) && "cursor-not-allowed opacity-50"
             )}
           />
@@ -756,23 +775,14 @@ export function MessageComposer({
             gateReason="send messages"
             disabled={!text.trim() || sessionExpired || sending}
             onClick={handleSend}
-            className="wa-send-button h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90 disabled:opacity-40"
+            className="wa-send-button bg-primary hover:bg-primary/90 size-10 shrink-0 rounded-xl p-0 disabled:opacity-30"
           >
             <Send className="h-4 w-4" />
           </GatedButton>
         </div>
       )}
 
-      {/* Hint sits outside the flex row so its height doesn't push
-          `items-end` buttons below the textarea. Indented to line up
-          under the textarea left edge. */}
-      {!draft && !recording && (
-        <p className="mt-1 pl-[5.5rem] text-[10px] text-muted-foreground">
-          {t("draftHint")}
-        </p>
-      )}
-
-      {/* Interactive-message builder dialog. */}
+      {/* Interactive-message builder dialog. */}      {/* Interactive-message builder dialog. */}
       <Dialog open={interactiveOpen} onOpenChange={setInteractiveOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
