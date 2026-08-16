@@ -147,7 +147,7 @@
 <div class="topbar">
   <div class="mark">W</div>
   <strong>WACRM Blueprint — Redesign visual &amp; UX</strong>
-  <div class="status"><span class="dot"></span>Fase 1 · Descoberta — a aguardar aprovação</div>
+  <div class="status" style="background:var(--brand-soft);border-color:transparent;color:var(--brand-ink);"><span class="dot" style="background:var(--brand-ink);"></span>Fase 1-4 implementadas (shell) — em <code style="font-size:10.5px;">main</code> local, a aguardar confirmação visual</div>
 </div>
 
 <div class="wrap">
@@ -166,7 +166,7 @@
 
   <main>
     <section id="intro">
-      <div class="eyebrow">Descoberta — nenhuma alteração feita à aplicação real</div>
+      <div class="eyebrow">Descoberta + Fase 1-4 implementada — shell em produção, conteúdo por página ainda por fazer</div>
       <h1 class="title">Redesign visual e de UX do WACRM</h1>
       <p class="lede">Auditoria completa da IA, navegação e sistema visual actuais do WACRM (repositório <code>Dev-Ruco/wacrm</code>), seguida de uma arquitectura proposta e três protótipos genuinamente distintos. Tudo o que se segue foi derivado do código real — 3 agentes de investigação leram as rotas, os componentes e as migrações Supabase; nada aqui foi inventado.</p>
     </section>
@@ -286,24 +286,25 @@ Settings         <span class="dim">rail com 12 secções, 3 grupos</span>
       </figure>
 
       <table class="map">
-        <thead><tr><th>Áreas actuais (sidebar)</th><th></th><th>Área no novo header</th><th>Submenu contextual proposto</th></tr></thead>
+        <thead><tr><th>Áreas actuais (sidebar)</th><th></th><th>Área no novo header</th><th>Submenu contextual</th><th>Estado</th></tr></thead>
         <tbody>
-          <tr><td class="old">Dashboard</td><td class="arrow">→</td><td><strong>Dashboard</strong></td><td class="old">— (sem submenu)</td></tr>
-          <tr><td class="old">Inbox</td><td class="arrow">→</td><td rowspan="1"><strong>Conversas</strong></td><td>Todas · Não lidas · Pendentes · Minhas · Arquivadas</td></tr>
-          <tr><td class="old">Notifications</td><td class="arrow">→</td><td>Sino no header <span class="old">(resolve achado #6)</span></td><td class="old">—</td></tr>
-          <tr><td class="old">Contacts</td><td class="arrow">→</td><td><strong>Contactos</strong></td><td class="old">— (filtros em página)</td></tr>
-          <tr><td class="old">Pipelines</td><td class="arrow">→</td><td rowspan="2"><strong>Vendas</strong></td><td>Pipeline</td></tr>
-          <tr><td class="old">Visitas</td><td class="arrow">→</td><td>Visitas agendadas</td></tr>
-          <tr><td class="old">Catálogo (6 tabs)</td><td class="arrow">→</td><td rowspan="2"><strong>Catálogo</strong></td><td>Produtos · Estrutura da oferta · Composições · Categorias · <strong>Disponibilidade &amp; Operações</strong> · Saúde · Integrações</td></tr>
-          <tr><td class="old">Operations <span class="old">(órfã)</span></td><td class="arrow">→</td><td class="old">fundida na tab acima <span class="old">(resolve achado #1)</span></td></tr>
-          <tr><td class="old">Automations</td><td class="arrow">→</td><td rowspan="3"><strong>Automação</strong></td><td>Regras</td></tr>
-          <tr><td class="old">Flows</td><td class="arrow">→</td><td>Fluxos</td></tr>
-          <tr><td class="old">Agentes de IA</td><td class="arrow">→</td><td>Agentes IA</td></tr>
-          <tr><td class="old">Broadcasts</td><td class="arrow">→</td><td><strong>Campanhas</strong></td><td class="old">— (lista + relatório)</td></tr>
-          <tr><td class="old">Settings</td><td class="arrow">→</td><td>Menu de conta no header <span class="old">(1 só menu, resolve achado #3)</span></td><td class="old">—</td></tr>
+          <tr><td class="old">Dashboard</td><td class="arrow">→</td><td><strong>Dashboard</strong></td><td class="old">— (sem submenu)</td><td>✅ implementado</td></tr>
+          <tr><td class="old">Inbox</td><td class="arrow">→</td><td rowspan="1"><strong>Conversas</strong></td><td>— por agora (filtro fica dentro da página, como hoje)</td><td>⏳ Fase 6 — Todas/Não lidas/Pendentes/Minhas/Arquivadas só quando o Inbox passar a ler o filtro do URL</td></tr>
+          <tr><td class="old">Notifications</td><td class="arrow">→</td><td>Sino no header <span class="old">(resolve achado #6)</span></td><td class="old">—</td><td>✅ implementado</td></tr>
+          <tr><td class="old">Contacts</td><td class="arrow">→</td><td><strong>Contactos</strong></td><td class="old">— (filtros em página)</td><td>✅ implementado</td></tr>
+          <tr><td class="old">Pipelines</td><td class="arrow">→</td><td rowspan="2"><strong>Vendas</strong></td><td>Pipeline</td><td>✅ implementado</td></tr>
+          <tr><td class="old">Visitas</td><td class="arrow">→</td><td>Visitas agendadas</td><td>✅ implementado</td></tr>
+          <tr><td class="old">Catálogo (6 tabs)</td><td class="arrow">→</td><td rowspan="2"><strong>Catálogo</strong></td><td>Produtos · <strong>Disponibilidade &amp; Operações</strong></td><td>✅ implementado (só estas 2 — as outras 4: Estrutura da oferta, Composições, Categorias, Saúde, Integrações continuam dentro da própria página, ainda não ligadas a um URL)</td></tr>
+          <tr><td class="old">Operations <span class="old">(órfã)</span></td><td class="arrow">→</td><td class="old">fundida na tab acima <span class="old">(resolve achado #1)</span></td><td class="old"></td><td>✅ implementado</td></tr>
+          <tr><td class="old">Automations</td><td class="arrow">→</td><td rowspan="3"><strong>Automação</strong></td><td>Regras</td><td>✅ implementado</td></tr>
+          <tr><td class="old">Flows</td><td class="arrow">→</td><td>Fluxos</td><td>✅ implementado</td></tr>
+          <tr><td class="old">Agentes de IA</td><td class="arrow">→</td><td>Agentes IA</td><td>✅ implementado</td></tr>
+          <tr><td class="old">Broadcasts</td><td class="arrow">→</td><td><strong>Campanhas</strong></td><td class="old">— (lista + relatório)</td><td>✅ implementado</td></tr>
+          <tr><td class="old">Settings</td><td class="arrow">→</td><td>Menu de conta no header <span class="old">(1 só menu, resolve achado #3)</span></td><td class="old">—</td><td>✅ implementado</td></tr>
         </tbody>
       </table>
       <p style="margin-top:16px;font-size:12.8px;color:var(--ink-soft);">Automação e Vendas agrupam sistemas que já hoje são tecnicamente distintos (regras vs. fluxos com estado vs. bot de IA; pipeline vs. visitas agendadas) mas partilham a mesma intenção comercial — exactamente o exemplo que o briefing deu para "Automação".</p>
+      <p style="margin-top:10px;font-size:12.8px;color:var(--ink-soft);">A regra seguida na implementação: o submenu contextual só liga a rotas que <em>já existem e já renderizam</em> sozinhas — nunca a um separador que só existe como estado local dentro de outra página. É por isso que Conversas ainda não tem submenu (o filtro do Inbox hoje é <code>useState</code>, não URL) e Catálogo só expõe 2 dos 6 separadores. Ligar os restantes é trabalho de página (Fase 6 e Fase 9), não do shell.</p>
     </section>
 
     <section id="design-system">
@@ -440,8 +441,7 @@ Settings         <span class="dim">rail com 12 secções, 3 grupos</span>
       <div class="callout">
         <h3>Recomendação técnica</h3>
         <p>As três cumprem o pedido, mas para um CRM cujo motor é o WhatsApp e cujo utilizador típico (PME moçambicana, dados em MZN, agente único a gerir várias conversas) valoriza velocidade sobre densidade analítica, o <strong>Template B (WhatsApp Productivity)</strong> é o ponto de partida mais forte — é o que melhor cumpre "simplicidade do WhatsApp + organização de CRM" do objectivo final. Uma combinação plausível: <strong>chrome e densidade de dados do Template A</strong> (Vendas, Catálogo, Automação) <strong>com a experiência de Conversas do Template B</strong> como ecrã de entrada — os dois principais já partilham o mesmo shell, pelo que combinar não implica recomeçar.</p>
-        <p class="ask">Os três conceitos estão preparados. Qual aprovas: A, B, C, ou uma combinação?</p>
-        <p style="font-size:12.5px;color:var(--ink-soft);margin-top:6px;">Não vou tocar na aplicação real até escreveres explicitamente que uma proposta está aprovada.</p>
+        <p><strong>Actualização:</strong> a proposta foi aprovada (B como base + densidade do A nos módulos de dados) e a Fase 1-4 (tokens reutilizados, header, submenu contextual, shell) já está implementada e mesclada em <code style="font-size:11.5px;">main</code> local — ver a tabela de mapeamento acima para o que já é real vs. o que ainda depende de trabalho por página. Ainda não foi possível confirmar visualmente num browser autenticado (este ambiente não tem credenciais Supabase); as fases seguintes — Dashboard, Conversas, Contactos, Vendas, Catálogo, Automação, Campanhas — tiveram apenas correcções seguras e mecânicas (títulos consistentes, sem tocar em kanban/canvas/realtime).</p>
       </div>
     </section>
 
