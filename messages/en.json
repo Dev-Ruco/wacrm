@@ -57,6 +57,39 @@
     "menuSettings": "Settings",
     "menuSignOut": "Sign out"
   },
+  "Nav": {
+    "areas": {
+      "dashboard": "Dashboard",
+      "conversas": "Conversations",
+      "contactos": "Contacts",
+      "vendas": "Sales",
+      "catalogo": "Catalog",
+      "automacao": "Automation",
+      "campanhas": "Campaigns"
+    },
+    "submenu": {
+      "pipeline": "Pipeline",
+      "visits": "Scheduled visits",
+      "products": "Products",
+      "operations": "Availability & Operations",
+      "rules": "Rules",
+      "flows": "Flows",
+      "aiAgents": "AI Agents"
+    },
+    "beta": "Beta",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu",
+    "notifications": "Notifications",
+    "viewAllNotifications": "View all notifications",
+    "unreadConversations": "{count} unread {count, plural, =1 {conversation} other {conversations}}",
+    "unreadNotifications": "{count} unread {count, plural, =1 {notification} other {notifications}}",
+    "openAccountMenu": "Open account menu",
+    "defaultUser": "User",
+    "defaultAvatar": "Avatar",
+    "menuProfile": "Profile",
+    "menuSettings": "Settings",
+    "menuSignOut": "Sign out"
+  },
   "ModeToggle": {
     "switchMode": "Switch to {mode} mode"
   },

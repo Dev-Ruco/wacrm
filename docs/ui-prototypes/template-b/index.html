@@ -1,0 +1,321 @@
+<title>WhatsApp Productivity</title>
+<style>
+  :root{
+    --ink:#111b21; --ink-soft:#667781; --ink-faint:#8b98a3;
+    --paper:#ffffff; --paper-sunken:#f7f9fa; --paper-recessed:#eef2f1;
+    --line:#e9edef; --line-strong:#d4dadd;
+    --brand:#25d366; --brand-deep:#128c7e; --brand-deepest:#075e54;
+    --brand-soft:#e7fbef; --brand-ink:#0b7a3c;
+    --bubble-out:#d9fdd3; --bubble-in:#ffffff;
+    --success:#1f9254; --warning:#b6740a; --danger:#c53434; --info:#1c6fb8;
+    --radius-pill:999px; --radius-md:10px; --radius-lg:14px;
+    --shadow-sm:0 1px 2px rgba(17,27,33,.06);
+    --font: ui-sans-serif,"Inter","Segoe UI",system-ui,-apple-system,sans-serif;
+    --font-mono: ui-monospace,"SF Mono","Cascadia Code",Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ink:#e9edef; --ink-soft:#8696a0; --ink-faint:#5b6770;
+      --paper:#111b21; --paper-sunken:#0b141a; --paper-recessed:#1a2831;
+      --line:#233138; --line-strong:#2f3f47;
+      --brand-soft:#0e2b1c; --brand-ink:#4fd987;
+      --bubble-out:#005c4b; --bubble-in:#202c33;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ink:#e9edef; --ink-soft:#8696a0; --ink-faint:#5b6770;
+    --paper:#111b21; --paper-sunken:#0b141a; --paper-recessed:#1a2831;
+    --line:#233138; --line-strong:#2f3f47;
+    --brand-soft:#0e2b1c; --brand-ink:#4fd987;
+    --bubble-out:#005c4b; --bubble-in:#202c33;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;}
+  button{font-family:inherit;}
+  .app{display:flex;flex-direction:column;height:100vh;}
+
+  header.top{
+    background:var(--paper); color:var(--ink); display:flex; align-items:center; gap:16px;
+    padding:0 16px; height:58px; flex-shrink:0; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:30;
+  }
+  .brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:15px;color:var(--brand-deepest);flex-shrink:0;}
+  :root[data-theme="dark"] .brand{color:var(--brand);}
+  @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .brand{color:var(--brand);}}
+  .brand .mark{width:26px;height:26px;border-radius:50%;background:var(--brand);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#06210f;}
+
+  nav.primary{display:flex;align-items:center;gap:4px;background:var(--paper-sunken);padding:4px;border-radius:var(--radius-pill);}
+  nav.primary button{
+    background:none;border:none;color:var(--ink-soft);font-size:12.5px;font-weight:700;
+    padding:7px 14px;border-radius:var(--radius-pill);cursor:pointer;display:flex;align-items:center;gap:6px;transition:all .12s;
+  }
+  nav.primary button:hover{color:var(--ink);}
+  nav.primary button.active{background:var(--brand);color:#06210f;}
+  nav.primary button .dot{width:6px;height:6px;border-radius:50%;background:#ef5350;}
+  nav.primary button.active .dot{background:#06210f;}
+  nav.primary button .pill{background:rgba(0,0,0,.12);font-size:9.5px;font-weight:800;padding:1px 5px;border-radius:99px;}
+
+  .top-spacer{flex:1;}
+  .search{display:flex;align-items:center;gap:8px;background:var(--paper-sunken);border-radius:var(--radius-pill);padding:7px 12px;color:var(--ink-faint);font-size:12.5px;width:200px;flex-shrink:0;}
+  .search kbd{margin-left:auto;font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);}
+  .icon-btn{width:34px;height:34px;border-radius:50%;border:none;background:transparent;color:var(--ink-soft);display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;flex-shrink:0;font-size:16px;}
+  .icon-btn:hover{background:var(--paper-sunken);}
+  .icon-btn .badge{position:absolute;top:4px;right:5px;width:8px;height:8px;background:#ef5350;border-radius:50%;border:1.5px solid var(--paper);}
+  .btn-new{background:var(--brand);color:#06210f;border:none;font-weight:800;font-size:12.5px;padding:8px 14px;border-radius:var(--radius-pill);cursor:pointer;flex-shrink:0;}
+  .btn-new:hover{background:var(--brand-deep);color:#fff;}
+  .wa-status{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--brand-ink);background:var(--brand-soft);padding:5px 10px;border-radius:var(--radius-pill);flex-shrink:0;font-weight:700;}
+  .wa-status .dot{width:6px;height:6px;border-radius:50%;background:var(--brand);}
+  .avatar{width:32px;height:32px;border-radius:50%;background:var(--brand-soft);color:var(--brand-ink);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;flex-shrink:0;cursor:pointer;}
+
+  .body{flex:1;display:flex;min-height:0;}
+  aside.submenu{width:180px;flex-shrink:0;background:var(--paper);border-right:1px solid var(--line);padding:14px 8px;overflow-y:auto;}
+  aside.submenu.hidden{display:none;}
+  aside.submenu h3{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);margin:4px 10px 10px;}
+  aside.submenu button{display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;background:none;border:none;font-size:13px;color:var(--ink-soft);padding:8px 12px;border-radius:var(--radius-pill);cursor:pointer;margin-bottom:2px;font-weight:600;}
+  aside.submenu button:hover{background:var(--paper-sunken);color:var(--ink);}
+  aside.submenu button.active{background:var(--brand-soft);color:var(--brand-ink);}
+  aside.submenu button .count{font-size:11px;font-weight:700;}
+
+  main.workspace{flex:1;min-width:0;overflow-y:auto;background:var(--paper);}
+  .screen{display:none;padding:22px 26px;}
+  .screen.active{display:block;}
+  .page-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:18px;}
+  .page-head h1{font-size:19px;font-weight:800;margin:0;letter-spacing:-.01em;}
+  .page-head p{font-size:12.5px;color:var(--ink-soft);margin:3px 0 0;}
+
+  .stat-strip{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:18px;}
+  .stat{background:var(--paper-sunken);border-radius:var(--radius-lg);padding:14px 16px;}
+  .stat .label{font-size:11px;color:var(--ink-faint);font-weight:700;}
+  .stat .value{font-size:21px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums;}
+  .stat .delta{font-size:11px;margin-top:3px;font-weight:700;}
+  .stat .delta.up{color:var(--success);} .stat .delta.warn{color:var(--warning);}
+
+  .grid-2{display:grid;grid-template-columns:1.3fr 1fr;gap:14px;margin-bottom:14px;}
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:var(--radius-lg);padding:16px;}
+  .card h2{font-size:13.5px;font-weight:800;margin:0 0 12px;}
+
+  .bars{display:flex;align-items:flex-end;gap:8px;height:100px;padding-top:8px;}
+  .bars .bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;}
+  .bars .bar{width:100%;border-radius:99px 99px 3px 3px;background:var(--brand-soft);}
+  .bars .bar.hi{background:var(--brand);}
+  .bars .bar-label{font-size:10px;color:var(--ink-faint);}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);font-weight:700;padding:6px 8px;border-bottom:1px solid var(--line);}
+  td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle;}
+  tr:last-child td{border-bottom:none;}
+  .name-cell{display:flex;align-items:center;gap:8px;font-weight:700;}
+  .mini-avatar{width:24px;height:24px;border-radius:50%;background:var(--paper-recessed);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:var(--ink-soft);flex-shrink:0;}
+  .badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:99px;}
+  .badge.wait{background:#fdf1e0;color:var(--warning);} .badge.open{background:#e6f0fa;color:var(--info);}
+  .badge.won{background:var(--brand-soft);color:var(--brand-ink);}
+  @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .badge.wait{background:#3a2a10;} :root:not([data-theme="light"]) .badge.open{background:#122539;}}
+  :root[data-theme="dark"] .badge.wait{background:#3a2a10;} :root[data-theme="dark"] .badge.open{background:#122539;}
+
+  .conv-shell{display:grid;grid-template-columns:300px 1fr 250px;height:calc(100vh - 58px);}
+  .conv-list{border-right:1px solid var(--line);overflow-y:auto;background:var(--paper);}
+  .conv-list .search-row{padding:10px 12px;}
+  .conv-list .search-row input{width:100%;border:none;background:var(--paper-sunken);border-radius:var(--radius-pill);padding:9px 14px;font-size:12.5px;color:var(--ink);}
+  .filter-chips{display:flex;gap:6px;padding:0 12px 10px;flex-wrap:wrap;}
+  .filter-chips button{border:1px solid var(--line);background:var(--paper);color:var(--ink-soft);font-size:11px;font-weight:700;padding:5px 11px;border-radius:99px;cursor:pointer;}
+  .filter-chips button.active{background:var(--brand-soft);color:var(--brand-ink);border-color:transparent;}
+  .conv-item{display:flex;gap:10px;padding:11px 14px;cursor:pointer;}
+  .conv-item:hover{background:var(--paper-sunken);}
+  .conv-item.active{background:var(--paper-sunken);}
+  .conv-item .mini-avatar{width:44px;height:44px;font-size:13px;}
+  .conv-item .meta{flex:1;min-width:0;border-bottom:1px solid var(--line);padding-bottom:11px;}
+  .conv-item:last-child .meta{border-bottom:none;}
+  .conv-item .row1{display:flex;justify-content:space-between;font-size:13.5px;font-weight:700;}
+  .conv-item .row1 time{font-weight:500;color:var(--ink-faint);font-size:11px;}
+  .conv-item .row2{display:flex;justify-content:space-between;align-items:center;margin-top:3px;}
+  .conv-item .snippet{font-size:12px;color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:190px;}
+  .unread-dot{min-width:19px;height:19px;padding:0 5px;border-radius:99px;background:var(--brand);color:#06210f;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+
+  .chat-pane{display:flex;flex-direction:column;background:#efeae2;position:relative;}
+  @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .chat-pane{background:#0b141a;}}
+  :root[data-theme="dark"] .chat-pane{background:#0b141a;}
+  .chat-head{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--paper);border-bottom:1px solid var(--line);}
+  .chat-head .who{font-weight:800;font-size:14px;}
+  .chat-head .sub{font-size:11px;color:var(--ink-faint);}
+  .chat-body{flex:1;overflow-y:auto;padding:20px 24px;display:flex;flex-direction:column;gap:6px;}
+  .bubble{max-width:60%;padding:8px 12px;border-radius:12px;font-size:13.5px;line-height:1.4;box-shadow:var(--shadow-sm);}
+  .bubble.in{background:var(--bubble-in);align-self:flex-start;border-top-left-radius:2px;}
+  .bubble.out{background:var(--bubble-out);align-self:flex-end;border-top-right-radius:2px;}
+  .bubble time{display:block;font-size:9.5px;opacity:.55;margin-top:3px;text-align:right;}
+  .chat-input{display:flex;gap:8px;padding:12px 16px;background:var(--paper);}
+  .chat-input input{flex:1;border:none;border-radius:var(--radius-pill);padding:11px 16px;font-size:13.5px;background:var(--paper-sunken);color:var(--ink);}
+  .chat-input button{background:var(--brand);border:none;color:#06210f;width:40px;border-radius:50%;font-weight:800;cursor:pointer;}
+
+  .ctx-pane{overflow-y:auto;padding:18px;border-left:1px solid var(--line);background:var(--paper);}
+  .ctx-pane .contact-head{text-align:center;margin-bottom:16px;}
+  .ctx-pane .contact-head .mini-avatar{width:64px;height:64px;font-size:19px;margin:0 auto 10px;}
+  .ctx-pane .contact-head h3{margin:0;font-size:14.5px;}
+  .ctx-pane .contact-head p{margin:2px 0 0;font-size:11.5px;color:var(--ink-faint);}
+  .ctx-section{margin-bottom:16px;}
+  .ctx-section h4{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);margin:0 0 8px;font-weight:800;}
+  .ctx-row{display:flex;justify-content:space-between;font-size:12px;padding:6px 0;}
+  .ctx-row span:first-child{color:var(--ink-soft);}
+  .ctx-row span:last-child{font-weight:700;}
+  .tag{display:inline-block;font-size:10.5px;font-weight:700;background:var(--brand-soft);color:var(--brand-ink);padding:3px 10px;border-radius:99px;margin:0 5px 5px 0;}
+
+  .footnote{margin-top:24px;padding:12px 14px;background:var(--paper-sunken);border-radius:var(--radius-md);font-size:11.5px;color:var(--ink-faint);}
+</style>
+
+<div class="app">
+  <header class="top">
+    <div class="brand"><span class="mark">W</span>WACRM</div>
+    <nav class="primary" id="primaryNav"></nav>
+    <div class="top-spacer"></div>
+    <div class="search">🔍 Pesquisar… <kbd>⌘K</kbd></div>
+    <button class="btn-new">+ Novo</button>
+    <button class="icon-btn">🔔<span class="badge"></span></button>
+    <div class="wa-status"><span class="dot"></span>Conectado</div>
+    <div class="avatar">AC</div>
+  </header>
+  <div class="body">
+    <aside class="submenu" id="submenu"></aside>
+    <main class="workspace" id="workspace"></main>
+  </div>
+</div>
+
+<script>
+const AREAS = {
+  conversas: {label:"Conversas", badge:"dot", submenu:["Todas (18)","Não lidas (5)","Pendentes (3)","Minhas (7)","Arquivadas"]},
+  dashboard: {label:"Dashboard", submenu:null},
+  contactos: {label:"Contactos", submenu:["Todos (312)","Com etiqueta","Adicionados esta semana"]},
+  vendas: {label:"Vendas", submenu:["Pipeline","Visitas agendadas (4)"]},
+  catalogo: {label:"Catálogo", submenu:["Produtos","Estrutura da oferta","Composições","Categorias","Disponibilidade & Operações","Saúde","Integrações externas"]},
+  automacao: {label:"Automação", submenu:["Regras","Fluxos","Agentes IA"]},
+  campanhas: {label:"Campanhas", badge:"BETA", submenu:null},
+};
+const nav = document.getElementById('primaryNav');
+Object.entries(AREAS).forEach(([key,a])=>{
+  const b=document.createElement('button');
+  b.dataset.key=key;
+  b.innerHTML = a.label + (a.badge==='dot' ? ' <span class="dot"></span>' : a.badge ? ` <span class="pill">${a.badge}</span>` : '');
+  b.onclick=()=>selectArea(key);
+  nav.appendChild(b);
+});
+
+function selectArea(key){
+  document.querySelectorAll('#primaryNav button').forEach(b=>b.classList.toggle('active', b.dataset.key===key));
+  const sm = document.getElementById('submenu');
+  const items = AREAS[key].submenu;
+  if(!items){ sm.classList.add('hidden'); sm.innerHTML=''; }
+  else {
+    sm.classList.remove('hidden');
+    sm.innerHTML = `<h3>${AREAS[key].label}</h3>` + items.map((it,i)=>{
+      const parts = it.match(/^(.*?)(\s\(([\d,]+)\))?$/);
+      return `<button class="${i===0?'active':''}">${parts[1]}${parts[2]?`<span class="count">${parts[3]}</span>`:''}</button>`;
+    }).join('');
+    sm.querySelectorAll('button').forEach(btn=>btn.onclick=()=>{
+      sm.querySelectorAll('button').forEach(x=>x.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  }
+  renderWorkspace(key);
+}
+
+function renderWorkspace(key){
+  const ws = document.getElementById('workspace');
+  if(key==='dashboard'){ ws.innerHTML = DASHBOARD_HTML; return; }
+  if(key==='conversas'){ ws.innerHTML = CONVERSAS_HTML; return; }
+  ws.innerHTML = genericPreview(key);
+}
+
+function genericPreview(key){
+  const data = {
+    contactos:{title:"Contactos", sub:"312 contactos · 23 novos nos últimos 7 dias", items:[
+      ["Fátima Ussene","+258 84 123 4567","VIP"],["Carlos Mabjaia","+258 82 987 6543","Novo Lead"],
+      ["Sara Massango","+258 84 555 1122","Cliente"],["Pedro Sitoe","+258 87 222 3344","Cliente"],
+      ["Amélia Chissano","+258 84 777 8899","Novo Lead"]]},
+    vendas:{title:"Pipeline · Vendas Loja", sub:"9 negócios em aberto · 312.000 MZN", items:[
+      ["Kit Ginásio Completo","Fátima Ussene","45.000 MZN"],["Sapatilhas Running Pro ×2","Carlos Mabjaia","8.500 MZN"],
+      ["Whey Protein 900g ×6","Sara Massango","16.800 MZN"],["Faixas de Resistência","Pedro Sitoe","1.200 MZN"]]},
+    catalogo:{title:"Catálogo · Produtos", sub:"48 produtos activos · sincronização saudável", items:[
+      ["Kit Ginásio Completo","LC Fitness","45.000 MZN"],["Sapatilhas Running Pro","LC Fitness","4.250 MZN"],
+      ["Whey Protein 900g","LC Fitness","2.800 MZN"],["Faixas de Resistência (kit 5)","LC Fitness","1.200 MZN"]]},
+    automacao:{title:"Automação · Regras", sub:"6 regras activas", items:[
+      ["Boas-vindas a novo contacto","Gatilho: novo contacto","Activa"],["Resposta fora de horário","Gatilho: hora","Activa"],
+      ["Etiqueta VIP automática","Gatilho: negócio ganho","Activa"]]},
+    campanhas:{title:"Campanhas", sub:"3 campanhas enviadas este mês", items:[
+      ["Promoção Volta às Aulas","842 enviados · 61% lidos","Concluída"],["Novo stock Whey Protein","310 enviados · 44% lidos","Concluída"]]},
+  }[key];
+  return `<div class="screen active"><div class="page-head"><div><h1>${data.title}</h1><p>${data.sub}</p></div><button class="btn-new">+ Novo</button></div>
+  <table><thead><tr><th>Nome</th><th>Detalhe</th><th>Estado</th></tr></thead><tbody>
+  ${data.items.map(r=>`<tr><td class="name-cell"><span class="mini-avatar">${r[0][0]}</span>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('')}
+  </tbody></table>
+  <div class="footnote">Protótipo de discovery — mesmo shell (header + submenu contextual) do Dashboard/Conversas; ecrã detalhado desenhado na fase correspondente após aprovação.</div>
+  </div>`;
+}
+
+const DASHBOARD_HTML = `<div class="screen active">
+  <div class="page-head"><div><h1>Dashboard</h1><p>LC Fitness · segunda-feira, 16 de agosto</p></div></div>
+  <div class="stat-strip">
+    <div class="stat"><div class="label">Conversas activas</div><div class="value">18</div><div class="delta up">▲ 4 vs. ontem</div></div>
+    <div class="stat"><div class="label">Aguardando resposta</div><div class="value">5</div><div class="delta warn">2 há mais de 1h</div></div>
+    <div class="stat"><div class="label">Novos contactos (7d)</div><div class="value">23</div><div class="delta up">▲ 12%</div></div>
+    <div class="stat"><div class="label">Negócios em aberto</div><div class="value">312k MZN</div><div class="delta up">9 negócios</div></div>
+    <div class="stat"><div class="label">Tempo médio resposta</div><div class="value">4m12s</div><div class="delta up">▼ 38s</div></div>
+  </div>
+  <div class="grid-2">
+    <div class="card"><h2>Conversas por dia</h2>
+      <div class="bars">${[12,18,9,22,15,26,18].map((v,i)=>`<div class="bar-col"><div class="bar ${i===5?'hi':''}" style="height:${v*3.2}px"></div><div class="bar-label">${['S','T','Q','Q','S','S','D'][i]}</div></div>`).join('')}</div>
+    </div>
+    <div class="card"><h2>Pipeline por estágio</h2>
+      <table><tbody>
+        <tr><td>Novo Lead</td><td style="text-align:right;font-weight:800;">3</td></tr>
+        <tr><td>Qualificado</td><td style="text-align:right;font-weight:800;">2</td></tr>
+        <tr><td>Proposta enviada</td><td style="text-align:right;font-weight:800;">2</td></tr>
+        <tr><td>Negociação</td><td style="text-align:right;font-weight:800;">1</td></tr>
+        <tr><td>Ganho (mês)</td><td style="text-align:right;font-weight:800;color:var(--brand-ink);">4</td></tr>
+      </tbody></table>
+    </div>
+  </div>
+  <div class="card"><h2>Precisa da tua atenção</h2>
+    <table><thead><tr><th>Contacto</th><th>Situação</th><th>Última mensagem</th><th>Estado</th></tr></thead><tbody>
+      <tr><td class="name-cell"><span class="mini-avatar">FU</span>Fátima Ussene</td><td>Pergunta sobre stock</td><td>há 6 min</td><td><span class="badge wait">Aguardando</span></td></tr>
+      <tr><td class="name-cell"><span class="mini-avatar">AC</span>Amélia Chissano</td><td>Pedido de preços</td><td>agora mesmo</td><td><span class="badge open">Não lida</span></td></tr>
+      <tr><td class="name-cell"><span class="mini-avatar">CM</span>Carlos Mabjaia</td><td>Negócio: Sapatilhas Running Pro</td><td>há 1h 20</td><td><span class="badge wait">Aguardando</span></td></tr>
+      <tr><td class="name-cell"><span class="mini-avatar">SM</span>Sara Massango</td><td>Visita agendada amanhã 10h</td><td>ontem</td><td><span class="badge won">Confirmada</span></td></tr>
+    </tbody></table>
+  </div>
+</div>`;
+
+const CONVERSAS_HTML = `<div class="screen active conv-shell">
+  <div class="conv-list">
+    <div class="search-row"><input placeholder="Procurar ou começar nova conversa"></div>
+    <div class="filter-chips">
+      <button class="active">Todas</button><button>Não lidas 5</button><button>Pendentes</button><button>Minhas</button>
+    </div>
+    ${[
+      ["FU","Fátima Ussene","Ainda têm o kit em tamanho M?","14:32",2,true],
+      ["AC","Amélia Chissano","Bom dia, gostaria de saber os preços","agora",1,false],
+      ["CM","Carlos Mabjaia","Obrigado! Vou pensar e já digo.","13:05",0,false],
+      ["SM","Sara Massango","Perfeito, confirmo a visita amanhã às 10h.","ontem",0,false],
+      ["PS","Pedro Sitoe","🤖 Claro! O horário é das 8h às 18h.","ontem",0,false],
+    ].map((c,i)=>`<div class="conv-item ${i===0?'active':''}"><div class="mini-avatar">${c[0]}</div>
+      <div class="meta"><div class="row1"><span>${c[1]}</span><time>${c[3]}</time></div>
+      <div class="row2"><span class="snippet">${c[2]}</span>${c[4]>0?`<span class="unread-dot">${c[4]}</span>`:''}</div></div></div>`).join('')}
+  </div>
+  <div class="chat-pane">
+    <div class="chat-head"><div class="mini-avatar" style="width:38px;height:38px;">FU</div>
+      <div><div class="who">Fátima Ussene</div><div class="sub">+258 84 123 4567 · vista há 2 min</div></div></div>
+    <div class="chat-body">
+      <div class="bubble in">Boa tarde! Vi o kit de ginásio completo no catálogo.<time>14:20</time></div>
+      <div class="bubble out">Boa tarde Fátima! Sim, temos em stock. Qual tamanho procura?<time>14:24 ✓✓</time></div>
+      <div class="bubble in">Ainda têm o kit em tamanho M?<time>14:32</time></div>
+    </div>
+    <div class="chat-input"><input placeholder="Escrever mensagem"><button>➤</button></div>
+  </div>
+  <div class="ctx-pane">
+    <div class="contact-head"><div class="mini-avatar">FU</div><h3>Fátima Ussene</h3><p>Cliente desde Mar 2026</p></div>
+    <div class="ctx-section"><h4>Etiquetas</h4><span class="tag">VIP</span><span class="tag">Ginásio</span></div>
+    <div class="ctx-section"><h4>Negócio activo</h4>
+      <div class="ctx-row"><span>Kit Ginásio Completo</span><span>45.000 MZN</span></div>
+      <div class="ctx-row"><span>Estágio</span><span>Proposta enviada</span></div>
+    </div>
+  </div>
+</div>`;
+
+selectArea('conversas');
+</script>
