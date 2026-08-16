@@ -59,7 +59,7 @@ alter table wacrm.catalog_products
   add constraint catalog_products_catalog_collection_fk
   foreign key (catalog_id, account_id)
   references wacrm.catalog_collections(id, account_id)
-  on delete set null;
+  on delete restrict;
 
 create index if not exists catalog_products_catalog_idx
   on wacrm.catalog_products (account_id, catalog_id, is_active, created_at desc);
