@@ -49,9 +49,33 @@ export async function DELETE(
 
     const conversationIds = (conversations ?? []).map((row) => row.id);
 
-    // deals.conversation_id is an optional legacy pointer without ON DELETE
-    // SET NULL. Detach it first so deleting a chat never deletes the deal and
-    // cannot be blocked by that FK.
+    // Notifications are transient operational records, not business history.
+    // Delete them BEFORE touching the contact/conversations. Some older rows
+    // can carry a stale notification.account_id while still referencing a
+    // conversation/contact from this account. The notifications integrity
+    // trigger correctly rejects the FK's ON DELETE SET NULL update in that
+    // state ("Notification conversation belongs to another account").
+    //
+    // The contact above was already tenant-validated with the caller-scoped
+    // client. We therefore clean every notification that references exactly
+    // this validated contact or one of its validated conversations, including
+    // historically inconsistent rows whose own account_id is stale.
+    if (conversationIds.length > 0) {
+      const { error: conversationNotificationError } = await db
+        .from("notifications")
+        .delete()
+        .in("conversation_id", conversationIds);
+      if (conversationNotificationError) throw conversationNotificationError;
+    }
+
+    const { error: contactNotificationError } = await db
+      .from("notifications")
+      .delete()
+      .eq("contact_id", contact.id);
+    if (contactNotificationError) throw contactNotificationError;
+
+    // deals.conversation_id is an optional legacy pointer. Detach it first so
+    // deleting a chat never deletes a deal and cannot be blocked by the FK.
     if (conversationIds.length > 0) {
       const { error: dealError } = await db
         .from("deals")
