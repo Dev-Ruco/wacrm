@@ -271,6 +271,75 @@ html[data-theme="whatsapp"][data-mode="light"] {
   --wallpaper-tint: oklch(0.902 0.014 67.6); /* #E5DDD5 */
 }
 
+/* ---- Inbox chat visual language ------------------------------------------------
+ * The conversation surface has its own palette instead of inheriting the current
+ * product accent. This keeps long-form chat readable and visually stable across
+ * violet/emerald/cobalt/etc. themes. Values intentionally echo familiar modern
+ * messaging ergonomics without copying another product's proprietary artwork.
+ */
+:root,
+html[data-mode="dark"] {
+  --chat-header: #202c33;
+  --chat-header-foreground: #e9edef;
+  --bubble-out: #005c4b;
+  --bubble-out-foreground: #e9edef;
+  --bubble-in: #202c33;
+  --bubble-in-foreground: #e9edef;
+  --wallpaper-tint: #0b141a;
+  --chat-meta-out: #a7c7bd;
+  --chat-meta-in: #8696a0;
+  --chat-read: #53bdeb;
+  --chat-date-bg: rgb(24 34 41 / 0.9);
+  --chat-date-fg: #8696a0;
+  --chat-in-border: rgb(255 255 255 / 0.035);
+  --chat-ai-badge-bg: rgb(255 255 255 / 0.09);
+  --chat-bubble-shadow: 0 1px 0.5px rgb(0 0 0 / 0.22);
+}
+
+html[data-mode="light"] {
+  --chat-header: #f0f2f5;
+  --chat-header-foreground: #111b21;
+  --bubble-out: #d9fdd3;
+  --bubble-out-foreground: #111b21;
+  --bubble-in: #ffffff;
+  --bubble-in-foreground: #111b21;
+  --wallpaper-tint: #efeae2;
+  --chat-meta-out: #667781;
+  --chat-meta-in: #667781;
+  --chat-read: #53bdeb;
+  --chat-date-bg: rgb(255 255 255 / 0.88);
+  --chat-date-fg: #54656f;
+  --chat-in-border: rgb(17 27 33 / 0.045);
+  --chat-ai-badge-bg: rgb(17 27 33 / 0.06);
+  --chat-bubble-shadow: 0 1px 0.5px rgb(11 20 26 / 0.13);
+}
+
+.chat-bubble {
+  isolation: isolate;
+}
+
+.chat-bubble-tail-out::after,
+.chat-bubble-tail-in::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.chat-bubble-tail-out::after {
+  right: -6px;
+  border-top: 9px solid var(--bubble-out);
+  border-right: 7px solid transparent;
+}
+
+.chat-bubble-tail-in::after {
+  left: -6px;
+  border-top: 9px solid var(--bubble-in);
+  border-left: 7px solid transparent;
+}
+
 /* Authentic circular send button — only under the WhatsApp theme, and
  * only on the composer's actual send action (marked with this class),
  * so every other button in the app keeps its normal rounded-lg shape. */

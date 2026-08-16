@@ -154,7 +154,7 @@ const STATUS_OPTIONS: { label: string; value: ConversationStatus; color: string 
  * if we ever switch the asset, both spots update together.
  */
 const DOODLE_BG_CLASSES =
-  "bg-[var(--wallpaper-tint,var(--background))] bg-[url('/inbox-doodle.svg')] bg-repeat";
+  "bg-[var(--wallpaper-tint,var(--background))] bg-[url('/inbox-doodle.svg')] bg-[length:320px_320px] bg-repeat";
 
 export function MessageThread({
   conversation,
@@ -1137,7 +1137,7 @@ export function MessageThread({
       />
 
       {/* Messages Area */}
-      <div ref={scrollRef} onScroll={handleThreadScroll} className="flex-1 overflow-y-auto px-4 py-4">
+      <div ref={scrollRef} onScroll={handleThreadScroll} className="flex-1 overflow-y-auto px-3 py-3 sm:px-5 sm:py-4 lg:px-6">
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -1155,13 +1155,20 @@ export function MessageThread({
               <div key={group.date}>
                 {/* Date separator */}
                 <div className="mb-4 flex items-center justify-center">
-                  <span className="rounded-full bg-muted px-3 py-1 text-[10px] font-medium text-muted-foreground">
+                  <span className="rounded-md border border-black/[0.03] bg-[var(--chat-date-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--chat-date-fg)] shadow-sm backdrop-blur-sm">
                     {formatDateSeparator(group.date, t)}
                   </span>
                 </div>
                 {/* Messages */}
-                <div className="space-y-2">
-                  {group.messages.map((msg) => {
+                <div className="space-y-0">
+                  {group.messages.map((msg, index) => {
+                    const currentIsAgent =
+                      msg.sender_type === "agent" || msg.sender_type === "bot";
+                    const previous = index > 0 ? group.messages[index - 1] : null;
+                    const previousIsAgent = previous
+                      ? previous.sender_type === "agent" || previous.sender_type === "bot"
+                      : null;
+                    const startsNewRun = index === 0 || currentIsAgent !== previousIsAgent;
                     const parent = msg.reply_to_message_id
                       ? messagesById.get(msg.reply_to_message_id)
                       : null;
@@ -1187,8 +1194,11 @@ export function MessageThread({
                       void postReaction(msg.id, next);
                     };
                     return (
-                      <MessageActions
+                      <div
                         key={msg.id}
+                        className={cn(index > 0 && (startsNewRun ? "mt-2" : "mt-0.5"))}
+                      >
+                      <MessageActions
                         message={msg}
                         onReply={() => handleStartReply(msg)}
                         onReact={(emoji) => {
@@ -1202,8 +1212,10 @@ export function MessageThread({
                           currentUserId={user?.id}
                           onToggleReaction={handlePillToggle}
                           onOpenMedia={handleMediaChange}
+                          showTail={startsNewRun}
                         />
                       </MessageActions>
+                      </div>
                     );
                   })}
                 </div>
