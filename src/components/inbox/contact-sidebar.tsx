@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { format } from 'date-fns';
 import { useTranslations } from 'next-intl';
+import { ConversationDeleteAction } from './conversation-delete-action';
 
 interface ContactSidebarProps {
   contact: Contact | null;
@@ -168,6 +169,14 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
               <span className="truncate">{contact.email}</span>
             </div>
           ) : null}
+        </div>
+
+        <div className="border-border/70 mt-2 border-t pt-2">
+          <ConversationDeleteAction
+            contactId={contact.id}
+            phone={contact.phone}
+            displayName={displayName}
+          />
         </div>
       </div>
 
