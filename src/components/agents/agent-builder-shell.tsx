@@ -4,7 +4,6 @@ import type { ReactNode } from 'react';
 import { Pause, Play, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { SegmentedControl } from '@/components/ui/segmented-control';
 
 export type Section =
   | 'overview'
@@ -34,31 +33,37 @@ interface NavGroup {
 }
 
 const NAV_GROUPS: NavGroup[] = [
-  { id: 'overview', label: 'Visão Geral', items: [{ id: 'overview', label: 'Visão Geral' }] },
   {
-    id: 'configure',
-    label: 'Configurar',
+    id: 'agent',
+    label: 'Agente',
     items: [
-      { id: 'identity', label: 'Identidade & Comportamento' },
-      { id: 'skills', label: 'Skills' },
+      { id: 'overview', label: 'Visão geral' },
+      { id: 'identity', label: 'Comportamento' },
+    ],
+  },
+  {
+    id: 'capabilities',
+    label: 'Capacidades',
+    items: [
       { id: 'tools', label: 'Ferramentas' },
+      { id: 'skills', label: 'Skills' },
       { id: 'knowledge', label: 'Conhecimento' },
       { id: 'memory', label: 'Memória' },
     ],
   },
   {
-    id: 'control',
-    label: 'Controlar',
+    id: 'operation',
+    label: 'Operação',
     items: [
-      { id: 'security', label: 'Segurança & Handoff' },
-      { id: 'runtime', label: 'Modelo & Runtime' },
+      { id: 'security', label: 'Segurança & handoff' },
+      { id: 'runtime', label: 'Modelo & runtime' },
     ],
   },
-  { id: 'test', label: 'Testar', items: [{ id: 'playground', label: 'Playground' }] },
   {
-    id: 'observe',
-    label: 'Observar',
+    id: 'validation',
+    label: 'Validar & observar',
     items: [
+      { id: 'playground', label: 'Testar agente' },
       { id: 'flow', label: 'Fluxo ao vivo' },
       { id: 'suggestions', label: 'Lições' },
       { id: 'eval', label: 'Avaliação', gated: true },
@@ -75,22 +80,12 @@ export function sectionLabel(id: Section): string {
   return '';
 }
 
-function groupOf(id: Section): NavGroup {
-  return NAV_GROUPS.find((group) => group.items.some((item) => item.id === id)) ?? NAV_GROUPS[0];
-}
-
 /**
- * Agent workspace shell — a header card (identity + status + actions)
- * over a two-row *horizontal* sub-navigation, replacing the 288px
- * vertical rail this used to render. That rail sat next to the app's
- * own contextual submenu (Automação → Agentes IA, ~192px), so the
- * page had two nested sidebars eating ~504px before any content
- * started — this shell now contributes zero vertical rails, per the
- * "one contextual submenu, maximum workspace" rule.
- *
- * Row 1 picks a group (Visão Geral / Configurar / Controlar / Testar
- * / Observar); row 2 only appears when the active group has more
- * than one section, so single-item groups don't waste a row.
+ * Agent workspace with one local navigation rail only. The previous version
+ * replaced the original sidebar with two stacked SegmentedControls, which
+ * still consumed vertical space and forced users to understand two levels of
+ * navigation. This shell keeps the top app navigation global and gives the
+ * agent workspace one compact contextual rail on desktop.
  */
 export function AgentBuilderShell({
   active,
@@ -118,67 +113,94 @@ export function AgentBuilderShell({
     items: group.items.filter((item) => !item.gated || canViewUsage),
   })).filter((group) => group.items.length > 0);
 
-  const activeGroup = groupOf(active);
-  const activeGroupItems = visibleGroups.find((g) => g.id === activeGroup.id)?.items ?? [];
-
   return (
-    <div className="mt-4 space-y-4">
-      {/* Agent header — identity + status + primary actions. */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-5 py-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <span
-            className={cn(
-              'h-2.5 w-2.5 shrink-0 rounded-full',
-              isActive ? 'bg-primary shadow-[0_0_0_3px_var(--primary-soft)]' : 'bg-muted-foreground',
-            )}
-            aria-hidden="true"
-          />
-          <div className="min-w-0">
-            <p className="truncate text-base font-semibold text-foreground">
-              {agentName || 'Agente sem nome'}
-            </p>
-            <p className="truncate text-xs text-muted-foreground">
-              {agentRole || 'Sem papel definido'} · WhatsApp
-              <span className={cn('ml-1.5 font-medium', isActive ? 'text-primary' : 'text-muted-foreground')}>
-                · {isActive ? 'Activo' : 'Pausado'}
-              </span>
-            </p>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => onNavigate('playground')}>
-            <Sparkles className="size-4" />
-            Testar agente
-          </Button>
-          {canToggleActive && onToggleActive ? (
-            <Button variant={isActive ? 'outline' : 'default'} size="sm" onClick={onToggleActive}>
-              {isActive ? <Pause className="size-4" /> : <Play className="size-4" />}
-              {isActive ? 'Pausar' : 'Activar'}
-            </Button>
-          ) : null}
-        </div>
-      </div>
+    <div className="min-w-0">
+      <div className="flex min-w-0 flex-col gap-5 lg:flex-row lg:gap-0">
+        <aside className="border-border/80 bg-card/35 w-full shrink-0 rounded-xl border p-2 lg:w-56 lg:self-start lg:rounded-none lg:border-y-0 lg:border-l-0 lg:border-r lg:bg-transparent lg:p-0 lg:pr-4">
+          <nav aria-label="Navegação do agente" className="space-y-4">
+            {visibleGroups.map((group) => (
+              <div key={group.id}>
+                <p className="text-label mb-1.5 px-2">{group.label}</p>
+                <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-1">
+                  {group.items.map((item) => {
+                    const isActiveItem = active === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        aria-current={isActiveItem ? 'page' : undefined}
+                        onClick={() => onNavigate(item.id)}
+                        className={cn(
+                          'min-h-9 rounded-lg px-2.5 py-2 text-left text-sm font-medium transition-colors duration-150',
+                          isActiveItem
+                            ? 'bg-primary-soft text-primary'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                        )}
+                      >
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </nav>
+        </aside>
 
-      <div className="space-y-2">
-        <SegmentedControl
-          items={visibleGroups.map((g) => ({ value: g.id, label: g.label }))}
-          value={activeGroup.id}
-          onChange={(groupId) => {
-            const group = visibleGroups.find((g) => g.id === groupId);
-            if (group) onNavigate(group.items[0].id);
-          }}
-        />
-        {activeGroupItems.length > 1 ? (
-          <SegmentedControl
-            items={activeGroupItems.map((item) => ({ value: item.id, label: item.label }))}
-            value={active}
-            onChange={(id) => onNavigate(id as Section)}
-            className="bg-transparent p-0"
-          />
-        ) : null}
-      </div>
+        <section className="min-w-0 flex-1 lg:pl-6">
+          <header className="border-border/80 flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2.5">
+                <span
+                  className={cn(
+                    'h-2.5 w-2.5 shrink-0 rounded-full',
+                    isActive
+                      ? 'bg-primary shadow-[0_0_0_4px_var(--primary-soft)]'
+                      : 'bg-muted-foreground'
+                  )}
+                  aria-hidden="true"
+                />
+                <h1 className="text-[22px] font-semibold tracking-tight text-foreground sm:text-2xl">
+                  {agentName || 'Agente sem nome'}
+                </h1>
+              </div>
+              <p className="text-muted-foreground mt-1 max-w-2xl text-sm">
+                {agentRole || 'Sem papel definido'} · WhatsApp ·{' '}
+                <span className={cn('font-medium', isActive ? 'text-primary' : '')}>
+                  {isActive ? 'Activo' : 'Pausado'}
+                </span>
+              </p>
+            </div>
 
-      <div className="min-w-0">{children}</div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onNavigate('playground')}
+              >
+                <Sparkles className="size-4" />
+                Testar
+              </Button>
+              {canToggleActive && onToggleActive ? (
+                <Button
+                  variant={isActive ? 'outline' : 'default'}
+                  size="sm"
+                  onClick={onToggleActive}
+                >
+                  {isActive ? (
+                    <Pause className="size-4" />
+                  ) : (
+                    <Play className="size-4" />
+                  )}
+                  {isActive ? 'Pausar' : 'Activar'}
+                </Button>
+              ) : null}
+            </div>
+          </header>
+
+          <div className="min-w-0 pt-5">{children}</div>
+        </section>
+      </div>
     </div>
   );
 }

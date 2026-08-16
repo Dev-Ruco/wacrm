@@ -1,0 +1,70 @@
+/* WACRM product hierarchy refinements.
+ * Imported after globals.css so these semantic classes deliberately refine the
+ * 2026 redesign scale without changing theme tokens or component behaviour.
+ */
+
+.text-display {
+  font-size: 2rem;
+  line-height: 1.08;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.text-page-title {
+  font-size: 1.75rem;
+  line-height: 1.15;
+  font-weight: 650;
+  letter-spacing: -0.022em;
+}
+
+.text-section-title {
+  font-size: 1.125rem;
+  line-height: 1.3;
+  font-weight: 620;
+  letter-spacing: -0.012em;
+}
+
+.text-card-title {
+  font-size: 0.9375rem;
+  line-height: 1.35;
+  font-weight: 620;
+}
+
+.text-body {
+  font-size: 0.875rem;
+  line-height: 1.55;
+  font-weight: 420;
+}
+
+.text-meta {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  font-weight: 480;
+}
+
+.text-label {
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  font-weight: 650;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.text-metric {
+  font-size: 1.75rem;
+  line-height: 1;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .text-page-title {
+    font-size: 1.5rem;
+  }
+
+  .text-display,
+  .text-metric {
+    font-size: 1.625rem;
+  }
+}
