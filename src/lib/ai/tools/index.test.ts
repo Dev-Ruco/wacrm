@@ -520,9 +520,12 @@ describe('CRM agent tools', () => {
     vi.mocked(engineSendMedia).mockResolvedValue({ whatsapp_message_id: 'wamid-1' } as never)
     const db = {
       from: () => {
+        const result = { error: null }
         const chain = {
           update: () => chain,
-          eq: () => Promise.resolve({ error: null }),
+          eq: () => chain,
+          then: (resolve: (value: typeof result) => unknown, reject?: (reason: unknown) => unknown) =>
+            Promise.resolve(result).then(resolve, reject),
         }
         return chain
       },
@@ -570,9 +573,12 @@ describe('CRM agent tools', () => {
     )
     const db = {
       from: () => {
+        const result = { error: null }
         const chain = {
           update: () => chain,
-          eq: () => Promise.resolve({ error: null }),
+          eq: () => chain,
+          then: (resolve: (value: typeof result) => unknown, reject?: (reason: unknown) => unknown) =>
+            Promise.resolve(result).then(resolve, reject),
         }
         return chain
       },
