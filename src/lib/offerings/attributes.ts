@@ -365,5 +365,5 @@ export function canReplaceOfferingAttributeValue(
   if (!existing) return true
   if (existing.verified || existing.source === 'manual') return false
   if (incomingSource === 'ai') return existing.source === 'ai'
-  return incomingSource !== 'ai'
+  return true
 }

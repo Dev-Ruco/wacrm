@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { WacrmSupabaseClient } from '@/lib/supabase/types'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import type { CatalogSourceRow, ExternalFieldMapping } from './types'
@@ -226,7 +226,9 @@ async function withTimeout<T>(promise: PromiseLike<T>, message: string): Promise
 }
 
 async function fetchSupabaseRows(
-  client: ReturnType<typeof createClient>,
+  // External sources may use arbitrary schemas/tables that are only known at runtime.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  client: SupabaseClient<any, any, any, any, any>,
   table: string,
   activeColumn: string | null,
   publishedColumn: string | null,

@@ -50,7 +50,7 @@ export interface PersistedCompositionState {
 }
 
 export interface ComposeCatalogSolutionInput {
-  templateKey: string
+  templateKey: string | null
   anchorProductId?: string | null
   existingState?: PersistedCompositionState | null
   keepSlots?: string[]
@@ -336,6 +336,7 @@ export async function composeCatalogSolution(
   accountId: string,
   input: ComposeCatalogSolutionInput,
 ): Promise<CompositionResult | null> {
+  if (!input.templateKey) return null
   const template = await loadCompositionTemplate(db, accountId, input.templateKey)
   if (!template) return null
   const existing = input.existingState?.slots ?? {}

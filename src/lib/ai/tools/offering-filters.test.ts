@@ -6,6 +6,7 @@ import { createAutoReplyTools } from './index'
 function permissions(searchCatalog: boolean): Record<AgentToolKey, boolean> {
   return {
     search_catalog: searchCatalog,
+    compose_solution: false,
     send_product: false,
     search_knowledge: false,
     add_tag: false,
