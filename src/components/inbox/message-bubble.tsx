@@ -38,18 +38,20 @@ interface MessageBubbleProps {
    * stays inline and non-clickable.
    */
   onOpenMedia?: (messageId: string) => void;
+  /** Show the small chat tail only at the start of a sender run. */
+  showTail?: boolean;
 }
 
 function StatusIcon({ status }: { status: Message["status"] }) {
   switch (status) {
     case "sending":
-      return <Clock className="h-3 w-3 text-muted-foreground" />;
+      return <Clock className="h-3 w-3 text-[var(--chat-meta-out)]" />;
     case "sent":
-      return <Check className="h-3 w-3 text-muted-foreground" />;
+      return <Check className="h-3 w-3 text-[var(--chat-meta-out)]" />;
     case "delivered":
-      return <CheckCheck className="h-3 w-3 text-muted-foreground" />;
+      return <CheckCheck className="h-3 w-3 text-[var(--chat-meta-out)]" />;
     case "read":
-      return <CheckCheck className="h-3 w-3 text-blue-400" />;
+      return <CheckCheck className="h-3 w-3 text-[var(--chat-read)]" />;
     case "failed":
       return <XCircle className="h-3 w-3 text-red-400" />;
     default:
@@ -73,7 +75,7 @@ function MessageContent({
   switch (message.content_type) {
     case "text":
       return (
-        <p className="whitespace-pre-wrap break-words text-sm">
+        <p className="whitespace-pre-wrap break-words text-[15px] leading-[1.45]">
           {message.content_text}
         </p>
       );
@@ -87,7 +89,7 @@ function MessageContent({
             <MediaUnavailable label={t("photo")} t={t} />
           )}
           {message.content_text && (
-            <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+            <p className="mt-1 whitespace-pre-wrap break-words text-[15px] leading-[1.45]">
               {message.content_text}
             </p>
           )}
@@ -103,7 +105,7 @@ function MessageContent({
             <MediaUnavailable label={t("video")} t={t} />
           )}
           {message.content_text && (
-            <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+            <p className="mt-1 whitespace-pre-wrap break-words text-[15px] leading-[1.45]">
               {message.content_text}
             </p>
           )}
@@ -119,7 +121,7 @@ function MessageContent({
             <MediaUnavailable label={t("audio")} t={t} />
           )}
           {message.content_text && (
-            <p className="mt-1 whitespace-pre-wrap break-words text-sm italic text-muted-foreground">
+            <p className="mt-1 whitespace-pre-wrap break-words text-[15px] leading-[1.45] italic text-muted-foreground">
               {message.content_text}
             </p>
           )}
@@ -140,7 +142,7 @@ function MessageContent({
             {t("template")}
           </span>
           {message.content_text && (
-            <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+            <p className="mt-1 whitespace-pre-wrap break-words text-[15px] leading-[1.45]">
               {message.content_text}
             </p>
           )}
@@ -149,7 +151,7 @@ function MessageContent({
 
     case "location":
       return (
-        <div className="flex items-center gap-2 text-sm">
+        <div className="flex items-center gap-2 text-[15px] leading-[1.45]">
           <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span>{message.content_text || t("locationShared")}</span>
         </div>
@@ -175,14 +177,14 @@ function MessageContent({
               <CornerDownLeft className="h-3 w-3" />
               {t("buttonReply")}
             </span>
-            <p className="whitespace-pre-wrap break-words text-sm">
+            <p className="whitespace-pre-wrap break-words text-[15px] leading-[1.45]">
               {message.content_text || t("interactiveReply")}
             </p>
           </div>
         );
       }
       return (
-        <p className="whitespace-pre-wrap break-words text-sm">
+        <p className="whitespace-pre-wrap break-words text-[15px] leading-[1.45]">
           {message.content_text || t("interactiveReply")}
         </p>
       );
@@ -190,7 +192,7 @@ function MessageContent({
 
     default:
       return (
-        <p className="whitespace-pre-wrap break-words text-sm">
+        <p className="whitespace-pre-wrap break-words text-[15px] leading-[1.45]">
           {message.content_text || t("unsupported")}
         </p>
       );
@@ -204,6 +206,7 @@ export function MessageBubble({
   currentUserId,
   onToggleReaction,
   onOpenMedia,
+  showTail = false,
 }: MessageBubbleProps) {
   const t = useTranslations("Inbox.bubble");
 
@@ -221,10 +224,11 @@ export function MessageBubble({
     >
       <div
         className={cn(
-          "relative rounded-2xl px-3 py-2",
+          "chat-bubble relative rounded-[10px] px-2.5 py-1.5 shadow-[var(--chat-bubble-shadow)]",
           isAgent
-            ? "rounded-br-md bg-[var(--bubble-out,var(--primary))] text-[var(--bubble-out-foreground,var(--primary-foreground))]"
-            : "rounded-bl-md bg-[var(--bubble-in,var(--muted))] text-[var(--bubble-in-foreground,var(--foreground))]",
+            ? "bg-[var(--bubble-out)] text-[var(--bubble-out-foreground)]"
+            : "border border-[var(--chat-in-border)] bg-[var(--bubble-in)] text-[var(--bubble-in-foreground)]",
+          showTail && (isAgent ? "chat-bubble-tail-out" : "chat-bubble-tail-in"),
         )}
       >
         {reply && (
@@ -237,7 +241,7 @@ export function MessageBubble({
         <MessageContent message={message} t={t} onOpenMedia={onOpenMedia} />
         <div
           className={cn(
-            "mt-1 flex items-center gap-1",
+            "mt-0.5 flex min-h-3.5 items-center gap-1",
             isAgent ? "justify-end" : "justify-start",
           )}
         >
@@ -247,7 +251,7 @@ export function MessageBubble({
               glance. */}
           {message.ai_generated && (
             <span
-              className="inline-flex items-center gap-0.5 rounded-full bg-[var(--bubble-out-foreground,var(--primary-foreground))]/20 px-1.5 py-px text-[9px] font-semibold uppercase leading-none tracking-wide text-[var(--bubble-out-foreground,var(--primary-foreground))]"
+              className="inline-flex items-center gap-0.5 rounded-full bg-[var(--chat-ai-badge-bg)] px-1.5 py-px text-[9px] font-semibold uppercase leading-none tracking-wide text-[var(--chat-meta-out)]"
               title={t("aiBadgeTitle")}
             >
               <Sparkles className="h-2.5 w-2.5" />
@@ -256,12 +260,10 @@ export function MessageBubble({
           )}
           <span
             className={cn(
-              "text-[10px]",
-              // Outbound bubbles sit on the primary fill, so the
-              // timestamp must read against that (not the neutral
-              // foreground) — otherwise it goes low-contrast in light
-              // mode. Inbound bubbles use the muted surface.
-              isAgent ? "text-primary-foreground/70" : "text-muted-foreground",
+              "text-[11px] leading-none tabular-nums",
+              isAgent
+                ? "text-[var(--chat-meta-out)]"
+                : "text-[var(--chat-meta-in)]",
             )}
           >
             {time}

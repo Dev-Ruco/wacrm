@@ -15,9 +15,7 @@ interface ReplyQuoteProps {
   /** Present → renders the composer-chip variant with an X button. Absent →
    *  renders the embedded-in-bubble variant. */
   onDismiss?: () => void;
-  /** True when embedded inside an outbound (primary-filled) bubble, so the
-   *  quote must read against the primary surface rather than the neutral
-   *  foreground — otherwise it goes low-contrast in light mode. */
+  /** True when embedded inside an outbound chat bubble. */
   onPrimary?: boolean;
 }
 
@@ -29,35 +27,34 @@ export function ReplyQuote({
 }: ReplyQuoteProps) {
   const t = useTranslations("Inbox.replyQuote");
   const isChip = !!onDismiss;
+
   return (
     <div
       className={cn(
-        "flex items-start gap-2 border-l-2 px-2 py-1",
-        onPrimary ? "border-primary-foreground/50" : "border-primary",
+        "flex items-start gap-2 border-l-2 border-[#00a884] px-2 py-1",
         isChip
           ? "rounded-md bg-muted/80"
           : onPrimary
-            ? "mb-1.5 rounded-md bg-primary-foreground/15"
-            : "mb-1.5 rounded-md bg-background/20",
+            ? "mb-1.5 rounded-md bg-black/[0.045] dark:bg-black/20"
+            : "mb-1.5 rounded-md bg-[#f0f2f5]/90 dark:bg-black/20",
       )}
     >
       <div className="min-w-0 flex-1 overflow-hidden">
-        <div
-          className={cn(
-            "truncate text-[11px] font-medium",
-            onPrimary ? "text-primary-foreground" : "text-primary",
-          )}
-        >
+        <div className="truncate text-[11px] font-semibold text-[#008069] dark:text-[#00a884]">
           {authorLabel}
         </div>
         {/* Wrap the preview instead of truncating to a single line.
-         *  `truncate` (white-space: nowrap) forced the quote onto one
-         *  impossibly-wide line and — because the parent flex chain
-         *  lacked `min-w-0` at every step — pushed the entire inbox
-         *  layout wider, shoving the contact sidebar off-screen.
-         *  `break-words` also wraps long URLs that have no whitespace
-         *  to break on. Issue #165. */}
-        <div className="whitespace-pre-wrap break-words text-xs text-foreground/80">
+         * `break-words` also protects the inbox from long unbroken URLs. */}
+        <div
+          className={cn(
+            "whitespace-pre-wrap break-words text-xs",
+            isChip
+              ? "text-foreground/80"
+              : onPrimary
+                ? "text-[var(--bubble-out-foreground)] opacity-80"
+                : "text-[var(--bubble-in-foreground)] opacity-80",
+          )}
+        >
           {preview}
         </div>
       </div>
