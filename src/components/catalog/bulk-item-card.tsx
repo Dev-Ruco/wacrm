@@ -16,7 +16,7 @@ export interface BulkItem {
   classifying: boolean
   name: string
   price: string
-  currency: string
+  currency?: string
   category: string | null
   color: string | null
   description: string
@@ -29,7 +29,7 @@ export function isBulkItemComplete(item: BulkItem): boolean {
     item.name.trim().length > 0 &&
     item.price !== '' &&
     Number(item.price) >= 0 &&
-    item.currency.trim().length > 0
+    (item.currency ?? 'MZN').trim().length > 0
   )
 }
 
@@ -118,7 +118,7 @@ export function BulkItemCard({
           <Input
             aria-label="Moeda"
             maxLength={8}
-            value={item.currency}
+            value={item.currency ?? 'MZN'}
             onChange={(e) => onChange({ currency: e.target.value.toUpperCase() })}
           />
         </div>
