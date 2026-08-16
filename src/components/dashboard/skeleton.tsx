@@ -1,25 +1,17 @@
-import { cn } from '@/lib/utils'
+import { cn } from '@/lib/utils';
 
-/**
- * Shared skeleton primitive — a pulsing slate block sized to whatever
- * container it's dropped into. Used by every dashboard widget while
- * its data fetches.
- */
+/** Shared skeleton primitive used by dashboard widgets while data loads. */
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn('animate-pulse rounded-md bg-muted', className)} />
+  return <div className={cn('animate-pulse rounded-md bg-muted', className)} />;
 }
 
+/** Skeleton for one cell inside the shared KPI strip. */
 export function SkeletonCard({ className }: { className?: string }) {
   return (
-    <div
-      className={cn(
-        'rounded-xl border border-border bg-card p-5',
-        className,
-      )}
-    >
-      <Skeleton className="h-4 w-32" />
-      <Skeleton className="mt-4 h-8 w-20" />
-      <Skeleton className="mt-2 h-3 w-16" />
+    <div className={cn('bg-card px-4 py-4 sm:px-5', className)}>
+      <Skeleton className="h-3 w-28" />
+      <Skeleton className="mt-3 h-7 w-20" />
+      <Skeleton className="mt-2 h-3 w-24" />
     </div>
-  )
+  );
 }
