@@ -4,9 +4,9 @@ import { useState } from 'react';
 import Link from 'next/link';
 import {
   Activity,
-  Boxes,
   ChevronDown,
   Database,
+  FolderOpen,
   GitBranch,
   Layers3,
   Settings2,
@@ -31,8 +31,7 @@ const MAIN_ITEMS: Array<{
   href: string;
   icon: typeof Activity;
 }> = [
-  { key: 'overview', label: 'Visão geral', href: '/catalog?view=overview', icon: Activity },
-  { key: 'offers', label: 'Ofertas', href: '/catalog?view=products', icon: Boxes },
+  { key: 'overview', label: 'Catálogos', href: '/catalog', icon: FolderOpen },
   { key: 'steward', label: 'Agente do Catálogo', href: '/catalog?view=steward', icon: Sparkles },
   { key: 'sources', label: 'Fontes', href: '/catalog?view=external', icon: Database },
 ];
@@ -58,13 +57,13 @@ export function CatalogWorkspaceNav({ active }: { active: CatalogWorkspaceKey })
       <div className="mb-3 px-2 pt-1">
         <p className="text-label">Catálogo</p>
         <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
-          O conhecimento comercial usado pelo atendimento.
+          Organize o conhecimento comercial usado pelo atendimento.
         </p>
       </div>
 
       <nav aria-label="Navegação do catálogo" className="space-y-1">
         {MAIN_ITEMS.map((item) => (
-          <CatalogNavItem key={item.key} item={item} active={active === item.key} />
+          <CatalogNavItem key={item.key} item={item} active={active === item.key || (active === 'offers' && item.key === 'overview')} />
         ))}
 
         <div className="pt-2">
