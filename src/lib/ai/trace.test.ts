@@ -152,4 +152,4 @@ describe('agent trace', () => {
     expect(() => trace.finish('reply')).not.toThrow()
     await flushTraceWrites()
   })
-}
+})
