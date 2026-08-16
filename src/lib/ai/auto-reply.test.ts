@@ -51,6 +51,49 @@ vi.mock('./contact-memory', () => ({
   ]),
   contactMemoryPrompt: vi.fn().mockReturnValue('Contact memory'),
 }))
+vi.mock('./trace', () => ({
+  createAgentTraceCollector: (args: {
+    accountId: string
+    conversationId: string
+  }) => {
+    let intent: string | null = null
+    let modelTier = 'smart'
+    let guardrailViolations: string[] = []
+    h.state.tracePayload = {
+      account_id: args.accountId,
+      conversation_id: args.conversationId,
+      intent,
+      model_tier: modelTier,
+      final_action: 'no_reply',
+      guardrail_violations: guardrailViolations,
+    }
+    return {
+      traceId: 'trace-test',
+      setRuntime: () => undefined,
+      setIntent: (nextIntent: string, nextModelTier: string) => {
+        intent = nextIntent
+        modelTier = nextModelTier
+      },
+      setMemoryMatchCount: () => undefined,
+      recordToolCall: () => undefined,
+      recordGuardrailViolations: (violations: string[]) => {
+        guardrailViolations = [...violations]
+      },
+      recordEvent: () => undefined,
+      startStep: () => ({ sequence: 0, startedAt: 0 }),
+      finishStep: () => undefined,
+      finish: (finalAction: string) => {
+        h.state.tracePayload = {
+          ...h.state.tracePayload,
+          intent,
+          model_tier: modelTier,
+          final_action: finalAction,
+          guardrail_violations: guardrailViolations,
+        }
+      },
+    }
+  },
+}))
 vi.mock('./tools', () => ({
   createAutoReplyTools: (args: { permissions: Record<string, boolean> }) => {
     h.state.toolsCalledWithPermissions = args.permissions
@@ -84,6 +127,36 @@ vi.mock('./admin-client', () => ({
         }
         return chain
       }
+      if (table === 'tool_definitions') {
+        const data = [
+          { key: 'search_catalog', default_enabled: true },
+          { key: 'send_product', default_enabled: true },
+          { key: 'compose_solution', default_enabled: false },
+          { key: 'search_knowledge', default_enabled: true },
+          { key: 'add_tag', default_enabled: false },
+          { key: 'create_deal', default_enabled: false },
+          { key: 'schedule_visit', default_enabled: false },
+          { key: 'get_style_opinion', default_enabled: false },
+          { key: 'handoff_human', default_enabled: true },
+        ]
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          then: (resolve: (value: { data: typeof data; error: null }) => unknown) =>
+            Promise.resolve({ data, error: null }).then(resolve),
+        }
+        return chain
+      }
+      if (table === 'offering_attribute_definitions') {
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          order: () => chain,
+          then: (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
+            Promise.resolve({ data: [], error: null }).then(resolve),
+        }
+        return chain
+      }
       if (table === 'agent_tools') {
         const chain = {
           select: () => chain,
@@ -105,14 +178,6 @@ vi.mock('./admin-client', () => ({
       }
       if (table === 'notifications') {
         return { insert: () => Promise.resolve({ error: null }) }
-      }
-      if (table === 'agent_traces') {
-        return {
-          insert: (payload: Record<string, unknown>) => {
-            h.state.tracePayload = payload
-            return Promise.resolve({ error: null })
-          },
-        }
       }
       return {
         select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: h.state.conv, error: null }) }) }),
