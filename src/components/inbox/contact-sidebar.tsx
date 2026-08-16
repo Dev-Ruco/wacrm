@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import type { Contact, ContactNote, Deal, Tag } from '@/types';
@@ -111,7 +111,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
   if (!contact) {
     return (
-      <div className="border-border bg-card flex h-full w-64 items-center justify-center border-l px-5 xl:w-68">
+      <div className="border-border bg-card flex h-full w-64 items-center justify-center border-l px-5 xl:w-72">
         <p className="text-muted-foreground text-center text-xs">
           {tThread('selectConversation')}
         </p>
@@ -123,7 +123,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   const initials = displayName.charAt(0).toUpperCase();
 
   return (
-    <aside className="border-border bg-card flex h-full w-64 flex-col border-l xl:w-68">
+    <aside className="border-border bg-card flex h-full w-64 flex-col border-l xl:w-72">
       <div className="border-border/80 border-b px-4 py-3.5">
         <div className="flex min-w-0 items-center gap-3">
           <div className="bg-muted text-foreground flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-semibold">
@@ -284,7 +284,7 @@ function SectionLabel({
   children,
 }: {
   icon: typeof TagIcon;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <div className="text-muted-foreground flex items-center gap-2 text-[10px] font-semibold tracking-[0.08em] uppercase">
