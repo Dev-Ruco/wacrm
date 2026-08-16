@@ -1,0 +1,38 @@
+name: Apply chat visual redesign
+
+on:
+  push:
+    branches:
+      - feat/chat-visual-redesign-20260816
+    paths:
+      - scripts/apply-chat-visual-redesign.mjs
+      - .github/workflows/apply-chat-visual-redesign.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feat/chat-visual-redesign-20260816
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Apply chat visual redesign
+        run: node scripts/apply-chat-visual-redesign.mjs
+      - name: Verify expected files changed
+        run: |
+          git diff --check
+          git diff --name-only
+          test -n "$(git status --porcelain)"
+      - name: Commit generated changes
+        run: |
+          git config user.name "Felisberto Ruco"
+          git config user.email "felisberto.ruco10@gmail.com"
+          git add src/app/globals.css src/components/inbox/message-actions.tsx src/components/inbox/message-bubble.tsx src/components/inbox/message-thread.tsx public/inbox-doodle.svg
+          git commit -m "redesign(inbox): refine chat bubbles and wallpaper"
+          git push origin HEAD:feat/chat-visual-redesign-20260816
