@@ -16,7 +16,6 @@ export interface BulkItem {
   classifying: boolean
   name: string
   price: string
-  currency?: string
   category: string | null
   color: string | null
   description: string
@@ -24,13 +23,7 @@ export interface BulkItem {
 }
 
 export function isBulkItemComplete(item: BulkItem): boolean {
-  return (
-    Boolean(item.imageUrl) &&
-    item.name.trim().length > 0 &&
-    item.price !== '' &&
-    Number(item.price) >= 0 &&
-    (item.currency ?? 'MZN').trim().length > 0
-  )
+  return Boolean(item.imageUrl) && item.name.trim().length > 0 && item.price !== '' && Number(item.price) >= 0
 }
 
 export function BulkItemCard({
@@ -106,22 +99,14 @@ export function BulkItemCard({
             onCreate={onCreateColor}
           />
         </div>
-        <div className="grid grid-cols-[1fr_82px] gap-2">
-          <Input
-            type="number"
-            min="0"
-            step="0.01"
-            placeholder="Preço"
-            value={item.price}
-            onChange={(e) => onChange({ price: e.target.value })}
-          />
-          <Input
-            aria-label="Moeda"
-            maxLength={8}
-            value={item.currency ?? 'MZN'}
-            onChange={(e) => onChange({ currency: e.target.value.toUpperCase() })}
-          />
-        </div>
+        <Input
+          type="number"
+          min="0"
+          step="0.01"
+          placeholder="Preço (confirma antes de guardar)"
+          value={item.price}
+          onChange={(e) => onChange({ price: e.target.value })}
+        />
         <Textarea
           placeholder="Descrição comercial"
           rows={4}
