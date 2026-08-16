@@ -33,6 +33,7 @@ import {
 import { engineSendText, engineSendTypingIndicator } from '@/lib/flows/meta-send'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { triggerMatches } from '@/lib/automations/engine'
+import { recordLiveCatalogLearning } from '@/lib/catalog/live-learning'
 import type { Automation } from '@/types'
 import { chatContentText } from './types'
 
@@ -116,6 +117,8 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
   let trace: AgentTraceCollector | null = null
   let finalAction: AgentFinalAction = 'no_reply'
   let runStatusOverride: AgentRunStatus | undefined
+  let catalogSearchAttempted = false
+  let compositionAttempted = false
 
   try {
     const db = supabaseAdmin()
@@ -309,7 +312,12 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
       config,
       permissions: effectivePermissions,
       toolInstructions,
-      onToolCall: (call) => trace?.recordToolCall(call),
+      onToolCall: (call) => {
+        trace?.recordToolCall(call)
+        if (!call.succeeded) return
+        if (call.name === 'search_catalog') catalogSearchAttempted = true
+        if (call.name === 'compose_solution') compositionAttempted = true
+      },
     })
 
     const [prefetch, crmContext, memories, lessons, catalogueState] = await Promise.all([
@@ -416,12 +424,30 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
 
     const hasPendingActions = agentTools.hasPendingActions()
     const structuredHandoff = agentTools.getHandoffRequest()
+    const catalogueVerified = agentTools.wasCatalogueVerified()
+    const learningRetrievalKind = !catalogueVerified
+      ? compositionAttempted
+        ? ('composition' as const)
+        : catalogSearchAttempted
+          ? ('catalog' as const)
+          : null
+      : null
+    const recordLearningOutcome = async (outcome: 'gap' | 'handoff') => {
+      if (!learningRetrievalKind || !latestInboundText) return
+      await recordLiveCatalogLearning({
+        accountId,
+        conversationId,
+        requestText: latestInboundText,
+        retrievalKind: learningRetrievalKind,
+        outcome,
+      })
+    }
     const guardrail = evaluateAgentOutput({
       text,
       trustedText: config.systemPrompt ?? '',
       trustedPriceAmounts: agentTools.getTrustedPriceAmounts(),
       salesIntent: route.intent === 'sales',
-      catalogueVerified: agentTools.wasCatalogueVerified(),
+      catalogueVerified,
     })
 
     if (!structuredHandoff && !handoff && text && !guardrail.safe) {
@@ -430,6 +456,7 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
         conversationId,
         violations: guardrail.violations,
       })
+      await recordLearningOutcome('handoff')
       const summary = buildHandoffSummary({ messages, replyCount })
       await markHandoff(
         'Resposta automática bloqueada por uma verificação de segurança.',
@@ -448,6 +475,7 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
         emptyReply: !text,
         hasPendingActions,
       })
+      await recordLearningOutcome('handoff')
       const summary = buildHandoffSummary({
         messages,
         replyCount,
@@ -465,6 +493,8 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
       await sendStaticNotice(args, HANDOFF_NOTICE)
       return
     }
+
+    await recordLearningOutcome('gap')
 
     const { data: claimed, error: claimErr } = await db.rpc('claim_ai_reply_slot', {
       conversation_id: conversationId,
