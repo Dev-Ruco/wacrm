@@ -24,6 +24,7 @@ import {
   Check,
   Clock,
   ArrowLeft,
+  ArrowDown,
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
@@ -178,6 +179,8 @@ export function MessageThread({
   const { getPresence, getRow, now } = usePresence();
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [showNewMessages, setShowNewMessages] = useState(false);
+  const previousMessageCountRef = useRef(0);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
@@ -438,6 +441,8 @@ export function MessageThread({
   // a quote pulled from conversation A shouldn't bleed into conversation B.
   useEffect(() => {
     setReplyTo(null);
+    previousMessageCountRef.current = 0;
+    setShowNewMessages(false);
   }, [conversationId]);
 
   // Reset the server-side unread_count to 0 whenever an unread count
@@ -461,11 +466,43 @@ export function MessageThread({
       });
   }, [conversationId, hasUnread]);
 
-  // Auto-scroll to bottom on new messages
+  const scrollToLatest = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    setShowNewMessages(false);
+  }, []);
+
+  const handleThreadScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom < 80) setShowNewMessages(false);
+  }, []);
+
+  // Follow the conversation only while the operator is already near the end.
+  // If they are reading history, keep their position and show a compact
+  // new-message pill instead of snapping the viewport away from their work.
   useEffect(() => {
-    if (scrollRef.current) {
-      const el = scrollRef.current;
-      el.scrollTop = el.scrollHeight;
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const previousCount = previousMessageCountRef.current;
+    const hasNewMessages = messages.length > previousCount;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const shouldFollow = previousCount === 0 || distanceFromBottom < 160;
+    previousMessageCountRef.current = messages.length;
+
+    if (shouldFollow) {
+      requestAnimationFrame(() => {
+        const current = scrollRef.current;
+        if (current) current.scrollTop = current.scrollHeight;
+      });
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setShowNewMessages(false);
+    } else if (hasNewMessages) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setShowNewMessages(true);
     }
   }, [messages]);
 
@@ -905,7 +942,7 @@ export function MessageThread({
     // clipped and the hover toolbar overlaps the Tags panel. Letting the
     // root shrink lets the bubbles' break-words / max-w caps apply.
     // Issue #257.
-    <div className={cn("flex min-w-0 flex-1 flex-col", DOODLE_BG_CLASSES)}>
+    <div className={cn("relative flex min-w-0 flex-1 flex-col", DOODLE_BG_CLASSES)}>
       {/* Header — solid card surface sits on top of the doodle so the
           name/avatar/dropdowns stay legible. */}
       <div className="flex items-center justify-between gap-2 border-b border-border bg-[var(--chat-header,var(--card))] px-3 py-3 text-[var(--chat-header-foreground,var(--card-foreground))] sm:px-4">
@@ -1085,8 +1122,22 @@ export function MessageThread({
         </div>
       </div>
 
+      {/* Operating mode belongs with conversation context, not the composer. */}
+      <AiThreadBanner
+        conversationId={conversation.id}
+        disabled={conversation.ai_autoreply_disabled ?? false}
+        handoffSummary={conversation.ai_handoff_summary}
+        assignedAgentId={assignedAgentId}
+        currentUserId={user?.id}
+        onChange={(patch) => {
+          if ('assigned_agent_id' in patch) {
+            onAssignChange(conversation.id, patch.assigned_agent_id ?? null);
+          }
+        }}
+      />
+
       {/* Messages Area */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+      <div ref={scrollRef} onScroll={handleThreadScroll} className="flex-1 overflow-y-auto px-4 py-4">
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -1162,21 +1213,16 @@ export function MessageThread({
         )}
       </div>
 
-      {/* AI auto-reply banner — take over an active bot, or resume it
-          after a handoff. Renders nothing unless the account has
-          auto-reply configured. */}
-      <AiThreadBanner
-        conversationId={conversation.id}
-        disabled={conversation.ai_autoreply_disabled ?? false}
-        handoffSummary={conversation.ai_handoff_summary}
-        assignedAgentId={assignedAgentId}
-        currentUserId={user?.id}
-        onChange={(patch) => {
-          if ("assigned_agent_id" in patch) {
-            onAssignChange(conversation.id, patch.assigned_agent_id ?? null);
-          }
-        }}
-      />
+      {showNewMessages ? (
+        <button
+          type="button"
+          onClick={scrollToLatest}
+          className="border-border bg-card hover:bg-muted absolute bottom-[78px] left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium text-foreground shadow-md transition-colors"
+        >
+          <ArrowDown className="size-3.5" />
+          Novas mensagens
+        </button>
+      ) : null}
 
       {/* Composer */}
       <MessageComposer
