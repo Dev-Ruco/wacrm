@@ -116,7 +116,7 @@ export function AgentBuilderShell({
   return (
     <div className="min-w-0">
       <div className="flex min-w-0 flex-col gap-5 lg:flex-row lg:gap-0">
-        <aside className="border-border/80 bg-card/35 w-full shrink-0 rounded-xl border p-2 lg:w-56 lg:self-start lg:rounded-none lg:border-y-0 lg:border-l-0 lg:border-r lg:bg-transparent lg:p-0 lg:pr-4">
+        <aside className="border-border/80 bg-card/35 w-full shrink-0 rounded-xl border p-2 lg:sticky lg:top-0 lg:w-56 lg:self-start lg:rounded-none lg:border-y-0 lg:border-l-0 lg:border-r lg:bg-transparent lg:p-0 lg:pr-4">
           <nav aria-label="Navegação do agente" className="space-y-4">
             {visibleGroups.map((group) => (
               <div key={group.id}>

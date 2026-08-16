@@ -120,11 +120,16 @@ export async function scanCatalogHealth(
     if (product.image_url) {
       productsWithMedia += 1
     } else {
+      // Media is useful for many retail businesses but is not a universal
+      // requirement for a generic SaaS catalogue: services, appointments,
+      // subscriptions and other offerings may be perfectly valid without a
+      // product image. Surface it as optional information instead of lowering
+      // the tenant's readiness score by default.
       issues.push({
         issueType: 'missing_media',
-        severity: 'warning',
+        severity: 'info',
         title: 'Oferta sem imagem principal',
-        description: `${product.name} não possui imagem principal para apresentação ao cliente.`,
+        description: `${product.name} não possui imagem principal. Isto só limita apresentações visuais quando forem relevantes para este negócio.`,
         productId: product.id,
         sourceId: product.source_id,
         evidence: { product_name: product.name },
@@ -213,16 +218,25 @@ export async function scanCatalogHealth(
   }
 
   const denominator = Math.max(activeProducts.length, 1)
-  const mediaRatio = productsWithMedia / denominator
-  const requiredPenalty = Math.min(0.45, missingRequiredAttributeCount / denominator * 0.08)
-  const mirrorPenalty = Math.min(0.25, failedMirrorSourceCount * 0.1)
+
+  // Readiness is driven only by facts the tenant itself declared required and
+  // by objective source integrity. Optional presentation choices (for example,
+  // having an image) must not make a service business look unhealthy simply
+  // because it is not a retail catalogue.
+  const requiredPenalty = Math.min(
+    0.55,
+    (missingRequiredAttributeCount / denominator) * 0.08,
+  )
+  const mirrorPenalty = Math.min(0.3, failedMirrorSourceCount * 0.1)
   const duplicatePenalty = Math.min(
     0.15,
-    issues.filter((issue) => issue.issueType === 'possible_duplicate_name').length / denominator * 0.03,
+    (issues.filter((issue) => issue.issueType === 'possible_duplicate_name').length /
+      denominator) *
+      0.03,
   )
   const score = activeProducts.length === 0
     ? 100
-    : clampScore(100 * (0.55 + mediaRatio * 0.45 - requiredPenalty - mirrorPenalty - duplicatePenalty))
+    : clampScore(100 * (1 - requiredPenalty - mirrorPenalty - duplicatePenalty))
 
   return {
     score,
