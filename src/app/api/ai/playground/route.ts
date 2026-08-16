@@ -10,7 +10,13 @@ import { AiError, type ChatMessage } from '@/lib/ai/types'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { createAutoReplyTools } from '@/lib/ai/tools'
 import { loadAgentToolPermissions, restrictToPreviewSafe } from '@/lib/ai/tool-permissions'
-import { applySkillNarrowing, loadAgentSkills, type AgentSkill } from '@/lib/ai/skills'
+import {
+  applySkillNarrowing,
+  loadAgentSkills,
+  skillsPrompt,
+  type AgentSkill,
+} from '@/lib/ai/skills'
+import { selectSkillsForTurn } from '@/lib/ai/skill-router'
 import { evaluateAgentOutput } from '@/lib/ai/guardrails'
 import type { AgentTraceToolCall } from '@/lib/ai/trace'
 
@@ -21,9 +27,9 @@ const MAX_TURNS = 20
  * POST /api/ai/playground  (agent+)
  *
  * Test-chat with the account's agent WITHOUT touching WhatsApp. Runs the
- * same `auto_reply` system prompt, skills and tool-calling loop the live
- * bot uses, scoped to PREVIEW_SAFE_TOOL_KEYS (read/informational tools
- * only) since there is no real conversation or contact here for a
+ * same `auto_reply` system prompt, contextual skill routing and tool-calling
+ * loop the live bot uses, scoped to PREVIEW_SAFE_TOOL_KEYS (read/informational
+ * tools only) since there is no real conversation or contact here for a
  * mutating tool (create_deal, add_tag, schedule_visit) to attach to.
  * Reads the config even when the master switch is off (requireActive:
  * false) so you can try it before going live. Stateless: the client sends
@@ -88,18 +94,27 @@ export async function POST(request: Request) {
     const db = supabaseAdmin()
     let tools: ReturnType<typeof createAutoReplyTools>['tools'] | undefined
     let executeTool: ReturnType<typeof createAutoReplyTools>['executeTool'] | undefined
-    let activeSkills: AgentSkill[] = []
+    let selectedSkills: AgentSkill[] = []
     const toolCalls: AgentTraceToolCall[] = []
     let getTrustedPriceAmounts: (() => number[]) | undefined
     let hasCatalogueCapability = false
     if (config.agentId) {
-      const [{ permissions, instructions: toolInstructions }, skills] = await Promise.all([
+      const [{ permissions, instructions: toolInstructions }, configuredSkills] = await Promise.all([
         loadAgentToolPermissions(db, accountId, config.agentId),
         loadAgentSkills(db, accountId, config.agentId),
       ])
-      activeSkills = skills
-      const effectivePermissions = restrictToPreviewSafe(applySkillNarrowing(permissions, skills))
-      hasCatalogueCapability = Boolean(effectivePermissions.search_catalog || effectivePermissions.send_product)
+      const skillSelection = await selectSkillsForTurn({
+        skills: configuredSkills,
+        config,
+        messages,
+      })
+      selectedSkills = skillSelection.skills
+      const effectivePermissions = restrictToPreviewSafe(
+        applySkillNarrowing(permissions, selectedSkills),
+      )
+      hasCatalogueCapability = Boolean(
+        effectivePermissions.search_catalog || effectivePermissions.send_product,
+      )
       const toolRuntime = createAutoReplyTools({
         db,
         accountId,
@@ -116,13 +131,16 @@ export async function POST(request: Request) {
       getTrustedPriceAmounts = toolRuntime.getTrustedPriceAmounts
     }
 
-    const systemPrompt = buildSystemPrompt({
+    const baseSystemPrompt = buildSystemPrompt({
       userPrompt: config.systemPrompt,
       mode: 'auto_reply',
       knowledge,
       identity: { name: config.agentName, role: config.agentRole, language: config.agentLanguage },
       hasCatalogueCapability,
     })
+    const systemPrompt = [baseSystemPrompt, skillsPrompt(selectedSkills)]
+      .filter((part): part is string => Boolean(part))
+      .join('\n\n')
 
     const { text, handoff } = await generateReply({
       config,
@@ -146,7 +164,7 @@ export async function POST(request: Request) {
       reply: text,
       handoff,
       execution: {
-        skills_active: activeSkills.map((skill) => skill.name),
+        skills_active: selectedSkills.map((skill) => skill.name),
         tools_called: toolCalls,
         knowledge_sources_used: knowledge.length,
         guardrails: { safe: guardrails.safe, violations: guardrails.violations },

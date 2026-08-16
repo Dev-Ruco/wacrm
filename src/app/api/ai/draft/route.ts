@@ -13,7 +13,8 @@ import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { AiError } from '@/lib/ai/types'
 import { createAutoReplyTools } from '@/lib/ai/tools'
 import { loadAgentToolPermissions, restrictToPreviewSafe } from '@/lib/ai/tool-permissions'
-import { applySkillNarrowing, loadAgentSkills } from '@/lib/ai/skills'
+import { applySkillNarrowing, loadAgentSkills, skillsPrompt } from '@/lib/ai/skills'
+import { selectSkillsForTurn } from '@/lib/ai/skill-router'
 
 /**
  * POST /api/ai/draft  (agent+)
@@ -109,13 +110,40 @@ export async function POST(request: Request) {
     let tools: ReturnType<typeof createAutoReplyTools>['tools'] | undefined
     let executeTool: ReturnType<typeof createAutoReplyTools>['executeTool'] | undefined
     let hasCatalogueCapability = false
+    let selectedSkillsContext: string | null = null
     if (config.agentId) {
-      const [{ permissions, instructions: toolInstructions }, skills] = await Promise.all([
+      const [{ permissions, instructions: toolInstructions }, configuredSkills] = await Promise.all([
         loadAgentToolPermissions(db, accountId, config.agentId),
         loadAgentSkills(db, accountId, config.agentId),
       ])
-      const effectivePermissions = restrictToPreviewSafe(applySkillNarrowing(permissions, skills))
-      hasCatalogueCapability = Boolean(effectivePermissions.search_catalog || effectivePermissions.send_product)
+      const skillSelection = await selectSkillsForTurn({
+        skills: configuredSkills,
+        config,
+        messages,
+      })
+      selectedSkillsContext = skillsPrompt(skillSelection.skills)
+
+      // Skill routing is an LLM call too; account for its BYO-key spend
+      // separately from the customer-facing draft generation below.
+      try {
+        void logAiUsage(db, {
+          accountId,
+          conversationId,
+          mode: 'draft',
+          provider: config.provider,
+          model: config.model,
+          usage: skillSelection.usage,
+        })
+      } catch (logErr) {
+        console.error('[ai/draft] skill-router usage log skipped:', logErr)
+      }
+
+      const effectivePermissions = restrictToPreviewSafe(
+        applySkillNarrowing(permissions, skillSelection.skills),
+      )
+      hasCatalogueCapability = Boolean(
+        effectivePermissions.search_catalog || effectivePermissions.send_product,
+      )
       const toolRuntime = createAutoReplyTools({
         db,
         accountId,
@@ -130,13 +158,16 @@ export async function POST(request: Request) {
       executeTool = tools.length > 0 ? toolRuntime.executeTool : undefined
     }
 
-    const systemPrompt = buildSystemPrompt({
+    const baseSystemPrompt = buildSystemPrompt({
       userPrompt: config.systemPrompt,
       mode: 'draft',
       knowledge,
       identity: { name: config.agentName, role: config.agentRole, language: config.agentLanguage },
       hasCatalogueCapability,
     })
+    const systemPrompt = [baseSystemPrompt, selectedSkillsContext]
+      .filter((part): part is string => Boolean(part))
+      .join('\n\n')
 
     const { text, usage } = await generateReply({
       config,
@@ -154,7 +185,7 @@ export async function POST(request: Request) {
     //  - it's fire-and-forget (`void`), not awaited, so the response
     //    isn't held for a DB round-trip.
     try {
-      void logAiUsage(supabaseAdmin(), {
+      void logAiUsage(db, {
         accountId,
         conversationId,
         mode: 'draft',
