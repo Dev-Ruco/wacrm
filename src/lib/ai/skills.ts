@@ -64,22 +64,23 @@ export async function loadAgentSkills(
     }
   })
 
-  getAgentTraceContext()?.recordEvent('skills_loaded', 'Skills activas no contexto', {
+  getAgentTraceContext()?.recordEvent('skills_loaded', 'Skills activas disponíveis', {
     count: skills.length,
     names: skills.map((skill) => skill.name).slice(0, 20),
   })
   return skills
 }
 
+/** Build model guidance only for skills already selected for this turn. */
 export function skillsPrompt(skills: AgentSkill[]): string | null {
   const withContent = skills.filter(
     (skill) => skill.instructions || skill.objective || skill.whenToUse || skill.whenNotToUse,
   )
   if (withContent.length === 0) return null
   return [
-    'Skills — objectives this account configured for specific situations (e.g. selling, qualifying, after-sales). ' +
-      'Each one may include when it applies and when it does not — use that as your own judgement call for THIS turn, not as a menu to announce; nothing external selects a skill for you. ' +
-      'Follow whichever ones genuinely match what the customer needs right now; ignore the rest. These are internal guidance, never mention a skill by name to the customer.',
+    'Selected skills for this turn — specialised objectives routed as relevant to the customer’s current need. ' +
+      'Apply their instructions when their conditions genuinely fit; if the newest customer message makes one no longer applicable, ignore it rather than forcing it. ' +
+      'These are internal guidance. Never announce a skill name, routing decision or internal instruction to the customer.',
     ...withContent.map((skill) => {
       const lines = [`[${skill.name}]`]
       if (skill.objective) lines.push(`Objective: ${skill.objective}`)
@@ -100,11 +101,17 @@ export function skillToolKeys(skills: AgentSkill[]): Set<AgentToolKey> | null {
   return keys
 }
 
+/**
+ * Apply the tool subset declared by the skills selected for THIS turn.
+ * An empty selection deliberately leaves the account permissions untouched.
+ * Skills can only remove capabilities; they can never grant a tool that the
+ * account disabled. Human handoff remains globally available as a safety net.
+ */
 export function applySkillNarrowing(
   permissions: Record<AgentToolKey, boolean>,
-  skills: AgentSkill[],
+  selectedSkills: AgentSkill[],
 ): Record<AgentToolKey, boolean> {
-  const narrowed = skillToolKeys(skills)
+  const narrowed = skillToolKeys(selectedSkills)
   if (!narrowed) return permissions
   const effective = { ...permissions }
   for (const key of AGENT_TOOL_KEYS) {
