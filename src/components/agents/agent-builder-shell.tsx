@@ -1,25 +1,10 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
-import {
-  BarChart3,
-  Bot,
-  BookOpen,
-  BrainCog,
-  Cpu,
-  FlaskConical,
-  GraduationCap,
-  LayoutDashboard,
-  Layers,
-  Menu,
-  ShieldCheck,
-  Sparkles,
-  UserRound,
-  Workflow,
-  Wrench,
-  X,
-} from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Pause, Play, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 
 export type Section =
   | 'overview'
@@ -39,42 +24,45 @@ export type Section =
 interface NavItem {
   id: Section;
   label: string;
-  icon: typeof Bot;
   gated?: boolean;
 }
 
 interface NavGroup {
-  label: string | null;
+  id: string;
+  label: string;
   items: NavItem[];
 }
 
 const NAV_GROUPS: NavGroup[] = [
-  { label: null, items: [{ id: 'overview', label: 'Visão Geral', icon: LayoutDashboard }] },
+  { id: 'overview', label: 'Visão Geral', items: [{ id: 'overview', label: 'Visão Geral' }] },
   {
+    id: 'configure',
     label: 'Configurar',
     items: [
-      { id: 'identity', label: 'Identidade & Comportamento', icon: UserRound },
-      { id: 'skills', label: 'Skills', icon: Layers },
-      { id: 'tools', label: 'Ferramentas', icon: Wrench },
-      { id: 'knowledge', label: 'Conhecimento', icon: BookOpen },
-      { id: 'memory', label: 'Memória', icon: BrainCog },
+      { id: 'identity', label: 'Identidade & Comportamento' },
+      { id: 'skills', label: 'Skills' },
+      { id: 'tools', label: 'Ferramentas' },
+      { id: 'knowledge', label: 'Conhecimento' },
+      { id: 'memory', label: 'Memória' },
     ],
   },
   {
+    id: 'control',
     label: 'Controlar',
     items: [
-      { id: 'security', label: 'Segurança & Handoff', icon: ShieldCheck },
-      { id: 'runtime', label: 'Modelo & Runtime', icon: Cpu },
+      { id: 'security', label: 'Segurança & Handoff' },
+      { id: 'runtime', label: 'Modelo & Runtime' },
     ],
   },
-  { label: 'Testar', items: [{ id: 'playground', label: 'Playground', icon: Sparkles }] },
+  { id: 'test', label: 'Testar', items: [{ id: 'playground', label: 'Playground' }] },
   {
+    id: 'observe',
     label: 'Observar',
     items: [
-      { id: 'flow', label: 'Fluxo ao vivo', icon: Workflow },
-      { id: 'suggestions', label: 'Lições', icon: GraduationCap },
-      { id: 'eval', label: 'Avaliação', icon: FlaskConical, gated: true },
-      { id: 'usage', label: 'Utilização', icon: BarChart3, gated: true },
+      { id: 'flow', label: 'Fluxo ao vivo' },
+      { id: 'suggestions', label: 'Lições' },
+      { id: 'eval', label: 'Avaliação', gated: true },
+      { id: 'usage', label: 'Utilização', gated: true },
     ],
   },
 ];
@@ -87,15 +75,22 @@ export function sectionLabel(id: Section): string {
   return '';
 }
 
+function groupOf(id: Section): NavGroup {
+  return NAV_GROUPS.find((group) => group.items.some((item) => item.id === id)) ?? NAV_GROUPS[0];
+}
+
 /**
- * Internal Agent Builder navigation: a grouped sidebar instead of the
- * flat 13-item horizontal tab bar it replaces. Modeled as navigation
- * (buttons + aria-current="page"), not an ARIA tablist — matches
- * src/components/layout/sidebar.tsx's own pattern for the primary app
- * nav, including the mobile drawer mechanics (translate-x, backdrop,
- * Escape, scroll lock) copied from that file rather than reinvented.
- * Callers keep every section's content mounted and pass only the
- * active one as `children` swapped by the caller — see agents/page.tsx.
+ * Agent workspace shell — a header card (identity + status + actions)
+ * over a two-row *horizontal* sub-navigation, replacing the 288px
+ * vertical rail this used to render. That rail sat next to the app's
+ * own contextual submenu (Automação → Agentes IA, ~192px), so the
+ * page had two nested sidebars eating ~504px before any content
+ * started — this shell now contributes zero vertical rails, per the
+ * "one contextual submenu, maximum workspace" rule.
+ *
+ * Row 1 picks a group (Visão Geral / Configurar / Controlar / Testar
+ * / Observar); row 2 only appears when the active group has more
+ * than one section, so single-item groups don't waste a row.
  */
 export function AgentBuilderShell({
   active,
@@ -103,6 +98,8 @@ export function AgentBuilderShell({
   agentName,
   agentRole,
   isActive,
+  onToggleActive,
+  canToggleActive,
   canViewUsage,
   children,
 }: {
@@ -111,141 +108,77 @@ export function AgentBuilderShell({
   agentName: string;
   agentRole: string;
   isActive: boolean;
+  onToggleActive?: () => void;
+  canToggleActive: boolean;
   canViewUsage: boolean;
   children: ReactNode;
 }) {
-  const [mobileOpen, setMobileOpen] = useState(false);
-
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [active]);
-
-  useEffect(() => {
-    if (!mobileOpen) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMobileOpen(false);
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => {
-      document.body.style.overflow = previous;
-      window.removeEventListener('keydown', handleKey);
-    };
-  }, [mobileOpen]);
-
   const visibleGroups = NAV_GROUPS.map((group) => ({
     ...group,
     items: group.items.filter((item) => !item.gated || canViewUsage),
   })).filter((group) => group.items.length > 0);
 
-  const nav = (onSelect?: () => void) => (
-    <nav aria-label="Secções do agente" className="flex-1 overflow-y-auto px-3 py-4">
-      {visibleGroups.map((group, index) => (
-        <div key={group.label ?? `group-${index}`} className={index > 0 ? 'mt-6' : undefined}>
-          {group.label && (
-            <p className="mb-1.5 px-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              {group.label}
-            </p>
-          )}
-          <ul className="flex flex-col gap-0.5">
-            {group.items.map((item) => {
-              const Icon = item.icon;
-              const isCurrent = item.id === active;
-              return (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    aria-current={isCurrent ? 'page' : undefined}
-                    onClick={() => {
-                      onNavigate(item.id);
-                      onSelect?.();
-                    }}
-                    className={cn(
-                      'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors',
-                      isCurrent
-                        ? 'bg-primary/10 text-primary'
-                        : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                    )}
-                  >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ))}
-    </nav>
-  );
+  const activeGroup = groupOf(active);
+  const activeGroupItems = visibleGroups.find((g) => g.id === activeGroup.id)?.items ?? [];
 
   return (
-    <div className="mt-4 flex gap-6 xl:items-start">
-      {/* Mobile: trigger + backdrop + slide-in drawer, same recipe as the primary app sidebar. */}
-      <button
-        type="button"
-        onClick={() => setMobileOpen(true)}
-        className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground xl:hidden"
-      >
-        <Menu className="h-4 w-4" /> Secções
-      </button>
-
-      <button
-        type="button"
-        aria-label="Fechar menu"
-        onClick={() => setMobileOpen(false)}
-        className={cn(
-          'fixed inset-0 z-30 bg-background/70 backdrop-blur-sm transition-opacity xl:hidden',
-          mobileOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
-        )}
-      />
-      <aside
-        aria-label="Secções do agente"
-        className={cn(
-          'fixed inset-y-0 left-0 z-40 flex h-full w-72 flex-col border-r border-border bg-card',
-          'transition-transform duration-200 ease-out will-change-transform xl:hidden',
-          mobileOpen ? 'translate-x-0' : '-translate-x-full',
-        )}
-      >
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
-          <span className="text-sm font-semibold text-foreground">Assistente</span>
-          <button
-            type="button"
-            onClick={() => setMobileOpen(false)}
-            aria-label="Fechar menu"
-            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-        {nav(() => setMobileOpen(false))}
-      </aside>
-
-      {/* Desktop: permanent sidebar from xl (1280px) up — the primary app
-          sidebar (240px) plus this one (288px) need the extra room. */}
-      <aside className="sticky top-4 hidden w-72 shrink-0 flex-col rounded-xl border border-border bg-card xl:flex">
-        <div className="flex items-center gap-2 border-b border-border px-4 py-3.5">
+    <div className="mt-4 space-y-4">
+      {/* Agent header — identity + status + primary actions. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-5 py-4">
+        <div className="flex min-w-0 items-center gap-3">
           <span
-            className={cn('h-2 w-2 shrink-0 rounded-full', isActive ? 'bg-primary' : 'bg-muted-foreground')}
+            className={cn(
+              'h-2.5 w-2.5 shrink-0 rounded-full',
+              isActive ? 'bg-primary shadow-[0_0_0_3px_var(--primary-soft)]' : 'bg-muted-foreground',
+            )}
             aria-hidden="true"
           />
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-foreground">
+            <p className="truncate text-base font-semibold text-foreground">
               {agentName || 'Agente sem nome'}
             </p>
-            {agentRole && <p className="truncate text-xs text-muted-foreground">{agentRole}</p>}
+            <p className="truncate text-xs text-muted-foreground">
+              {agentRole || 'Sem papel definido'} · WhatsApp
+              <span className={cn('ml-1.5 font-medium', isActive ? 'text-primary' : 'text-muted-foreground')}>
+                · {isActive ? 'Activo' : 'Pausado'}
+              </span>
+            </p>
           </div>
         </div>
-        {nav()}
-      </aside>
-
-      <div className="min-w-0 flex-1">
-        <h2 className="mb-4 text-lg font-semibold text-foreground xl:mt-1">
-          {sectionLabel(active)}
-        </h2>
-        {children}
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => onNavigate('playground')}>
+            <Sparkles className="size-4" />
+            Testar agente
+          </Button>
+          {canToggleActive && onToggleActive ? (
+            <Button variant={isActive ? 'outline' : 'default'} size="sm" onClick={onToggleActive}>
+              {isActive ? <Pause className="size-4" /> : <Play className="size-4" />}
+              {isActive ? 'Pausar' : 'Activar'}
+            </Button>
+          ) : null}
+        </div>
       </div>
+
+      <div className="space-y-2">
+        <SegmentedControl
+          items={visibleGroups.map((g) => ({ value: g.id, label: g.label }))}
+          value={activeGroup.id}
+          onChange={(groupId) => {
+            const group = visibleGroups.find((g) => g.id === groupId);
+            if (group) onNavigate(group.items[0].id);
+          }}
+        />
+        {activeGroupItems.length > 1 ? (
+          <SegmentedControl
+            items={activeGroupItems.map((item) => ({ value: item.id, label: item.label }))}
+            value={active}
+            onChange={(id) => onNavigate(id as Section)}
+            className="bg-transparent p-0"
+          />
+        ) : null}
+      </div>
+
+      <div className="min-w-0">{children}</div>
     </div>
   );
 }

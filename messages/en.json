@@ -60,14 +60,17 @@
   "Nav": {
     "areas": {
       "dashboard": "Dashboard",
-      "conversas": "Conversations",
+      "conversas": "Inbox",
       "contactos": "Contacts",
       "vendas": "Sales",
+      "crm": "CRM",
+      "agentes": "AI Agent",
       "catalogo": "Catalog",
       "automacao": "Automation",
       "campanhas": "Campaigns"
     },
     "submenu": {
+      "contacts": "Contacts",
       "pipeline": "Pipeline",
       "visits": "Scheduled visits",
       "products": "Products",

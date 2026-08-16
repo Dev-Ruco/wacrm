@@ -59,15 +59,18 @@
   },
   "Nav": {
     "areas": {
-      "dashboard": "Painel",
-      "conversas": "Conversas",
+      "dashboard": "Início",
+      "conversas": "Atendimento",
       "contactos": "Contactos",
       "vendas": "Vendas",
+      "crm": "CRM",
+      "agentes": "Agentes IA",
       "catalogo": "Catálogo",
       "automacao": "Automação",
       "campanhas": "Campanhas"
     },
     "submenu": {
+      "contacts": "Contactos",
       "pipeline": "Pipeline",
       "visits": "Visitas agendadas",
       "products": "Produtos",

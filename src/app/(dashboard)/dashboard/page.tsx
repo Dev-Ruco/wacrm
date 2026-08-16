@@ -8,22 +8,28 @@ import { MessageSquare, UserPlus, DollarSign, Send } from 'lucide-react';
 
 import {
   loadActivity,
+  loadAgentActivity,
   loadConversationsSeries,
   loadMetrics,
   loadPipelineDonut,
+  loadPriorities,
   loadResponseTime,
 } from '@/lib/dashboard/queries';
 import type {
   ActivityItem,
+  AgentActivitySummary,
   ConversationsSeriesPoint,
   MetricsBundle,
   PipelineDonutData,
+  PriorityCounts,
   ResponseTimeSummary,
 } from '@/lib/dashboard/types';
 
 import { MetricCard } from '@/components/dashboard/metric-card';
 import { SkeletonCard } from '@/components/dashboard/skeleton';
 import { QuickActions } from '@/components/dashboard/quick-actions';
+import { PriorityChips } from '@/components/dashboard/priority-chips';
+import { AgentActivityCard } from '@/components/dashboard/agent-activity-card';
 import { ConversationsChart } from '@/components/dashboard/conversations-chart';
 import { PipelineDonut } from '@/components/dashboard/pipeline-donut';
 import { ResponseTimeChart } from '@/components/dashboard/response-time-chart';
@@ -38,6 +44,12 @@ export default function DashboardPage() {
   const { defaultCurrency } = useAuth();
   const [metrics, setMetrics] = useState<MetricsBundle | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(true);
+
+  const [priorities, setPriorities] = useState<PriorityCounts | null>(null);
+
+  const [agentActivity, setAgentActivity] =
+    useState<AgentActivitySummary | null>(null);
+  const [agentActivityLoading, setAgentActivityLoading] = useState(true);
 
   const [range, setRange] = useState<RangeDays>(30);
   // Keep a cache per range so switching tabs doesn't re-fetch what we
@@ -73,6 +85,15 @@ export default function DashboardPage() {
       .then((m) => setMetrics(m))
       .catch((err) => console.error('[dashboard] metrics failed:', err))
       .finally(() => setMetricsLoading(false));
+
+    void loadPriorities(db)
+      .then((p) => setPriorities(p))
+      .catch((err) => console.error('[dashboard] priorities failed:', err));
+
+    void loadAgentActivity(db)
+      .then((a) => setAgentActivity(a))
+      .catch((err) => console.error('[dashboard] agent activity failed:', err))
+      .finally(() => setAgentActivityLoading(false));
 
     void loadConversationsSeries(db, 30)
       .then((s) => setSeries((prev) => ({ ...prev, 30: s })))
@@ -124,11 +145,15 @@ export default function DashboardPage() {
     <div className="space-y-5">
       {/* Header */}
       <div>
-        <h1 className="text-foreground text-2xl font-bold tracking-tight">
-          {t('title')}
-        </h1>
-        <p className="text-muted-foreground mt-1 text-sm">{t('description')}</p>
+        <h1 className="text-page-title">{t('title')}</h1>
+        <p className="text-body text-muted-foreground mt-1">
+          {t('description')}
+        </p>
       </div>
+
+      {/* Priorities — needs-attention-today row. Renders nothing until
+          loaded and nothing at all if every count is zero. */}
+      <PriorityChips counts={priorities} />
 
       {/* Metric cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -191,8 +216,21 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Quick actions */}
-      <QuickActions />
+      {/* Quick actions + agent activity — same 3/2 split as the charts
+          row below, so the page reads as one consistent rhythm rather
+          than a full-width quick-actions strip followed by a
+          differently-proportioned chart row. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+        <div className="lg:col-span-3">
+          <QuickActions />
+        </div>
+        <div className="lg:col-span-2">
+          <AgentActivityCard
+            data={agentActivity}
+            loading={agentActivityLoading}
+          />
+        </div>
+      </div>
 
       {/* Charts row */}
       {/* items-stretch (the grid default) stretches the two columns to

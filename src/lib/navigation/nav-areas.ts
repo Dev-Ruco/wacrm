@@ -1,5 +1,5 @@
 import {
-  GitBranch,
+  Bot,
   LayoutDashboard,
   MessageSquare,
   PackageSearch,
@@ -7,7 +7,7 @@ import {
   Users,
   Zap,
   type LucideIcon,
-} from "lucide-react";
+} from 'lucide-react';
 
 /**
  * Single source of truth for the top-level navigation and its
@@ -41,73 +41,73 @@ export interface NavArea {
 
 export const NAV_AREAS: NavArea[] = [
   {
-    key: "dashboard",
-    href: "/dashboard",
-    labelKey: "dashboard",
+    key: 'dashboard',
+    href: '/dashboard',
+    labelKey: 'dashboard',
     icon: LayoutDashboard,
-    matchPrefixes: ["/dashboard"],
+    matchPrefixes: ['/dashboard'],
   },
   {
-    key: "conversas",
-    href: "/inbox",
-    labelKey: "conversas",
+    key: 'conversas',
+    href: '/inbox',
+    labelKey: 'conversas',
     icon: MessageSquare,
-    matchPrefixes: ["/inbox"],
+    matchPrefixes: ['/inbox'],
   },
   {
-    key: "contactos",
-    href: "/contacts",
-    labelKey: "contactos",
+    key: 'crm',
+    href: '/contacts',
+    labelKey: 'crm',
     icon: Users,
-    matchPrefixes: ["/contacts"],
-  },
-  {
-    key: "vendas",
-    href: "/pipelines",
-    labelKey: "vendas",
-    icon: GitBranch,
-    matchPrefixes: ["/pipelines", "/visits"],
+    matchPrefixes: ['/contacts', '/pipelines', '/visits'],
     submenu: [
-      { href: "/pipelines", labelKey: "pipeline" },
-      { href: "/visits", labelKey: "visits" },
+      { href: '/contacts', labelKey: 'contacts' },
+      { href: '/pipelines', labelKey: 'pipeline' },
+      { href: '/visits', labelKey: 'visits' },
     ],
   },
   {
-    key: "catalogo",
-    href: "/catalog",
-    labelKey: "catalogo",
+    key: 'agentes',
+    href: '/agents',
+    labelKey: 'agentes',
+    icon: Bot,
+    matchPrefixes: ['/agents'],
+  },
+  {
+    key: 'catalogo',
+    href: '/catalog',
+    labelKey: 'catalogo',
     icon: PackageSearch,
-    matchPrefixes: ["/catalog", "/operations"],
+    matchPrefixes: ['/catalog', '/operations'],
     submenu: [
-      { href: "/catalog", labelKey: "products" },
-      { href: "/operations", labelKey: "operations" },
+      { href: '/catalog', labelKey: 'products' },
+      { href: '/operations', labelKey: 'operations' },
     ],
   },
   {
-    key: "automacao",
-    href: "/automations",
-    labelKey: "automacao",
+    key: 'automacao',
+    href: '/automations',
+    labelKey: 'automacao',
     icon: Zap,
-    matchPrefixes: ["/automations", "/flows", "/agents"],
+    matchPrefixes: ['/automations', '/flows'],
     submenu: [
-      { href: "/automations", labelKey: "rules" },
-      { href: "/flows", labelKey: "flows", beta: true },
-      { href: "/agents", labelKey: "aiAgents" },
+      { href: '/automations', labelKey: 'rules' },
+      { href: '/flows', labelKey: 'flows', beta: true },
     ],
   },
   {
-    key: "campanhas",
-    href: "/broadcasts",
-    labelKey: "campanhas",
+    key: 'campanhas',
+    href: '/broadcasts',
+    labelKey: 'campanhas',
     icon: Radio,
-    matchPrefixes: ["/broadcasts"],
+    matchPrefixes: ['/broadcasts'],
   },
 ];
 
 export function findActiveArea(pathname: string): NavArea | undefined {
   return NAV_AREAS.find((area) =>
     area.matchPrefixes.some(
-      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-    ),
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+    )
   );
 }

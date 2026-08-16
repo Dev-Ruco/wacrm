@@ -123,3 +123,25 @@ twice, turn it into a rule in `AGENTS.md` instead of a third log entry.
   `node_modules` isn't checked in, so a fresh clone needs `npm install`
   (which repairs the lock file) rather than `npm ci` until someone
   regenerates and commits a matching lockfile.
+
+- **The `(dashboard)` middleware credential gap (above) is real, but it
+  is not the end of the road for visual verification — build a static
+  HTML/CSS/JS preview outside the app (e.g. `docs/ui-prototypes/`) that
+  mirrors the real components' markup/classes, and screenshot *that*
+  with Playwright.** On this machine (macOS 12 "Monterey"), Playwright's
+  own bundled Chromium refuses to install ("ERROR: Playwright does not
+  support chromium on mac12") — work around it by installing just the
+  `playwright` npm package in a scratch dir and launching with
+  `executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'`
+  (the real Google Chrome was already installed) instead of
+  `playwright install chromium`.
+
+- **`src/lib/supabase/client.ts`'s browser client is created with `db:
+  { schema: 'wacrm' }`, so every `db.from(...)` call in client-side
+  query code (e.g. `src/lib/dashboard/queries.ts`) already resolves
+  against the `wacrm` schema** — `conversations`, `deals`,
+  `automation_logs`, and the newer `agent_traces`/`ai_configs` tables
+  are all reachable through the same single client with no
+  `.schema('wacrm')` chaining needed. Don't assume a table needs a
+  different client just because a migration file prefixes it
+  `wacrm.foo` — check `client.ts` before reaching for a second client.

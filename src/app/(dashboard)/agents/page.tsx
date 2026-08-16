@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Bot } from 'lucide-react';
 import { AiPlayground } from '@/components/agents/ai-playground';
 import { AiUsageCard } from '@/components/agents/ai-usage';
 import { AgentTools } from '@/components/agents/agent-tools';
@@ -17,7 +16,10 @@ import { AgentSecurity } from '@/components/agents/agent-security';
 import { AgentMemory } from '@/components/agents/agent-memory';
 import { AiKnowledgeCard } from '@/components/settings/ai-knowledge';
 import { useAgentConfig } from '@/components/agents/use-agent-config';
-import { AgentBuilderShell, type Section } from '@/components/agents/agent-builder-shell';
+import {
+  AgentBuilderShell,
+  type Section,
+} from '@/components/agents/agent-builder-shell';
 import { useAuth } from '@/hooks/use-auth';
 import { canEditSettings } from '@/lib/auth/roles';
 
@@ -95,16 +97,6 @@ export default function AgentsPage() {
 
   return (
     <div>
-      <div className="flex items-center gap-2">
-        <Bot className="h-6 w-6 text-primary" />
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">
-          Agentes de IA
-        </h1>
-      </div>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Configure o agente, defina o conhecimento e as ferramentas permitidas, e teste as respostas antes de o utilizar na caixa de entrada.
-      </p>
-
       {decided && (
         <AgentBuilderShell
           active={section}
@@ -112,6 +104,11 @@ export default function AgentsPage() {
           agentName={agentConfig.agentName}
           agentRole={agentConfig.agentRole}
           isActive={agentConfig.isActive}
+          canToggleActive={agentConfig.canEdit}
+          onToggleActive={() => {
+            agentConfig.setIsActive(!agentConfig.isActive);
+            void agentConfig.handleSave();
+          }}
           canViewUsage={canViewUsage}
         >
           {renderSection()}

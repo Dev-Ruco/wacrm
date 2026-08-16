@@ -60,14 +60,17 @@
   "Nav": {
     "areas": {
       "dashboard": "대시보드",
-      "conversas": "대화",
+      "conversas": "상담",
       "contactos": "연락처",
       "vendas": "영업",
+      "crm": "CRM",
+      "agentes": "AI 에이전트",
       "catalogo": "카탈로그",
       "automacao": "자동화",
       "campanhas": "캠페인"
     },
     "submenu": {
+      "contacts": "연락처",
       "pipeline": "파이프라인",
       "visits": "예약된 방문",
       "products": "제품",

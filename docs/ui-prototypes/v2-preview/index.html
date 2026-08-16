@@ -1,0 +1,376 @@
+<title>WACRM v2 Preview</title>
+<style>
+  :root{
+    --ink:#101828; --ink-soft:#4b5768; --ink-faint:#8592a6;
+    --paper:#f6f8fa; --paper-card:#ffffff; --paper-sunken:#eef1f4; --paper-recessed:#e7ebef;
+    --border:#e5e9ee; --border-strong:#d3dae1;
+    --nav-bg:#ffffff; --nav-border:#e5e9ee; --nav-fg:#101828; --nav-fg-muted:#5c6b7d;
+    --brand:#1fb855; --brand-deep:#128c7e; --brand-soft:#e7f8ec; --brand-ink:#0d6b30;
+    --success:#16a34a; --success-soft:#e7f8ec;
+    --warning:#b45309; --warning-soft:#fdf1de;
+    --danger:#dc2626; --danger-soft:#fde8e7;
+    --info:#2563eb; --info-soft:#e7edfc;
+    --shadow-sm:0 1px 2px rgba(16,24,40,.05); --shadow-md:0 4px 16px rgba(16,24,40,.08); --shadow-lg:0 12px 32px rgba(16,24,40,.12);
+    --font: ui-sans-serif,"Inter","Segoe UI",system-ui,-apple-system,sans-serif;
+    --font-mono: ui-monospace,"SF Mono","Cascadia Code",monospace;
+  }
+  [data-mode="dark"]{
+    --ink:#eef1f6; --ink-soft:#a7b2c2; --ink-faint:#6b7688;
+    --paper:#0b1220; --paper-card:#111a29; --paper-sunken:#0e1622; --paper-recessed:#152134;
+    --border:#22304a; --border-strong:#2c3c5a;
+    --nav-bg:#0e1826; --nav-border:#1c2a40; --nav-fg:#eef1f6; --nav-fg-muted:#93a1b8;
+    --brand-soft:#0f2b1c; --brand-ink:#5fd889;
+    --success-soft:#0e2a1c; --warning-soft:#332208; --danger-soft:#341313; --info-soft:#101f3a;
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4); --shadow-md:0 4px 16px rgba(0,0,0,.45); --shadow-lg:0 12px 32px rgba(0,0,0,.55);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;}
+  button{font-family:inherit;}
+
+  /* type scale — mirrors globals.css */
+  .text-display{font-size:28px;line-height:1.15;font-weight:700;letter-spacing:-.01em;}
+  .text-page-title{font-size:24px;line-height:1.2;font-weight:700;letter-spacing:-.01em;}
+  .text-section-title{font-size:16px;line-height:1.3;font-weight:600;}
+  .text-card-title{font-size:14px;line-height:1.3;font-weight:600;}
+  .text-body{font-size:14px;line-height:1.5;}
+  .text-meta{font-size:12px;line-height:1.4;color:var(--ink-faint);}
+  .text-label{font-size:11px;line-height:1;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-faint);}
+  .text-metric{font-size:26px;line-height:1;font-weight:700;font-variant-numeric:tabular-nums;}
+
+  .app{display:flex;flex-direction:column;height:100vh;}
+  header.top{background:var(--nav-bg);border-bottom:1px solid var(--nav-border);display:flex;align-items:center;gap:18px;padding:0 18px;height:56px;flex-shrink:0;color:var(--nav-fg);}
+  .brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:14.5px;flex-shrink:0;}
+  .brand .mark{width:24px;height:24px;border-radius:7px;background:var(--brand);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#052e14;}
+  nav.primary{display:flex;align-items:stretch;height:100%;}
+  nav.primary button{background:none;border:none;color:var(--nav-fg-muted);font-size:13px;font-weight:600;padding:0 12px;height:100%;cursor:pointer;border-bottom:2px solid transparent;display:flex;align-items:center;gap:6px;transition:color .15s;}
+  nav.primary button:hover{color:var(--nav-fg);}
+  nav.primary button.active{color:var(--nav-fg);border-bottom-color:var(--brand);}
+  nav.primary button .dot{width:6px;height:6px;border-radius:50%;background:var(--danger);}
+  .top-spacer{flex:1;}
+  .icon-btn{width:32px;height:32px;border-radius:8px;border:none;background:transparent;color:var(--nav-fg-muted);display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;}
+  .icon-btn:hover{background:var(--paper-sunken);color:var(--nav-fg);}
+  .mode-toggle{display:flex;align-items:center;gap:4px;background:var(--paper-sunken);border-radius:8px;padding:2px;}
+  .mode-toggle button{border:none;background:none;padding:5px 9px;border-radius:6px;font-size:11.5px;font-weight:700;cursor:pointer;color:var(--nav-fg-muted);}
+  .mode-toggle button.active{background:var(--paper-card);color:var(--nav-fg);box-shadow:var(--shadow-sm);}
+  .avatar{width:30px;height:30px;border-radius:50%;background:var(--brand-soft);color:var(--brand-ink);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11.5px;}
+
+  main.workspace{flex:1;overflow-y:auto;background:var(--paper);}
+  .screen{display:none;}
+  .screen.active{display:block;}
+  .pad{padding:24px 28px;}
+
+  .page-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:20px;}
+  .page-head .lede{color:var(--ink-soft);margin-top:4px;}
+
+  /* priorities */
+  .priorities{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px;}
+  .priority-chip{display:flex;align-items:center;gap:8px;padding:9px 14px;border-radius:10px;font-weight:600;font-size:13px;cursor:pointer;border:1px solid transparent;transition:transform .12s;}
+  .priority-chip:hover{transform:translateY(-1px);}
+  .priority-chip .n{font-size:15px;font-weight:800;}
+  .priority-chip.warn{background:var(--warning-soft);color:var(--warning);}
+  .priority-chip.danger{background:var(--danger-soft);color:var(--danger);}
+  .priority-chip.info{background:var(--info-soft);color:var(--info);}
+
+  .metric-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:20px;}
+  .metric{background:var(--paper-card);padding:16px 18px;}
+  .metric .delta{margin-top:4px;font-size:12px;font-weight:600;}
+  .metric .delta.up{color:var(--success);} .metric .delta.down{color:var(--danger);}
+
+  .grid-2{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;margin-bottom:16px;}
+  .card{background:var(--paper-card);border:1px solid var(--border);border-radius:14px;padding:18px;}
+  .card.elevated{box-shadow:0 10px 28px rgba(31,184,85,.14),0 2px 8px rgba(16,24,40,.08);border-color:var(--brand-soft);}
+  .card-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px;}
+
+  .area-chart{width:100%;height:130px;}
+  .stage-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed var(--border);}
+  .stage-row:last-child{border-bottom:none;}
+  .stage-bar{height:6px;border-radius:99px;background:var(--paper-recessed);flex:1;margin:0 12px;overflow:hidden;}
+  .stage-bar > div{height:100%;background:linear-gradient(90deg,var(--brand),var(--brand-deep));border-radius:99px;}
+
+  .agent-card{display:flex;align-items:center;gap:14px;}
+  .agent-card .ring{width:46px;height:46px;border-radius:50%;background:var(--brand-soft);display:flex;align-items:center;justify-content:center;color:var(--brand-ink);flex-shrink:0;position:relative;}
+  .agent-card .ring .dot{position:absolute;bottom:1px;right:1px;width:11px;height:11px;border-radius:50%;background:var(--success);border:2px solid var(--paper-card);}
+  .agent-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px;}
+  .agent-stats .s .v{font-size:18px;font-weight:700;}
+  .agent-stats .s .l{font-size:11px;color:var(--ink-faint);margin-top:2px;}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);font-weight:700;padding:7px 8px;border-bottom:1px solid var(--border);}
+  td{padding:9px 8px;border-bottom:1px solid var(--border);}
+  tr:last-child td{border-bottom:none;}
+  .name-cell{display:flex;align-items:center;gap:8px;font-weight:600;}
+  .mini-avatar{width:24px;height:24px;border-radius:50%;background:var(--paper-recessed);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--ink-soft);flex-shrink:0;}
+  .badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;}
+  .badge.warn{background:var(--warning-soft);color:var(--warning);}
+  .badge.info{background:var(--info-soft);color:var(--info);}
+  .badge.danger{background:var(--danger-soft);color:var(--danger);}
+
+  .timeline{display:flex;flex-direction:column;}
+  .t-row{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);}
+  .t-row:last-child{border-bottom:none;}
+  .t-dot{width:26px;height:26px;border-radius:50%;background:var(--paper-recessed);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:12px;}
+  .t-row .txt{font-size:13px;} .t-row time{font-size:11px;color:var(--ink-faint);}
+
+  /* conversas */
+  .conv-shell{display:grid;grid-template-columns:300px 1fr 280px;height:calc(100vh - 56px);transition:grid-template-columns .2s;}
+  .conv-shell.panel-collapsed{grid-template-columns:300px 1fr 0px;}
+  .conv-list{border-right:1px solid var(--border);overflow-y:auto;background:var(--paper-card);}
+  .conv-search{padding:12px;}
+  .conv-search input{width:100%;border:1px solid var(--border);border-radius:10px;padding:8px 12px;font-size:13px;background:var(--paper-sunken);color:var(--ink);}
+  .filter-row{display:flex;gap:6px;padding:0 12px 10px;flex-wrap:wrap;}
+  .filter-row button{border:1px solid var(--border);background:var(--paper-card);color:var(--ink-soft);font-size:11px;font-weight:600;padding:5px 10px;border-radius:99px;cursor:pointer;}
+  .filter-row button.active{background:var(--brand-soft);color:var(--brand-ink);border-color:transparent;}
+  .conv-item{display:flex;gap:10px;padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--border);}
+  .conv-item:hover{background:var(--paper-sunken);}
+  .conv-item.active{background:var(--brand-soft);}
+  .conv-item .mini-avatar{width:38px;height:38px;font-size:12px;}
+  .conv-item .meta{flex:1;min-width:0;}
+  .conv-item .row1{display:flex;justify-content:space-between;font-size:13px;font-weight:700;}
+  .conv-item .row1 time{font-weight:500;color:var(--ink-faint);font-size:10.5px;}
+  .conv-item .snippet{font-size:12px;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px;}
+  .unread{min-width:18px;height:18px;border-radius:99px;background:var(--brand);color:#052e14;font-size:9.5px;font-weight:800;display:flex;align-items:center;justify-content:center;padding:0 4px;}
+
+  .chat-pane{display:flex;flex-direction:column;background:var(--paper-sunken);}
+  .chat-head{display:flex;align-items:center;gap:10px;padding:11px 16px;background:var(--paper-card);border-bottom:1px solid var(--border);}
+  .chat-head .grow{flex:1;}
+  .chat-body{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;justify-content:flex-end;gap:7px;}
+  .bubble{max-width:58%;padding:9px 12px;border-radius:12px;font-size:13px;box-shadow:0 1px 2px rgba(16,24,40,.06);}
+  .bubble.in{background:var(--paper-card);align-self:flex-start;border-bottom-left-radius:3px;}
+  .bubble.out{background:var(--brand-soft);color:var(--brand-ink);align-self:flex-end;border-bottom-right-radius:3px;}
+  .chat-input{display:flex;gap:8px;padding:12px 16px;background:var(--paper-card);border-top:1px solid var(--border);}
+  .chat-input input{flex:1;border:1px solid var(--border);border-radius:10px;padding:9px 13px;background:var(--paper);color:var(--ink);}
+  .chat-input button{background:var(--brand);border:none;color:#052e14;width:38px;border-radius:10px;font-weight:800;cursor:pointer;}
+
+  .ctx-pane{overflow-y:auto;border-left:1px solid var(--border);background:var(--paper-card);}
+  .conv-shell.panel-collapsed .ctx-pane{display:none;}
+  .ctx-inner{padding:18px;width:280px;}
+  .ctx-head{text-align:center;margin-bottom:16px;}
+  .ctx-head .mini-avatar{width:56px;height:56px;font-size:17px;margin:0 auto 10px;}
+  .ctx-section{margin-bottom:16px;}
+  .ctx-section h4{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-faint);margin:0 0 8px;font-weight:700;}
+  .ctx-row{display:flex;justify-content:space-between;font-size:12px;padding:6px 0;}
+  .tag{display:inline-block;font-size:10.5px;font-weight:700;background:var(--brand-soft);color:var(--brand-ink);padding:3px 9px;border-radius:99px;margin:0 4px 4px 0;}
+
+  /* agents module */
+  .agent-header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;border:1px solid var(--border);background:var(--paper-card);border-radius:14px;padding:16px 20px;margin-bottom:16px;}
+  .agent-header .id{display:flex;align-items:center;gap:12px;}
+  .agent-header .dot{width:10px;height:10px;border-radius:50%;background:var(--success);box-shadow:0 0 0 3px var(--success-soft);}
+  .btn{font-size:12.5px;font-weight:700;padding:8px 14px;border-radius:9px;cursor:pointer;border:1px solid var(--border-strong);background:var(--paper-card);color:var(--ink);display:inline-flex;align-items:center;gap:6px;}
+  .btn.primary{background:var(--brand);border-color:transparent;color:#052e14;}
+  .btn.subtle{background:var(--paper-sunken);border-color:transparent;color:var(--ink-soft);}
+  .seg{display:flex;gap:2px;background:var(--paper-sunken);border-radius:10px;padding:3px;overflow-x:auto;}
+  .seg button{border:none;background:none;font-size:12.5px;font-weight:600;padding:7px 13px;border-radius:8px;cursor:pointer;color:var(--ink-soft);white-space:nowrap;}
+  .seg button.active{background:var(--paper-card);color:var(--ink);box-shadow:var(--shadow-sm);}
+  .seg.sub{margin-top:8px;background:transparent;padding:0;}
+
+  .agent-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:12px;font-weight:600;margin-bottom:5px;color:var(--ink-soft);}
+  .field input, .field textarea, .field select{width:100%;border:1px solid var(--border);border-radius:8px;padding:8px 11px;font-size:13px;background:var(--paper);color:var(--ink);font-family:inherit;}
+  .field .hint{font-size:11px;color:var(--ink-faint);margin-top:4px;}
+  .toggle-row{display:flex;justify-content:space-between;align-items:center;gap:12px;border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin-bottom:10px;}
+  .switch{width:34px;height:20px;border-radius:99px;background:var(--paper-recessed);position:relative;flex-shrink:0;}
+  .switch.on{background:var(--brand);}
+  .switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s;}
+  .switch.on::after{left:16px;}
+
+  .critique{position:fixed;bottom:16px;right:16px;background:var(--paper-card);border:1px solid var(--border);box-shadow:var(--shadow-lg);border-radius:12px;padding:12px 16px;font-size:12px;max-width:280px;color:var(--ink-soft);}
+</style>
+
+<div class="app">
+  <header class="top">
+    <div class="brand"><span class="mark">W</span>WACRM</div>
+    <nav class="primary" id="primaryNav"></nav>
+    <div class="top-spacer"></div>
+    <div class="mode-toggle">
+      <button id="modeLight" class="active" onclick="setMode('light')">Claro</button>
+      <button id="modeDark" onclick="setMode('dark')">Escuro</button>
+    </div>
+    <button class="icon-btn">🔔<span style="position:absolute;top:5px;right:5px;width:6px;height:6px;border-radius:50%;background:var(--danger);"></span></button>
+    <div class="avatar">AC</div>
+  </header>
+  <main class="workspace" id="workspace"></main>
+</div>
+
+<script>
+const AREAS = ['dashboard','conversas','crm','agentes','catalogo','automacao','campanhas'];
+const LABELS = {dashboard:'Início',conversas:'Atendimento',crm:'CRM',agentes:'Agentes',catalogo:'Catálogo',automacao:'Automação',campanhas:'Campanhas'};
+const nav = document.getElementById('primaryNav');
+AREAS.forEach(key=>{
+  const b=document.createElement('button');
+  b.dataset.key=key; b.textContent=LABELS[key];
+  if(key==='conversas') b.innerHTML += ' <span class="dot"></span>';
+  b.onclick=()=>selectArea(key);
+  nav.appendChild(b);
+});
+function selectArea(key){
+  document.querySelectorAll('#primaryNav button').forEach(b=>b.classList.toggle('active',b.dataset.key===key));
+  const ws=document.getElementById('workspace');
+  ws.innerHTML = {dashboard:DASHBOARD, conversas:CONVERSAS, agentes:AGENTES}[key] || `<div class="pad"><p class="text-meta">Ecrã "${LABELS[key]}" fora do âmbito deste preview — usa o mesmo shell já validado.</p></div>`;
+  if(key==='agentes') wireAgentTabs();
+  if(key==='conversas') wireConv();
+}
+function setMode(mode){
+  document.documentElement.setAttribute('data-mode', mode);
+  document.getElementById('modeLight').classList.toggle('active', mode==='light');
+  document.getElementById('modeDark').classList.toggle('active', mode==='dark');
+}
+
+const DASHBOARD = `<div class="pad">
+  <div class="page-head">
+    <div><div class="text-page-title">Bom dia, Ana</div><p class="lede text-body">Aqui está o que precisa da tua atenção hoje — segunda-feira, 16 de Agosto.</p></div>
+  </div>
+  <div class="priorities">
+    <div class="priority-chip warn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg><span class="n">8</span> conversas a aguardar resposta</div>
+    <div class="priority-chip danger"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg><span class="n">2</span> automações com erro</div>
+    <div class="priority-chip info"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg><span class="n">3</span> negócios a fechar esta semana</div>
+  </div>
+  <div class="metric-strip">
+    <div class="metric"><div class="text-label">Conversas activas</div><div class="text-metric">18</div><div class="delta up">▲ 12% vs. semana passada</div></div>
+    <div class="metric"><div class="text-label">Contactos novos (7d)</div><div class="text-metric">23</div><div class="delta up">▲ 4</div></div>
+    <div class="metric"><div class="text-label">Valor em pipeline</div><div class="text-metric">312k</div><div class="delta up">9 negócios abertos</div></div>
+    <div class="metric"><div class="text-label">Resolvido pela IA</div><div class="text-metric">68%</div><div class="delta down">▼ 3pp</div></div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><div class="text-section-title">Conversas por dia</div><span class="text-meta">últimos 7 dias</span></div>
+      <svg class="area-chart" viewBox="0 0 600 140" preserveAspectRatio="none">
+        <g stroke="currentColor" stroke-opacity=".08">
+          <line x1="0" y1="10" x2="600" y2="10"/><line x1="0" y1="45" x2="600" y2="45"/>
+          <line x1="0" y1="80" x2="600" y2="80"/><line x1="0" y1="115" x2="600" y2="115"/>
+        </g>
+        <polygon points="0,90 100,70 200,85 300,40 400,55 500,20 600,35 600,120 0,120" fill="#1fb855" fill-opacity=".08"/>
+        <polyline points="0,90 100,70 200,85 300,40 400,55 500,20 600,35" fill="none" stroke="#1fb855" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+        <circle cx="600" cy="35" r="4.5" fill="#1fb855" stroke="var(--paper-card)" stroke-width="2"/>
+        <text x="596" y="24" text-anchor="end" font-size="11" font-weight="700" fill="#1fb855">26</text>
+      </svg>
+    </div>
+    <div class="card">
+      <div class="card-head"><div class="text-section-title">Pipeline por estágio</div></div>
+      <div class="stage-row"><span class="text-body">Novo Lead</span><div class="stage-bar"><div style="width:30%"></div></div><span class="text-meta">3</span></div>
+      <div class="stage-row"><span class="text-body">Qualificado</span><div class="stage-bar"><div style="width:20%"></div></div><span class="text-meta">2</span></div>
+      <div class="stage-row"><span class="text-body">Proposta</span><div class="stage-bar"><div style="width:20%"></div></div><span class="text-meta">2</span></div>
+      <div class="stage-row"><span class="text-body">Negociação</span><div class="stage-bar"><div style="width:10%"></div></div><span class="text-meta">1</span></div>
+      <div class="stage-row"><span class="text-body">Ganho (mês)</span><div class="stage-bar"><div style="width:40%"></div></div><span class="text-meta">4</span></div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><div class="text-section-title">Precisa da tua atenção</div></div>
+      <table><thead><tr><th>Contacto</th><th>Situação</th><th></th><th>Estado</th></tr></thead><tbody>
+        <tr><td class="name-cell"><span class="mini-avatar">FU</span>Fátima Ussene</td><td class="text-meta">Pergunta sobre stock</td><td class="text-meta">há 6 min</td><td><span class="badge warn">Aguardando</span></td></tr>
+        <tr><td class="name-cell"><span class="mini-avatar">CM</span>Carlos Mabjaia</td><td class="text-meta">Negócio: Sapatilhas Running</td><td class="text-meta">há 1h20</td><td><span class="badge warn">Aguardando</span></td></tr>
+        <tr><td class="name-cell"><span class="mini-avatar">SM</span>Sara Massango</td><td class="text-meta">Visita amanhã 10h</td><td class="text-meta">ontem</td><td><span class="badge info">Confirmada</span></td></tr>
+      </tbody></table>
+    </div>
+    <div class="card elevated">
+      <div class="card-head"><div class="text-section-title">Agente IA</div><span class="badge info">Activo</span></div>
+      <div class="agent-card">
+        <div class="ring"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4M8 16h.01M16 16h.01"/></svg><span class="dot"></span></div>
+        <div><div class="text-card-title">Assistente Comercial</div><div class="text-meta">gpt-4o-mini · resposta automática ligada</div></div>
+      </div>
+      <div class="agent-stats">
+        <div class="s"><div class="v">42</div><div class="l">Conversas hoje</div></div>
+        <div class="s"><div class="v">5</div><div class="l">Handoffs</div></div>
+        <div class="s"><div class="v">1.2s</div><div class="l">Latência média</div></div>
+        <div class="s"><div class="v">$3.40</div><div class="l">Custo hoje</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><div class="text-section-title">Actividade recente</div></div>
+    <div class="timeline">
+      <div class="t-row"><div class="t-dot" style="color:var(--brand-ink);background:var(--brand-soft);"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-9 8.4A8.5 8.5 0 1 1 20.9 9a8.4 8.4 0 0 1 .1 2.5Z"/></svg></div><div class="grow"><div class="txt">Nova conversa de <strong>Amélia Chissano</strong></div></div><time>agora</time></div>
+      <div class="t-row"><div class="t-dot" style="color:var(--danger);background:var(--danger-soft);"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg></div><div class="grow"><div class="txt">Automação "Boas-vindas" falhou para <strong>Pedro Sitoe</strong></div></div><time>há 22 min</time></div>
+      <div class="t-row"><div class="t-dot" style="color:var(--info);background:var(--info-soft);"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg></div><div class="grow"><div class="txt">Negócio <strong>Kit Ginásio Completo</strong> passou para Proposta</div></div><time>há 1h</time></div>
+      <div class="t-row"><div class="t-dot" style="color:var(--brand-ink);background:var(--brand-soft);"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-8-8 18-2-8-8-2Z"/></svg></div><div class="grow"><div class="txt">Campanha "Volta às Aulas" enviada a 842 contactos</div></div><time>ontem</time></div>
+    </div>
+  </div>
+</div>`;
+
+const CONVERSAS = `<div class="conv-shell" id="convShell">
+  <div class="conv-list">
+    <div class="conv-search"><input placeholder="Procurar conversa…"></div>
+    <div class="filter-row"><button class="active">Todas</button><button>Não lidas 5</button><button>Pendentes</button><button>Minhas</button></div>
+    ${[["FU","Fátima Ussene","Ainda têm o kit em tamanho M?","14:32",2,true],
+       ["AC","Amélia Chissano","Bom dia, gostaria de saber os preços","agora",1,false],
+       ["CM","Carlos Mabjaia","Obrigado! Vou pensar e já digo.","13:05",0,false],
+       ["SM","Sara Massango","Perfeito, confirmo amanhã às 10h.","ontem",0,false]
+      ].map((c,i)=>`<div class="conv-item ${i===0?'active':''}"><div class="mini-avatar">${c[0]}</div><div class="meta"><div class="row1"><span>${c[1]}</span><time>${c[3]}</time></div><div class="snippet">${c[2]}</div></div>${c[4]>0?`<span class="unread">${c[4]}</span>`:''}</div>`).join('')}
+  </div>
+  <div class="chat-pane">
+    <div class="chat-head"><div class="mini-avatar" style="width:34px;height:34px;">FU</div><div class="grow"><div class="text-card-title">Fátima Ussene</div><div class="text-meta">+258 84 123 4567 · vista há 2 min</div></div>
+      <button class="icon-btn" onclick="document.getElementById('convShell').classList.toggle('panel-collapsed')" title="Mostrar/ocultar painel do cliente">☰</button>
+    </div>
+    <div class="chat-body">
+      <div class="bubble in">Boa tarde! Vi o kit de ginásio completo no catálogo.</div>
+      <div class="bubble out">Boa tarde Fátima! Sim, temos em stock. Qual tamanho procura?</div>
+      <div class="bubble in">Ainda têm o kit em tamanho M?</div>
+    </div>
+    <div class="chat-input"><input placeholder="Escrever mensagem…"><button>➤</button></div>
+  </div>
+  <div class="ctx-pane"><div class="ctx-inner">
+    <div class="ctx-head"><div class="mini-avatar">FU</div><div class="text-card-title">Fátima Ussene</div><div class="text-meta">Cliente desde Mar 2026</div></div>
+    <div class="ctx-section"><h4>Etiquetas</h4><span class="tag">VIP</span><span class="tag">Ginásio</span></div>
+    <div class="ctx-section"><h4>Negócio activo</h4><div class="ctx-row"><span>Kit Ginásio Completo</span><strong>45.000 MZN</strong></div><div class="ctx-row"><span>Estágio</span><span>Proposta enviada</span></div></div>
+    <div class="ctx-section"><h4>Notas</h4><div class="text-meta">Prefere contacto ao final da tarde.</div></div>
+  </div></div>
+</div>`;
+
+const AGENT_GROUPS = {
+  overview:{label:'Visão Geral', items:[['overview','Visão Geral']]},
+  configure:{label:'Configurar', items:[['identity','Identidade & Comportamento'],['skills','Skills'],['tools','Ferramentas'],['knowledge','Conhecimento'],['memory','Memória']]},
+  control:{label:'Controlar', items:[['security','Segurança & Handoff'],['runtime','Modelo & Runtime']]},
+  test:{label:'Testar', items:[['playground','Playground']]},
+  observe:{label:'Observar', items:[['flow','Fluxo ao vivo'],['suggestions','Lições'],['eval','Avaliação'],['usage','Utilização']]},
+};
+const AGENTES = `<div class="pad">
+  <div class="agent-header">
+    <div class="id"><span class="dot"></span><div><div class="text-card-title" style="font-size:15px;">Assistente Comercial</div><div class="text-meta">Assistente de vendas · WhatsApp · <span style="color:var(--success);font-weight:600;">Activo</span></div></div></div>
+    <div style="display:flex;gap:8px;"><button class="btn">✨ Testar agente</button><button class="btn subtle">⏸ Pausar</button></div>
+  </div>
+  <div class="seg" id="agentGroupSeg"></div>
+  <div class="seg sub" id="agentItemSeg"></div>
+  <div id="agentContent" style="margin-top:16px;"></div>
+</div>`;
+
+function wireAgentTabs(){
+  const groupSeg = document.getElementById('agentGroupSeg');
+  const itemSeg = document.getElementById('agentItemSeg');
+  const content = document.getElementById('agentContent');
+  let activeGroup = 'configure', activeItem = 'identity';
+  function render(){
+    groupSeg.innerHTML = Object.entries(AGENT_GROUPS).map(([k,g])=>`<button data-g="${k}" class="${k===activeGroup?'active':''}">${g.label}</button>`).join('');
+    const items = AGENT_GROUPS[activeGroup].items;
+    itemSeg.style.display = items.length>1 ? 'flex' : 'none';
+    itemSeg.innerHTML = items.map(([id,label])=>`<button data-i="${id}" class="${id===activeItem?'active':''}">${label}</button>`).join('');
+    groupSeg.querySelectorAll('button').forEach(b=>b.onclick=()=>{activeGroup=b.dataset.g; activeItem=AGENT_GROUPS[activeGroup].items[0][0]; render();});
+    itemSeg.querySelectorAll('button').forEach(b=>b.onclick=()=>{activeItem=b.dataset.i; render();});
+    content.innerHTML = activeItem==='identity' ? AGENT_IDENTITY_CONTENT : `<div class="card"><p class="text-meta">Secção "${sectionLabel(activeItem)}" — mesmo tratamento visual (cards agrupados, sem sidebar), conteúdo real inalterado.</p></div>`;
+  }
+  function sectionLabel(id){ for(const g of Object.values(AGENT_GROUPS)) for(const [i,l] of g.items) if(i===id) return l; return id; }
+  render();
+}
+const AGENT_IDENTITY_CONTENT = `<div class="agent-grid">
+  <div class="card"><div class="text-card-title" style="margin-bottom:10px;">Identidade</div>
+    <div class="field"><label>Nome do agente</label><input value="Assistente Comercial"></div>
+    <div class="field"><label>Função</label><input value="Assistente de vendas"></div>
+    <div class="field"><label>Idioma principal</label><input value="Português"></div>
+  </div>
+  <div class="card"><div class="text-card-title" style="margin-bottom:10px;">Comportamento</div>
+    <div class="field"><label>Contexto de negócio</label><textarea rows="6">Vendes artigos de ginásio para a loja LC Fitness em Maputo. Sê simpática, directa, e confirma sempre o tamanho antes de fechar.</textarea></div>
+  </div>
+  <div class="card" style="grid-column:span 2;"><div class="text-card-title" style="margin-bottom:10px;">Estratégia de conversa e venda</div>
+    <div class="agent-grid" style="margin-top:0;">
+      <div class="toggle-row"><div><div class="text-body" style="font-weight:600;">Apresentação visual automática</div><div class="text-meta">Envia fotos sem o cliente pedir.</div></div><div class="switch on"></div></div>
+      <div class="toggle-row"><div><div class="text-body" style="font-weight:600;">Recomendações automáticas</div><div class="text-meta">Sugere produtos relacionados.</div></div><div class="switch"></div></div>
+      <div class="toggle-row"><div><div class="text-body" style="font-weight:600;">Confirmar stock</div><div class="text-meta">Verifica disponibilidade antes de confirmar.</div></div><div class="switch on"></div></div>
+      <div class="toggle-row"><div><div class="text-body" style="font-weight:600;">Manter item seleccionado</div><div class="text-meta">Não perde o contexto do produto.</div></div><div class="switch on"></div></div>
+    </div>
+  </div>
+</div>`;
+
+function wireConv(){}
+
+selectArea('dashboard');
+</script>
