@@ -8,7 +8,6 @@ on:
     branches:
       - main
       - feat/ai-agent-tools-foundation
-      - ci/full-validation-20260816
 
 # Cancel older CI runs for the same branch when a new commit arrives —
 # saves minutes when someone pushes a stack of fixes to one PR.
@@ -38,7 +37,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 20
           cache: npm
 
       - name: Install dependencies
