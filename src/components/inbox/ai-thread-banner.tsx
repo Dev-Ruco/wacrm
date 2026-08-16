@@ -1,36 +1,49 @@
-"use client";
+'use client';
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from 'react';
 import {
-  Sparkles,
-  Hand,
-  Undo2,
-  Loader2,
   AlertTriangle,
-  Send,
+  Check,
+  ChevronDown,
+  Hand,
+  Loader2,
+  MoreHorizontal,
+  RotateCcw,
+  Sparkles,
+  UserRound,
   WandSparkles,
   X,
-  RotateCcw,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import { toast } from "sonner";
-import { useTranslations } from "next-intl";
-import { useAuth } from "@/hooks/use-auth";
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+import { useTranslations } from 'next-intl';
+import { useAuth } from '@/hooks/use-auth';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 interface AiAccountStatus {
   autoReplyOn: boolean;
 }
+
 const statusCache = new Map<string, AiAccountStatus>();
 
 async function fetchAiAccountStatus(accountId: string): Promise<AiAccountStatus> {
   const cached = statusCache.get(accountId);
   if (cached) return cached;
+
   try {
-    const res = await fetch("/api/ai/config", { cache: "no-store" });
+    const res = await fetch('/api/ai/config', { cache: 'no-store' });
     if (!res.ok) return { autoReplyOn: false };
-    const j = await res.json();
+    const json = await res.json();
     const status = {
-      autoReplyOn: !!(j?.configured && j?.is_active && j?.auto_reply_enabled),
+      autoReplyOn: Boolean(
+        json?.configured && json?.is_active && json?.auto_reply_enabled
+      ),
     };
     statusCache.set(accountId, status);
     return status;
@@ -51,6 +64,29 @@ interface AiThreadBannerProps {
   }) => void;
 }
 
+type OperatingMode = 'ai' | 'copilot' | 'human';
+
+const MODE_META: Record<
+  OperatingMode,
+  { label: string; description: string; icon: typeof Sparkles }
+> = {
+  ai: {
+    label: 'IA automática',
+    description: 'A IA responde directamente ao cliente',
+    icon: Sparkles,
+  },
+  copilot: {
+    label: 'Copiloto',
+    description: 'A IA prepara respostas e o humano decide o envio',
+    icon: WandSparkles,
+  },
+  human: {
+    label: 'Humano',
+    description: 'O atendimento automático está em pausa',
+    icon: UserRound,
+  },
+};
+
 export function AiThreadBanner({
   conversationId,
   disabled,
@@ -59,48 +95,56 @@ export function AiThreadBanner({
   currentUserId,
   onChange,
 }: AiThreadBannerProps) {
-  const t = useTranslations("Inbox.aiBanner");
+  const t = useTranslations('Inbox.aiBanner');
   const { accountId } = useAuth();
   const [autoReplyOn, setAutoReplyOn] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [paused, setPaused] = useState(disabled);
   const [copilotOpen, setCopilotOpen] = useState(false);
-  const [instruction, setInstruction] = useState("");
-  const [draft, setDraft] = useState("");
+  const [instruction, setInstruction] = useState('');
+  const [draft, setDraft] = useState('');
   const [generating, setGenerating] = useState(false);
-  const [sending, setSending] = useState(false);
 
   useEffect(() => setPaused(disabled), [conversationId, disabled]);
+
   useEffect(() => {
     setCopilotOpen(false);
-    setInstruction("");
-    setDraft("");
+    setInstruction('');
+    setDraft('');
   }, [conversationId]);
 
   useEffect(() => {
     if (!accountId) return;
     let alive = true;
-    fetchAiAccountStatus(accountId).then((s) => alive && setAutoReplyOn(s.autoReplyOn));
+    fetchAiAccountStatus(accountId).then((status) => {
+      if (alive) setAutoReplyOn(status.autoReplyOn);
+    });
     return () => {
       alive = false;
     };
   }, [accountId]);
 
-  const toggle = useCallback(
-    async (nextPaused: boolean) => {
+  const updatePause = useCallback(
+    async (nextPaused: boolean): Promise<boolean> => {
+      if (busy) return false;
       setBusy(true);
       try {
         const res = await fetch(`/api/ai/autoreply/${conversationId}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paused: nextPaused, assign_to_me: nextPaused }),
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            paused: nextPaused,
+            assign_to_me: nextPaused,
+          }),
         });
+
         if (!res.ok) {
-          const j = await res.json().catch(() => ({}));
-          toast.error(j?.error ?? t("updateError"));
-          return;
+          const json = await res.json().catch(() => ({}));
+          toast.error(json?.error ?? t('updateError'));
+          return false;
         }
+
         setPaused(nextPaused);
         onChange?.({
           ai_autoreply_disabled: nextPaused,
@@ -110,43 +154,46 @@ export function AiThreadBanner({
               : {}
             : { assigned_agent_id: null }),
         });
-        toast.success(nextPaused ? t("tookOver") : t("resumed"));
+        toast.success(nextPaused ? t('tookOver') : t('resumed'));
+        return true;
       } catch {
-        toast.error(t("networkError"));
+        toast.error(t('networkError'));
+        return false;
       } finally {
         setBusy(false);
       }
     },
-    [conversationId, currentUserId, onChange, t],
+    [busy, conversationId, currentUserId, onChange, t]
   );
 
   const resetConversationContext = useCallback(async () => {
     if (resetting) return;
     const confirmed = window.confirm(
-      "Reiniciar esta conversa para a IA? O histórico continuará visível no CRM, mas será ignorado pela IA. A próxima mensagem do cliente será tratada como o início de uma nova conversa.",
+      'Reiniciar o contexto da IA? O histórico continuará visível no CRM, mas a IA tratará a próxima mensagem do cliente como o início de uma nova conversa.'
     );
     if (!confirmed) return;
 
     setResetting(true);
     try {
       const res = await fetch(`/api/ai/autoreply/${conversationId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ paused: false, reset_context: true }),
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(payload?.error ?? "Não foi possível reiniciar a conversa.");
+        toast.error(payload?.error ?? 'Não foi possível reiniciar o contexto.');
         return;
       }
+
       setPaused(false);
       setCopilotOpen(false);
-      setInstruction("");
-      setDraft("");
+      setInstruction('');
+      setDraft('');
       onChange?.({ ai_autoreply_disabled: false, assigned_agent_id: null });
-      toast.success("Contexto reiniciado. A próxima mensagem será tratada como uma conversa nova.");
+      toast.success('Contexto da IA reiniciado.');
     } catch {
-      toast.error("Não foi possível reiniciar a conversa.");
+      toast.error('Não foi possível reiniciar o contexto.');
     } finally {
       setResetting(false);
     }
@@ -157,196 +204,270 @@ export function AiThreadBanner({
     if (!trimmed || generating) return;
     setGenerating(true);
     try {
-      const res = await fetch("/api/ai/operator-reply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation_id: conversationId, instruction: trimmed }),
+      const res = await fetch('/api/ai/operator-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          instruction: trimmed,
+        }),
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(payload?.error ?? "Não foi possível gerar a resposta.");
+        toast.error(payload?.error ?? 'Não foi possível gerar a resposta.');
         return;
       }
-      const nextDraft = typeof payload?.draft === "string" ? payload.draft.trim() : "";
+
+      const nextDraft =
+        typeof payload?.draft === 'string' ? payload.draft.trim() : '';
       if (!nextDraft) {
-        toast.error("A IA não devolveu uma resposta.");
+        toast.error('A IA não devolveu uma resposta.');
         return;
       }
       setDraft(nextDraft);
     } catch {
-      toast.error("Não foi possível contactar o assistente de IA.");
+      toast.error('Não foi possível contactar o assistente de IA.');
     } finally {
       setGenerating(false);
     }
   }, [conversationId, generating, instruction]);
 
-  const sendOperatorReply = useCallback(async () => {
-    const text = draft.trim();
-    if (!text || sending) return;
-    setSending(true);
-    try {
-      const res = await fetch("/api/whatsapp/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversation_id: conversationId,
-          message_type: "text",
-          content_text: text,
-        }),
-      });
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(payload?.error ?? "Não foi possível enviar a resposta.");
+  const humanMode = paused || Boolean(assignedAgentId);
+  const mode: OperatingMode = copilotOpen
+    ? 'copilot'
+    : humanMode
+      ? 'human'
+      : 'ai';
+
+  const changeMode = useCallback(
+    async (nextMode: OperatingMode) => {
+      if (nextMode === 'ai') {
+        setCopilotOpen(false);
+        if (paused || assignedAgentId) await updatePause(false);
         return;
       }
-      toast.success("Resposta enviada.");
-      setInstruction("");
-      setDraft("");
-      setCopilotOpen(false);
-    } catch {
-      toast.error("Não foi possível enviar a resposta.");
-    } finally {
-      setSending(false);
-    }
-  }, [conversationId, draft, sending]);
+
+      if (!paused) {
+        const changed = await updatePause(true);
+        if (!changed) return;
+      }
+
+      setCopilotOpen(nextMode === 'copilot');
+    },
+    [assignedAgentId, paused, updatePause]
+  );
+
+  const useDraftInComposer = useCallback(() => {
+    const text = draft.trim();
+    if (!text) return;
+    window.dispatchEvent(
+      new CustomEvent('wacrm:composer-draft', {
+        detail: { conversationId, text },
+      })
+    );
+    setDraft('');
+    setInstruction('');
+    toast.success('Resposta colocada no editor.');
+  }, [conversationId, draft]);
 
   if (!autoReplyOn) return null;
 
-  const humanMode = paused || Boolean(assignedAgentId);
+  const meta = MODE_META[mode];
+  const ModeIcon = meta.icon;
 
-  if (humanMode) {
-    return (
-      <div className="border-b border-border bg-card">
+  return (
+    <div
+      className={cn(
+        'border-border bg-card/95 border-b backdrop-blur-sm',
+        handoffSummary && 'bg-amber-500/[0.04]'
+      )}
+    >
+      <div className="flex min-h-10 items-center gap-2 px-3 py-1.5 sm:px-4">
         <div
           className={cn(
-            "flex items-center gap-3 px-3 py-2.5 text-xs sm:px-4",
-            handoffSummary ? "bg-amber-500/10" : "bg-muted/40",
+            'flex size-6 shrink-0 items-center justify-center rounded-full',
+            mode === 'ai'
+              ? 'bg-primary/10 text-primary'
+              : mode === 'copilot'
+                ? 'bg-violet-500/10 text-violet-500'
+                : 'bg-muted text-muted-foreground'
           )}
         >
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500/10">
+          <ModeIcon className="size-3.5" />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="shrink-0 text-xs font-semibold text-foreground">
+              {meta.label}
+            </span>
             {handoffSummary ? (
-              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              <span className="flex min-w-0 items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="size-3 shrink-0" />
+                <span className="truncate">{handoffSummary}</span>
+              </span>
             ) : (
-              <Hand className="h-4 w-4 text-muted-foreground" />
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold text-foreground">
-              {handoffSummary ? "Requer intervenção" : "Atendimento humano"}
-            </p>
-            {handoffSummary ? (
-              <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground">{handoffSummary}</p>
-            ) : (
-              <p className="mt-0.5 text-muted-foreground">A IA automática está em pausa nesta conversa.</p>
-            )}
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-            <BannerButton onClick={() => setCopilotOpen((open) => !open)} busy={false} icon={WandSparkles}>
-              Assistir com IA
-            </BannerButton>
-            <BannerButton onClick={() => void resetConversationContext()} busy={resetting} icon={RotateCcw}>
-              Reiniciar conversa
-            </BannerButton>
-            {paused && (
-              <BannerButton onClick={() => toggle(false)} busy={busy} icon={Undo2}>
-                {t("resume")}
-              </BannerButton>
+              <span className="text-muted-foreground hidden truncate text-[11px] md:block">
+                {meta.description}
+              </span>
             )}
           </div>
         </div>
 
-        {copilotOpen && (
-          <div className="border-t border-border bg-muted/20 px-3 py-3 sm:px-4">
-            <div className="mx-auto max-w-3xl space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">Copiloto de resposta</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Dê a instrução em linguagem simples. A IA reformula; reveja antes de enviar.
-                  </p>
-                </div>
-                <button type="button" onClick={() => setCopilotOpen(false)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Fechar copiloto">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="flex gap-2">
-                <textarea
-                  value={instruction}
-                  onChange={(e) => setInstruction(e.target.value)}
-                  placeholder='Ex.: "Diga-lhe que essa cor acabou, mas temos preto e azul."'
-                  rows={2}
-                  maxLength={2000}
-                  className="min-h-16 flex-1 resize-y rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
-                />
-                <button type="button" onClick={() => void generateOperatorReply()} disabled={!instruction.trim() || generating} className="inline-flex h-9 shrink-0 items-center gap-1.5 self-end rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50">
-                  {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                  Gerar
-                </button>
-              </div>
-              {draft && (
-                <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
-                  <div className="mb-1.5 flex items-center justify-between gap-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">Resposta proposta</p>
-                    <span className="text-[10px] text-muted-foreground">Revise antes de enviar</span>
+        {mode === 'ai' ? (
+          <button
+            type="button"
+            onClick={() => void changeMode('human')}
+            disabled={busy}
+            className="border-border bg-background hover:bg-muted inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium text-foreground transition-colors disabled:opacity-50"
+          >
+            {busy ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <Hand className="size-3" />
+            )}
+            Assumir
+          </button>
+        ) : null}
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            disabled={busy}
+            className="hover:bg-muted inline-flex h-7 items-center gap-1 rounded-md px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+          >
+            Modo
+            <ChevronDown className="size-3" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-72">
+            {(Object.keys(MODE_META) as OperatingMode[]).map((key) => {
+              const item = MODE_META[key];
+              const Icon = item.icon;
+              return (
+                <DropdownMenuItem
+                  key={key}
+                  onClick={() => void changeMode(key)}
+                  className="items-start gap-2.5 py-2.5"
+                >
+                  <Icon className="mt-0.5 size-4 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium">{item.label}</span>
+                      {mode === key ? <Check className="text-primary size-4" /> : null}
+                    </div>
+                    <p className="text-muted-foreground mt-0.5 text-xs leading-snug">
+                      {item.description}
+                    </p>
                   </div>
-                  <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={3} className="w-full resize-y rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50" />
-                  <div className="mt-2 flex justify-end gap-2">
-                    <button type="button" onClick={() => setDraft("")} disabled={sending} className="rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50">Descartar</button>
-                    <button type="button" onClick={() => void sendOperatorReply()} disabled={!draft.trim() || sending} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50">
-                      {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                      Enviar ao cliente
-                    </button>
-                  </div>
-                </div>
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            aria-label="Mais opções da IA"
+            className="hover:bg-muted inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <MoreHorizontal className="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setCopilotOpen(true)}>
+              <WandSparkles className="size-4" />
+              Abrir Copiloto
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => void resetConversationContext()}
+              disabled={resetting}
+            >
+              {resetting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <RotateCcw className="size-4" />
               )}
+              Reiniciar contexto da IA
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      {copilotOpen ? (
+        <div className="border-border bg-muted/20 border-t px-3 py-3 sm:px-4">
+          <div className="mx-auto max-w-4xl space-y-2.5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold text-foreground">
+                  Copiloto
+                </p>
+                <p className="text-muted-foreground mt-0.5 text-[11px]">
+                  Diga o que pretende responder. A IA prepara o texto e coloca-o no editor para revisão.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCopilotOpen(false)}
+                aria-label="Fechar Copiloto"
+                className="hover:bg-muted hover:text-foreground rounded-md p-1 text-muted-foreground"
+              >
+                <X className="size-4" />
+              </button>
             </div>
+
+            <div className="flex items-end gap-2">
+              <textarea
+                value={instruction}
+                onChange={(event) => setInstruction(event.target.value)}
+                placeholder="Ex.: Diga que esta cor acabou, mas ofereça preto e azul."
+                rows={1}
+                maxLength={2000}
+                className="border-border bg-background focus:border-primary/40 min-h-10 flex-1 resize-y rounded-xl border px-3 py-2 text-sm text-foreground outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => void generateOperatorReply()}
+                disabled={!instruction.trim() || generating}
+                className="bg-primary text-primary-foreground inline-flex h-10 shrink-0 items-center gap-1.5 rounded-xl px-3 text-xs font-medium disabled:opacity-50"
+              >
+                {generating ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="size-3.5" />
+                )}
+                Gerar
+              </button>
+            </div>
+
+            {draft ? (
+              <div className="border-primary/20 bg-primary/[0.04] rounded-xl border p-2.5">
+                <textarea
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  rows={3}
+                  className="border-border bg-background focus:border-primary/40 w-full resize-y rounded-lg border px-3 py-2 text-sm text-foreground outline-none"
+                />
+                <div className="mt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDraft('')}
+                    className="hover:bg-muted rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground"
+                  >
+                    Descartar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={useDraftInComposer}
+                    className="bg-primary text-primary-foreground inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium"
+                  >
+                    <WandSparkles className="size-3.5" />
+                    Usar no editor
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <Banner tone="primary">
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <Sparkles className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
-        <span className="truncate font-medium text-foreground">{t("activeText")}</span>
-      </div>
-      <div className="flex items-center gap-1.5">
-        <BannerButton onClick={() => void resetConversationContext()} busy={resetting} icon={RotateCcw}>
-          Reiniciar conversa
-        </BannerButton>
-        <BannerButton onClick={() => toggle(true)} busy={busy} icon={Hand}>
-          {t("takeOver")}
-        </BannerButton>
-      </div>
-    </Banner>
-  );
-}
-
-function Banner({ tone, children }: { tone: "primary" | "muted"; children: React.ReactNode }) {
-  return (
-    <div className={cn("flex items-center gap-3 border-b px-3 py-2 text-xs sm:px-4", tone === "primary" ? "border-primary/20 bg-primary/5" : "border-border bg-muted/40")}>
-      {children}
+        </div>
+      ) : null}
     </div>
-  );
-}
-
-function BannerButton({
-  onClick,
-  busy,
-  icon: Icon,
-  children,
-}: {
-  onClick: () => void;
-  busy: boolean;
-  icon: typeof Hand;
-  children: React.ReactNode;
-}) {
-  return (
-    <button type="button" onClick={onClick} disabled={busy} className="inline-flex flex-shrink-0 items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1 font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-60">
-      {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Icon className="h-3 w-3" />}
-      {children}
-    </button>
   );
 }
