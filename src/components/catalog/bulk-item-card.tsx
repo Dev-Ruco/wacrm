@@ -55,7 +55,7 @@ export function BulkItemCard({
             <Loader2 className="h-5 w-5 animate-spin" />
             {item.classifying ? (
               <span className="flex items-center gap-1">
-                <Sparkles className="h-3 w-3" />A analisar com IA…
+                <Sparkles className="h-3 w-3" />A preparar para o catálogo…
               </span>
             ) : (
               <span>A carregar…</span>
@@ -66,7 +66,7 @@ export function BulkItemCard({
           variant={complete ? 'default' : 'outline'}
           className="absolute top-2 left-2"
         >
-          {complete ? 'Pronto' : 'Falta informação'}
+          {complete ? 'Pronto para rever' : 'Falta informação'}
         </Badge>
         <button
           type="button"
@@ -79,7 +79,7 @@ export function BulkItemCard({
       </div>
       <CardContent className="space-y-2 pt-3">
         <Input
-          placeholder="Nome (obrigatório)"
+          placeholder="Nome comercial (obrigatório)"
           value={item.name}
           onChange={(e) => onChange({ name: e.target.value })}
         />
@@ -103,13 +103,13 @@ export function BulkItemCard({
           type="number"
           min="0"
           step="0.01"
-          placeholder="Preço (obrigatório)"
+          placeholder="Preço (confirma antes de guardar)"
           value={item.price}
           onChange={(e) => onChange({ price: e.target.value })}
         />
         <Textarea
-          placeholder="Descrição"
-          rows={2}
+          placeholder="Descrição comercial"
+          rows={4}
           value={item.description}
           onChange={(e) => onChange({ description: e.target.value })}
         />

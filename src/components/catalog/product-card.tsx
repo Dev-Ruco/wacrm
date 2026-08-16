@@ -5,6 +5,7 @@ import { ExternalLink, ImageIcon, Loader2, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { AttributeSelect, type AttributeOption } from './attribute-select'
@@ -21,13 +22,13 @@ export interface Product {
   category: string | null
   stock_quantity: number | null
   is_active: boolean
+  catalog_id?: string | null
 }
 
 /**
  * View mode is the default: photo, name, price, category · colour,
- * state — no textarea, no free-text category/colour input permanently
- * visible. "Editar" expands the same pattern used for Skills
- * (CollapsibleEditor); saving collapses back to the summary.
+ * state. Editing expands the commercial fields so AI suggestions always
+ * remain under human control.
  */
 export function ProductCard({
   product,
@@ -46,17 +47,24 @@ export function ProductCard({
   onCreateColor: (label: string) => Promise<string | null>
   onToggle: () => void
   onRemove: () => void
-  onSave: (patch: { category?: string | null; color?: string | null; description?: string | null }) => Promise<void>
+  onSave: (patch: {
+    name?: string
+    category?: string | null
+    color?: string | null
+    description?: string | null
+  }) => Promise<void>
 }) {
   const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(product.name)
   const [category, setCategory] = useState(product.category)
   const [color, setColor] = useState(product.color)
   const [description, setDescription] = useState(product.description ?? '')
   const [saving, setSaving] = useState(false)
 
-  const complete = Boolean(product.category && product.color && product.description)
+  const complete = Boolean(product.name && product.category && product.description)
 
   function startEdit() {
+    setName(product.name)
     setCategory(product.category)
     setColor(product.color)
     setDescription(product.description ?? '')
@@ -64,9 +72,16 @@ export function ProductCard({
   }
 
   async function save() {
+    const cleanedName = name.trim()
+    if (!cleanedName) return
     setSaving(true)
     try {
-      await onSave({ category, color, description: description.trim() || null })
+      await onSave({
+        name: cleanedName,
+        category,
+        color,
+        description: description.trim() || null,
+      })
       setEditing(false)
     } finally {
       setSaving(false)
@@ -102,7 +117,11 @@ export function ProductCard({
         </div>
 
         {editing ? (
-          <div className="space-y-2 border-t pt-3">
+          <div className="space-y-3 border-t pt-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Nome comercial</Label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={200} />
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <Label className="text-xs">Categoria</Label>
@@ -114,11 +133,11 @@ export function ProductCard({
               </div>
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Descrição</Label>
-              <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+              <Label className="text-xs">Descrição comercial</Label>
+              <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} />
             </div>
             <div className="flex gap-2">
-              <Button size="sm" onClick={() => void save()} disabled={saving}>
+              <Button size="sm" onClick={() => void save()} disabled={saving || !name.trim()}>
                 {saving ? <Loader2 className="animate-spin" /> : null}
                 Guardar
               </Button>
@@ -128,8 +147,8 @@ export function ProductCard({
             </div>
           </div>
         ) : (
-          <p className="line-clamp-3 text-sm text-muted-foreground">
-            {product.description || 'Sem descrição — usa "Organizar produtos com IA" ou edita à mão.'}
+          <p className="line-clamp-4 text-sm text-muted-foreground">
+            {product.description || 'Sem descrição — usa "Organizar com IA" ou edita à mão.'}
           </p>
         )}
 

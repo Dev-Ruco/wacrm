@@ -10,14 +10,21 @@ function optionalText(value: unknown, max = 1000): string | null {
   return cleaned
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const { supabase, accountId } = await requireRole('agent')
-    const { data, error } = await supabase
+    const url = new URL(request.url)
+    const catalogId = url.searchParams.get('catalog_id')?.trim() || null
+
+    let query = supabase
       .from('catalog_products')
       .select('*')
       .eq('account_id', accountId)
       .order('created_at', { ascending: false })
+
+    if (catalogId) query = query.eq('catalog_id', catalogId)
+
+    const { data, error } = await query
     if (error) throw error
     return NextResponse.json({ products: data ?? [] })
   } catch (error) {
@@ -41,8 +48,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'price must be a positive number.' }, { status: 400 })
     }
 
+    const catalogId = optionalText(input.catalog_id, 100)
+    if (catalogId) {
+      const { data: collection, error: collectionError } = await supabase
+        .from('catalog_collections')
+        .select('id')
+        .eq('id', catalogId)
+        .eq('account_id', accountId)
+        .maybeSingle()
+      if (collectionError) throw collectionError
+      if (!collection) {
+        return NextResponse.json({ error: 'Catálogo não encontrado.' }, { status: 404 })
+      }
+    }
+
     const row = {
       account_id: accountId,
+      catalog_id: catalogId,
       name,
       price,
       currency: optionalText(input.currency, 8) ?? 'MZN',

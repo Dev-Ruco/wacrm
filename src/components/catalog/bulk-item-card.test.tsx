@@ -48,14 +48,14 @@ describe('BulkItemCard — per-item state', () => {
     expect(getByText('Falta informação')).toBeTruthy()
   })
 
-  it('shows "Pronto" once image, name and price are filled', () => {
+  it('shows "Pronto para rever" once image, name and price are filled', () => {
     const { getByText } = renderCard({ ...BASE_ITEM, imageUrl: 'https://x/y.jpg', name: 'Legging', price: '10' })
-    expect(getByText('Pronto')).toBeTruthy()
+    expect(getByText('Pronto para rever')).toBeTruthy()
   })
 
-  it('shows an "A analisar com IA" state while classifying', () => {
+  it('shows an "A preparar para o catálogo" state while classifying', () => {
     const { getByText } = renderCard({ ...BASE_ITEM, imageUrl: 'https://x/y.jpg', classifying: true })
-    expect(getByText(/a analisar com ia/i)).toBeTruthy()
+    expect(getByText(/a preparar para o catálogo/i)).toBeTruthy()
   })
 
   it('surfaces a per-item error individually, without affecting the badge copy of other items', () => {
