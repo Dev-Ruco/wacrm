@@ -26,7 +26,36 @@ export async function GET(request: Request) {
 
     const { data, error } = await query
     if (error) throw error
-    return NextResponse.json({ products: data ?? [] })
+
+    const products = data ?? []
+    const productIds = products.map((product) => String(product.id))
+    const variantsByProduct = new Map<string, Record<string, unknown>[]>()
+
+    if (productIds.length > 0) {
+      const { data: variants, error: variantsError } = await supabase
+        .from('catalog_product_variants')
+        .select('id, product_id, external_id, sku, size, color, price, stock_quantity, image_url, is_active')
+        .eq('account_id', accountId)
+        .in('product_id', productIds)
+        .order('color', { ascending: true, nullsFirst: false })
+        .order('size', { ascending: true, nullsFirst: false })
+
+      if (variantsError) throw variantsError
+
+      for (const variant of variants ?? []) {
+        const productId = String(variant.product_id)
+        const current = variantsByProduct.get(productId) ?? []
+        current.push(variant as Record<string, unknown>)
+        variantsByProduct.set(productId, current)
+      }
+    }
+
+    return NextResponse.json({
+      products: products.map((product) => ({
+        ...product,
+        variants: variantsByProduct.get(String(product.id)) ?? [],
+      })),
+    })
   } catch (error) {
     return toErrorResponse(error)
   }
@@ -86,7 +115,7 @@ export async function POST(request: Request) {
       .select('*')
       .single()
     if (error) throw error
-    return NextResponse.json({ product: data }, { status: 201 })
+    return NextResponse.json({ product: { ...data, variants: [] } }, { status: 201 })
   } catch (error) {
     return toErrorResponse(error)
   }
