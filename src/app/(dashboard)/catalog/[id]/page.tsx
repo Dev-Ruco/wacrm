@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation'
 import { ArrowLeft, FolderOpen, Loader2, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { CatalogPackageImport } from '@/components/catalog/catalog-package-import'
 import { CatalogWorkspaceNav } from '@/components/catalog/catalog-workspace-nav'
 import { ProductsTab } from '@/components/catalog/products-tab'
 import type { Product } from '@/components/catalog/product-card'
@@ -82,10 +83,19 @@ export default function CatalogDetailPage() {
               {collection?.description || 'Revê e corrige o conhecimento comercial que o agente usa neste catálogo.'}
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
-            {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-            Actualizar
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {collection ? (
+              <CatalogPackageImport
+                catalogId={catalogId}
+                catalogName={collection.name}
+                onImported={load}
+              />
+            ) : null}
+            <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+              {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+              Actualizar
+            </Button>
+          </div>
         </header>
 
         <div className="pt-5">
