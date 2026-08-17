@@ -1,8 +1,9 @@
 import { createHash, randomBytes, randomUUID } from 'crypto'
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { isWebsiteOriginAllowed } from '@/lib/site-chat/origin'
+import { dispatchInboundThroughAccountBrain } from '@/lib/channels/inbound-brain'
 
 const MAX_MESSAGE_LENGTH = 4000
 const SESSION_MAX_MESSAGES = 200
@@ -484,21 +485,32 @@ export async function POST(request: Request) {
 
     if (message) {
       const now = new Date().toISOString()
-      const { data: current, error: currentError } = await admin
-        .from('conversations')
-        .select('unread_count')
-        .eq('id', conversationId)
-        .eq('account_id', channel.account_id)
-        .eq('channel', 'website')
-        .single()
-      if (currentError) throw currentError
+      const externalMessageId = `web_${randomUUID()}`
+      const [{ data: current, error: currentError }, { count: priorCustomerMessageCount }] =
+        await Promise.all([
+          admin
+            .from('conversations')
+            .select('unread_count, contact_id, user_id')
+            .eq('id', conversationId)
+            .eq('account_id', channel.account_id)
+            .eq('channel', 'website')
+            .single(),
+          admin
+            .from('messages')
+            .select('id', { count: 'exact', head: true })
+            .eq('conversation_id', conversationId)
+            .eq('sender_type', 'customer'),
+        ])
+      if (currentError || !current?.contact_id || !current?.user_id) {
+        throw currentError ?? new Error('Website conversation routing context is unavailable')
+      }
 
       const { error: messageError } = await admin.from('messages').insert({
         conversation_id: conversationId,
         sender_type: 'customer',
         content_type: 'text',
         content_text: message,
-        message_id: `web_${randomUUID()}`,
+        message_id: externalMessageId,
         status: 'delivered',
         created_at: now,
       })
@@ -509,12 +521,26 @@ export async function POST(request: Request) {
         .update({
           last_message_text: message,
           last_message_at: now,
-          unread_count: Number(current?.unread_count ?? 0) + 1,
+          unread_count: Number(current.unread_count ?? 0) + 1,
           status: 'open',
           updated_at: now,
         })
         .eq('id', conversationId)
       if (conversationError) throw conversationError
+
+      after(async () => {
+        await dispatchInboundThroughAccountBrain({
+          accountId: channel.account_id,
+          conversationId,
+          contactId: current.contact_id as string,
+          configOwnerUserId: current.user_id as string,
+          inboundMessageId: externalMessageId,
+          channel: 'website',
+          text: message,
+          contentType: 'text',
+          isFirstInboundMessage: (priorCustomerMessageCount ?? 0) === 0,
+        })
+      })
     }
 
     return json({ ok: true, session_token: sessionToken, conversation_id: conversationId }, 200, origin)
