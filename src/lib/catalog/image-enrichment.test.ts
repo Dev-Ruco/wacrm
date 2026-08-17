@@ -5,40 +5,44 @@ import {
 } from './image-enrichment'
 
 describe('catalog image enrichment', () => {
-  it('asks for commercial naming and forbids invented prices', () => {
+  it('asks for commercial enrichment and explicitly forbids price handling', () => {
     const prompt = buildCatalogImageEnrichmentPrompt(['Leggings', 'Viaturas'])
     expect(prompt).toContain('commercial title')
     expect(prompt).toContain('Leggings')
-    expect(prompt).toContain('Never estimate, infer, calculate or invent a price')
+    expect(prompt).toContain('never extract, read, infer, estimate, calculate, suggest, return, replace or correct a price')
     expect(prompt).toContain('vehicles')
+    expect(prompt).not.toContain('"price"')
+    expect(prompt).not.toContain('"currency"')
   })
 
-  it('parses a grounded commercial result', () => {
+  it('parses only editorial fields', () => {
     const parsed = parseCatalogImageEnrichment(
       JSON.stringify({
         name: 'Legging Desportiva de Cintura Alta',
         color: 'Azul-marinho',
         category: 'Leggings',
         description: 'Legging de corte justo e cintura alta. Indicada para treino, caminhada ou uso casual activo.',
-        price: 2800,
-        currency: 'MZN',
       }),
     )
-    expect(parsed.name).toBe('Legging Desportiva de Cintura Alta')
-    expect(parsed.price).toBe(2800)
-    expect(parsed.currency).toBe('MZN')
+    expect(parsed).toEqual({
+      name: 'Legging Desportiva de Cintura Alta',
+      color: 'Azul-marinho',
+      category: 'Leggings',
+      description: 'Legging de corte justo e cintura alta. Indicada para treino, caminhada ou uso casual activo.',
+    })
   })
 
-  it('keeps price null when the model provides no visible price', () => {
+  it('ignores price and currency even if a model tries to return them', () => {
     const parsed = parseCatalogImageEnrichment(
-      '{"name":"Frigorífico de Duas Portas","color":"Prata","category":"Frigoríficos","description":"Equipamento doméstico para conservação de alimentos.","price":null,"currency":null}',
+      '{"name":"Frigorífico de Duas Portas","color":"Prata","category":"Frigoríficos","description":"Equipamento doméstico para conservação de alimentos.","price":28000,"currency":"MZN"}',
     )
-    expect(parsed.price).toBeNull()
-    expect(parsed.currency).toBeNull()
-  })
-
-  it('normalises conservative numeric price strings', () => {
-    expect(parseCatalogImageEnrichment('{"name":null,"color":null,"category":null,"description":"","price":"2 800,00","currency":"mzn"}').price).toBe(2800)
-    expect(parseCatalogImageEnrichment('{"name":null,"color":null,"category":null,"description":"","price":"USD 50","currency":"USD"}').price).toBeNull()
+    expect(parsed).toEqual({
+      name: 'Frigorífico de Duas Portas',
+      color: 'Prata',
+      category: 'Frigoríficos',
+      description: 'Equipamento doméstico para conservação de alimentos.',
+    })
+    expect('price' in parsed).toBe(false)
+    expect('currency' in parsed).toBe(false)
   })
 })
