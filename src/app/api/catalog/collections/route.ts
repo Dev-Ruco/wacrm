@@ -10,6 +10,31 @@ function optionalText(value: unknown, max: number): string | null {
   return cleaned
 }
 
+function catalogSchemaUnavailable(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const candidate = error as { code?: unknown; message?: unknown }
+  const code = typeof candidate.code === 'string' ? candidate.code : ''
+  const message = typeof candidate.message === 'string' ? candidate.message.toLowerCase() : ''
+
+  return (
+    code === 'PGRST205' ||
+    code === '42703' ||
+    code === '42P01' ||
+    message.includes('catalog_collections') ||
+    message.includes('catalog_id')
+  )
+}
+
+function catalogSchemaError() {
+  return NextResponse.json(
+    {
+      error:
+        'A estrutura de catálogos ainda não está disponível na base de dados. Aplique a migration 20260816213000_catalog_collections.sql e actualize o schema cache.',
+    },
+    { status: 503 },
+  )
+}
+
 export async function GET() {
   try {
     const { supabase, accountId } = await requireRole('agent')
@@ -46,6 +71,7 @@ export async function GET() {
       })),
     })
   } catch (error) {
+    if (catalogSchemaUnavailable(error)) return catalogSchemaError()
     return toErrorResponse(error)
   }
 }
@@ -91,6 +117,7 @@ export async function POST(request: Request) {
       { status: 201 },
     )
   } catch (error) {
+    if (catalogSchemaUnavailable(error)) return catalogSchemaError()
     return toErrorResponse(error)
   }
 }
