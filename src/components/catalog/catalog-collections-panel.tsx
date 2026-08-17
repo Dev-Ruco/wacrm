@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  AlertCircle,
   ArrowRight,
   ChevronDown,
   FolderOpen,
@@ -33,6 +34,7 @@ export interface CatalogCollectionSummary {
 export function CatalogCollectionsPanel() {
   const [collections, setCollections] = useState<CatalogCollectionSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [savingId, setSavingId] = useState<string | null>(null)
@@ -42,13 +44,16 @@ export function CatalogCollectionsPanel() {
 
   const loadCollections = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const response = await fetch('/api/catalog/collections', { cache: 'no-store' })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(body.error ?? 'Não foi possível carregar os catálogos.')
       setCollections(body.collections ?? [])
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Erro ao carregar os catálogos.')
+      const message = error instanceof Error ? error.message : 'Erro ao carregar os catálogos.'
+      setLoadError(message)
+      toast.error(message)
     } finally {
       setLoading(false)
     }
@@ -155,15 +160,15 @@ export function CatalogCollectionsPanel() {
       <div className="grid grid-cols-3 overflow-hidden rounded-xl border border-border bg-card">
         <div className="border-r border-border px-4 py-3">
           <p className="text-xs text-muted-foreground">Catálogos</p>
-          <p className="mt-1 text-xl font-semibold tabular-nums">{totals.catalogues}</p>
+          <p className="mt-1 text-xl font-semibold tabular-nums">{loadError ? '—' : totals.catalogues}</p>
         </div>
         <div className="border-r border-border px-4 py-3">
           <p className="text-xs text-muted-foreground">Itens</p>
-          <p className="mt-1 text-xl font-semibold tabular-nums">{totals.items}</p>
+          <p className="mt-1 text-xl font-semibold tabular-nums">{loadError ? '—' : totals.items}</p>
         </div>
         <div className="px-4 py-3">
           <p className="text-xs text-muted-foreground">Activos</p>
-          <p className="mt-1 text-xl font-semibold tabular-nums">{totals.activeItems}</p>
+          <p className="mt-1 text-xl font-semibold tabular-nums">{loadError ? '—' : totals.activeItems}</p>
         </div>
       </div>
 
@@ -172,6 +177,17 @@ export function CatalogCollectionsPanel() {
           <div className="flex min-h-40 items-center justify-center text-muted-foreground">
             <Loader2 className="mr-2 size-4 animate-spin" />
             A carregar catálogos…
+          </div>
+        ) : loadError ? (
+          <div className="flex min-h-52 flex-col items-center justify-center px-6 text-center">
+            <div className="flex size-10 items-center justify-center rounded-full bg-destructive/10">
+              <AlertCircle className="size-5 text-destructive" />
+            </div>
+            <h3 className="mt-3 text-sm font-semibold">Não foi possível carregar os catálogos</h3>
+            <p className="mt-1 max-w-lg text-sm text-muted-foreground">{loadError}</p>
+            <Button className="mt-4" variant="outline" onClick={() => void loadCollections()}>
+              Tentar novamente
+            </Button>
           </div>
         ) : collections.length === 0 ? (
           <div className="flex min-h-52 flex-col items-center justify-center px-6 text-center">
