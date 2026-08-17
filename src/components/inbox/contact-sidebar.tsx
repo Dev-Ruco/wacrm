@@ -262,7 +262,7 @@ export function ContactSidebar({ contact, channel }: ContactSidebarProps) {
                     ) : null}
                   </div>
                 ))
-              ) : null}
+              )}
             </div>
           </section>
 
