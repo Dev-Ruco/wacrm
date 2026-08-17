@@ -4,6 +4,10 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { isWebsiteOriginAllowed } from '@/lib/site-chat/origin'
 import { dispatchInboundThroughAccountBrain } from '@/lib/channels/inbound-brain'
+import { loadEmbeddingsKey } from '@/lib/ai/config'
+import { transcribeAudio } from '@/lib/ai/transcription'
+
+export const maxDuration = 60
 
 const CHAT_MEDIA_BUCKET = 'chat-media'
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -114,6 +118,25 @@ async function getSession(
   return data as { id: string; conversation_id: string } | null
 }
 
+async function transcribeWebsiteAudio(
+  admin: ReturnType<typeof createAdminClient>,
+  accountId: string,
+  bytes: Buffer,
+  mimeType: string,
+): Promise<string | null> {
+  try {
+    const { key } = await loadEmbeddingsKey(admin, accountId)
+    if (!key) return null
+    return await transcribeAudio({ apiKey: key, audio: bytes, mimeType })
+  } catch (error) {
+    console.error(
+      '[site-chat/media] voice-note transcription failed:',
+      error instanceof Error ? error.message : error,
+    )
+    return null
+  }
+}
+
 export async function OPTIONS(request: Request) {
   return new NextResponse(null, { status: 204, headers: corsHeaders(requestOrigin(request)) })
 }
@@ -186,6 +209,15 @@ export async function POST(request: Request) {
       data: { publicUrl },
     } = admin.storage.from(CHAT_MEDIA_BUCKET).getPublicUrl(path)
 
+    // Match WhatsApp behaviour: voice notes become text before the shared
+    // brain sees them. The transport changes, but Flows/Automations/AI receive
+    // the same semantic customer message.
+    const transcription =
+      kind === 'audio'
+        ? await transcribeWebsiteAudio(admin, channel.account_id, bytes, mimeType)
+        : null
+    const contentText = transcription || caption || null
+
     const [{ data: current, error: currentError }, { count: priorCustomerMessageCount }] =
       await Promise.all([
         admin
@@ -213,7 +245,7 @@ export async function POST(request: Request) {
         conversation_id: session.conversation_id,
         sender_type: 'customer',
         content_type: kind,
-        content_text: caption || null,
+        content_text: contentText,
         media_url: publicUrl,
         message_id: externalMessageId,
         status: 'delivered',
@@ -227,7 +259,7 @@ export async function POST(request: Request) {
       throw messageError ?? new Error('Failed to persist website media message')
     }
 
-    const preview = caption || (kind === 'image' ? '📷 Fotografia' : '🎤 Áudio')
+    const preview = contentText || (kind === 'image' ? '📷 Fotografia' : '🎤 Áudio')
     const { error: conversationError } = await admin
       .from('conversations')
       .update({
@@ -256,7 +288,7 @@ export async function POST(request: Request) {
         configOwnerUserId: current.user_id as string,
         inboundMessageId: externalMessageId,
         channel: 'website',
-        text: caption,
+        text: contentText ?? '',
         contentType: kind,
         isFirstInboundMessage: (priorCustomerMessageCount ?? 0) === 0,
       })
