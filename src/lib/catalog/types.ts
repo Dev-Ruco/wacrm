@@ -1,7 +1,9 @@
 export interface CatalogProductVariant {
   id: string
+  sku?: string | null
   size: string | null
   color: string | null
+  price?: number | null
   stockQuantity: number | null
   imageUrl?: string | null
 }
