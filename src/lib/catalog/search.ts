@@ -432,7 +432,7 @@ async function hydrateCanonicalVariants(
   if (productIds.length === 0) return new Map()
   const { data, error } = await db
     .from('catalog_product_variants')
-    .select('id, product_id, size, color, stock_quantity, image_url')
+    .select('id, product_id, sku, size, color, price, stock_quantity, image_url')
     .eq('account_id', accountId)
     .eq('is_active', true)
     .in('product_id', productIds)
@@ -449,8 +449,10 @@ async function hydrateCanonicalVariants(
     const current = byProduct.get(productId) ?? []
     current.push({
       id: String(row.id),
+      sku: row.sku,
       size: row.size,
       color: row.color,
+      price: row.price == null ? null : Number(row.price),
       stockQuantity: row.stock_quantity,
       imageUrl: row.image_url,
     })
