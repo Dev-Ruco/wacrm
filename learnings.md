@@ -145,3 +145,11 @@ twice, turn it into a rule in `AGENTS.md` instead of a third log entry.
   `.schema('wacrm')` chaining needed. Don't assume a table needs a
   different client just because a migration file prefixes it
   `wacrm.foo` — check `client.ts` before reaching for a second client.
+
+- **Canonical CRM state must not depend on an optional LLM tool call.**
+  The customer-journey pipeline stayed empty even though `add_tag` was
+  enabled and the prompt told the agent to classify: tool use is still
+  a model choice. Journey classification now runs as a separate
+  post-reply classifier and writes the existing system stage tag
+  directly; keep `add_tag` for semantic/explicit tagging, not as the
+  only mechanism maintaining mandatory CRM state.
