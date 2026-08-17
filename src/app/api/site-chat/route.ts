@@ -23,6 +23,14 @@ type WebsiteLead = {
   phoneNormalized: string
 }
 
+type WebsiteProductInquiry = {
+  eventId: string
+  productId: string | null
+  name: string
+  priceMt: number | null
+  imageUrl: string | null
+}
+
 function requestOrigin(request: Request): string {
   return request.headers.get('origin')?.replace(/\/$/, '') ?? ''
 }
@@ -74,6 +82,48 @@ function parseLead(nameInput: unknown, whatsappInput: unknown): WebsiteLead | nu
     phone: `+${digits}`,
     phoneNormalized: digits,
   }
+}
+
+function safeHttpsUrl(input: unknown): string | null {
+  if (typeof input !== 'string') return null
+  const value = input.trim().slice(0, 2000)
+  if (!value) return null
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'https:' ? parsed.toString() : null
+  } catch {
+    return null
+  }
+}
+
+function parseProductInquiry(input: unknown): WebsiteProductInquiry | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null
+  const source = input as Record<string, unknown>
+  const eventId = typeof source.event_id === 'string' ? source.event_id.trim().slice(0, 128) : ''
+  const name = typeof source.name === 'string' ? source.name.trim().replace(/\s+/g, ' ').slice(0, 200) : ''
+  if (!eventId || !/^[A-Za-z0-9_-]+$/.test(eventId) || !name) return null
+
+  const productId = typeof source.product_id === 'string' && source.product_id.trim()
+    ? source.product_id.trim().slice(0, 128)
+    : null
+  const priceMt = typeof source.price_mt === 'number' && Number.isFinite(source.price_mt) && source.price_mt >= 0
+    ? source.price_mt
+    : null
+
+  return {
+    eventId,
+    productId,
+    name,
+    priceMt,
+    imageUrl: safeHttpsUrl(source.image_url),
+  }
+}
+
+function productInquiryText(inquiry: WebsiteProductInquiry): string {
+  const price = inquiry.priceMt !== null
+    ? ` · ${new Intl.NumberFormat('pt-PT', { maximumFractionDigits: 2 }).format(inquiry.priceMt)} MT`
+    : ''
+  return `Tenho interesse neste produto: ${inquiry.name}${price}`
 }
 
 function safeContext(input: unknown): Record<string, unknown> {
@@ -443,6 +493,8 @@ export async function POST(request: Request) {
     const publicKey = typeof body?.channel_key === 'string' ? body.channel_key.slice(0, 128) : null
     const suppliedToken = typeof body?.session_token === 'string' ? body.session_token : ''
     const message = typeof body?.message === 'string' ? body.message.trim() : ''
+    const productInquiryWasSupplied = body?.product_inquiry !== undefined
+    const productInquiry = parseProductInquiry(body?.product_inquiry)
     const context = safeContext(body?.context)
     const leadName = typeof body?.customer_name === 'string' ? body.customer_name : ''
     const leadWhatsapp = typeof body?.customer_whatsapp === 'string' ? body.customer_whatsapp : ''
@@ -455,6 +507,9 @@ export async function POST(request: Request) {
     }
     if (message.length > MAX_MESSAGE_LENGTH) {
       return json({ error: `Message exceeds ${MAX_MESSAGE_LENGTH} characters` }, 400, origin)
+    }
+    if (productInquiryWasSupplied && !productInquiry) {
+      return json({ error: 'Invalid product inquiry' }, 400, origin)
     }
 
     const rate = checkRateLimit(`site-chat:${origin}:${visitorId}`, RATE_LIMITS.publicApi)
@@ -481,6 +536,79 @@ export async function POST(request: Request) {
       const session = await ensureSession(admin, channel, visitorId, origin, context, lead)
       conversationId = session.conversationId
       sessionToken = session.sessionToken
+    }
+
+    if (productInquiry) {
+      const now = new Date().toISOString()
+      const externalMessageId = `web_product_${productInquiry.eventId}`
+      const { data: existingInquiry, error: existingInquiryError } = await admin
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', conversationId)
+        .eq('message_id', externalMessageId)
+        .maybeSingle()
+      if (existingInquiryError) throw existingInquiryError
+
+      if (!existingInquiry?.id) {
+        const contentText = productInquiryText(productInquiry)
+        const contentType = productInquiry.imageUrl ? 'image' : 'text'
+        const [{ data: current, error: currentError }, { count: priorCustomerMessageCount }] =
+          await Promise.all([
+            admin
+              .from('conversations')
+              .select('unread_count, contact_id, user_id')
+              .eq('id', conversationId)
+              .eq('account_id', channel.account_id)
+              .eq('channel', 'website')
+              .single(),
+            admin
+              .from('messages')
+              .select('id', { count: 'exact', head: true })
+              .eq('conversation_id', conversationId)
+              .eq('sender_type', 'customer'),
+          ])
+        if (currentError || !current?.contact_id || !current?.user_id) {
+          throw currentError ?? new Error('Website conversation routing context is unavailable')
+        }
+
+        const { error: productMessageError } = await admin.from('messages').insert({
+          conversation_id: conversationId,
+          sender_type: 'customer',
+          content_type: contentType,
+          content_text: contentText,
+          media_url: productInquiry.imageUrl,
+          message_id: externalMessageId,
+          status: 'delivered',
+          created_at: now,
+        })
+        if (productMessageError) throw productMessageError
+
+        const { error: conversationError } = await admin
+          .from('conversations')
+          .update({
+            last_message_text: contentText,
+            last_message_at: now,
+            unread_count: Number(current.unread_count ?? 0) + 1,
+            status: 'open',
+            updated_at: now,
+          })
+          .eq('id', conversationId)
+        if (conversationError) throw conversationError
+
+        after(async () => {
+          await dispatchInboundThroughAccountBrain({
+            accountId: channel.account_id,
+            conversationId,
+            contactId: current.contact_id as string,
+            configOwnerUserId: current.user_id as string,
+            inboundMessageId: externalMessageId,
+            channel: 'website',
+            text: contentText,
+            contentType,
+            isFirstInboundMessage: (priorCustomerMessageCount ?? 0) === 0,
+          })
+        })
+      }
     }
 
     if (message) {
