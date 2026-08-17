@@ -71,15 +71,13 @@ function normalizedColor(value: string | null | undefined): string {
 function productImages(product: CatalogProduct): Omit<VisualCandidateImage, 'candidateId' | 'product' | 'productKey'>[] {
   const raw = [
     {
-      imageIndex: 1,
       url: product.imageUrl ?? '',
       source: 'product' as const,
       variantId: null,
       color: null,
       size: null,
     },
-    ...(product.variants ?? []).map((variant, index) => ({
-      imageIndex: index + 2,
+    ...(product.variants ?? []).map((variant) => ({
       url: variant.imageUrl ?? '',
       source: 'variant' as const,
       variantId: variant.id,
@@ -98,7 +96,13 @@ function productImages(product: CatalogProduct): Omit<VisualCandidateImage, 'can
       const url = parsed.toString()
       if (seen.has(url)) continue
       seen.add(url)
-      result.push({ ...image, url })
+      result.push({
+        ...image,
+        url,
+        // Keep exactly the same 1-based index semantics used by send_product:
+        // duplicate variant URLs do not consume an index.
+        imageIndex: result.length + 1,
+      })
     } catch {
       // Invalid catalogue media cannot participate in visual comparison.
     }
