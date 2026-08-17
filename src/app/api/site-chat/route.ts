@@ -324,7 +324,7 @@ export async function GET(request: Request) {
 
     const { data, error } = await admin
       .from('messages')
-      .select('id, sender_type, content_type, content_text, status, created_at')
+      .select('id, sender_type, content_type, content_text, media_url, status, created_at')
       .eq('conversation_id', session.conversation_id)
       .order('created_at', { ascending: true })
       .limit(SESSION_MAX_MESSAGES)
