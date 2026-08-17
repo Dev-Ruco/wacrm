@@ -40,8 +40,9 @@ export function snapToCanonicalValue(
 
 /**
  * Backwards-compatible export kept for tests/callers that used the old
- * classifier helper. The contract is now richer: commercial name, category,
- * useful description and visible-price extraction while remaining generic.
+ * classifier helper. The classifier is editorial-only: it can prepare
+ * commercial naming, category, colour and description, but price is outside
+ * the AI contract.
  */
 export function buildClassificationSystemPrompt(knownCategories: string[]): string {
   return buildCatalogImageEnrichmentPrompt(knownCategories)
@@ -49,11 +50,11 @@ export function buildClassificationSystemPrompt(knownCategories: string[]): stri
 
 /**
  * POST /api/catalog/classify — commercially enriches one product photo already
- * uploaded to the catalogue bucket. The vision model proposes a searchable
- * commercial name, category, colour and sales-ready description, and may
- * extract a price ONLY when that price is explicitly visible in the image.
- * Suggestions remain editable; trusted catalogue facts are never inferred from
- * the photograph by this route.
+ * uploaded to the catalogue bucket. The vision model may propose a searchable
+ * commercial name, category, colour and sales-ready description.
+ *
+ * Price and currency are deliberately never returned by this route. Even if a
+ * model attempts to include them, parseCatalogImageEnrichment discards them.
  */
 export async function POST(request: Request) {
   try {

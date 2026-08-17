@@ -67,7 +67,7 @@ export function ReclassifyDialog({
                 Organizar produtos com IA
               </DialogTitle>
               <DialogDescription>
-                A IA vai rever <strong>{totalCount}</strong> produto{totalCount === 1 ? '' : 's'} com fotografia. Vai preparar nomes comerciais, categorias e descrições úteis para venda e pesquisa, sem inventar preço ou especificações.
+                A IA vai rever <strong>{totalCount}</strong> produto{totalCount === 1 ? '' : 's'} com fotografia. Pode melhorar nome comercial, categoria, cor e descrição para tornar o catálogo mais claro, pesquisável e útil para venda.
               </DialogDescription>
             </DialogHeader>
             <RadioGroup value={mode} onValueChange={(value) => onModeChange(value as ReclassifyMode)} className="space-y-3">
@@ -76,7 +76,7 @@ export function ReclassifyDialog({
                 <span className="text-sm">
                   <span className="font-medium">Preencher apenas campos vazios</span>
                   <span className="block text-muted-foreground">
-                    Mantém os dados já preenchidos e usa a IA apenas onde falta contexto comercial.
+                    Mantém o que já foi preenchido e sugere apenas informação editorial em falta.
                   </span>
                 </span>
               </label>
@@ -85,17 +85,17 @@ export function ReclassifyDialog({
                 <span className="text-sm">
                   <span className="font-medium">Rever todos os produtos</span>
                   <span className="block text-muted-foreground">
-                    A IA pode substituir nome, categoria, cor e descrição para tornar o catálogo mais consistente.
+                    Pode substituir nome comercial, categoria, cor e descrição quando encontrar uma apresentação melhor.
                   </span>
                 </span>
               </label>
             </RadioGroup>
-            {mode === 'review_all' ? (
-              <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-800 dark:text-amber-300">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                Dados editoriais já preenchidos podem ser substituídos. Preço, stock e outros factos operacionais não são alterados por esta acção.
-              </div>
-            ) : null}
+            <div className="flex items-start gap-2 rounded-lg border border-primary/25 bg-primary/5 p-2.5 text-xs text-foreground">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <span>
+                <strong>Preço protegido:</strong> a IA nunca cria, sugere, lê da fotografia, substitui ou corrige preços. Preço, stock, SKU e outros factos operacionais permanecem exactamente como estão.
+              </span>
+            </div>
             <DialogFooter>
               <Button variant="ghost" onClick={() => onOpenChange(false)}>
                 Cancelar

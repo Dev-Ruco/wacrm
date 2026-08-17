@@ -29,7 +29,7 @@ beforeEach(() => {
   mocks.loadAiConfig.mockResolvedValue({ provider: 'openai', model: 'test-model' })
   mocks.loadCatalogTaxonomy.mockResolvedValue(EMPTY_TAXONOMY)
   mocks.generateReply.mockResolvedValue({
-    text: '{"name":"Produto comercial","color":null,"category":null,"description":"ok","price":null,"currency":null}',
+    text: '{"name":"Produto comercial","color":null,"category":null,"description":"ok"}',
   })
 })
 
@@ -40,7 +40,9 @@ describe('buildClassificationSystemPrompt', () => {
     expect(prompt).toContain('Work across any sector')
     expect(prompt).toContain('Infer a concise reusable product category')
     expect(prompt).toContain('commercial title')
-    expect(prompt).toContain('Never estimate, infer, calculate or invent a price')
+    expect(prompt).toContain('never extract, read, infer, estimate, calculate, suggest, return, replace or correct a price')
+    expect(prompt).not.toContain('"price"')
+    expect(prompt).not.toContain('"currency"')
   })
 
   it("includes the tenant's own configured categories when they exist", () => {
@@ -90,7 +92,7 @@ describe('POST /api/catalog/classify — tenant-driven commercial enrichment', (
       colorGroups: [['preto', 'preta']],
     })
     mocks.generateReply.mockResolvedValue({
-      text: '{"name":"Pantalona Preta de Corte Amplo","color":"Preta","category":"Pantalona","description":"Peça de corte amplo para coordenados casuais ou formais.","price":null,"currency":null}',
+      text: '{"name":"Pantalona Preta de Corte Amplo","color":"Preta","category":"Pantalona","description":"Peça de corte amplo para coordenados casuais ou formais.","price":9999,"currency":"MZN"}',
     })
 
     const response = await POST(
@@ -107,7 +109,8 @@ describe('POST /api/catalog/classify — tenant-driven commercial enrichment', (
     expect(body.name).toBe('Pantalona Preta de Corte Amplo')
     expect(body.category).toBe('pantalona')
     expect(body.color).toBe('preto')
-    expect(body.price).toBeNull()
+    expect(body).not.toHaveProperty('price')
+    expect(body).not.toHaveProperty('currency')
   })
 
   it("uses a car-rental tenant's configured vehicle categories with the same generic route", async () => {
@@ -129,7 +132,7 @@ describe('POST /api/catalog/classify — tenant-driven commercial enrichment', (
     expect(call.systemPrompt).toContain('vehicle class')
   })
 
-  it('extracts an explicit image price returned by the vision model without estimating one itself', async () => {
+  it('ignores price and currency even when the vision model tries to return them', async () => {
     mocks.requireRole.mockResolvedValue({ accountId: 'retail-account' })
     mocks.generateReply.mockResolvedValue({
       text: '{"name":"Frigorífico de Duas Portas","color":"Prata","category":"Frigoríficos","description":"Frigorífico doméstico para conservação de alimentos.","price":24999,"currency":"MZN"}',
@@ -143,8 +146,10 @@ describe('POST /api/catalog/classify — tenant-driven commercial enrichment', (
     )
     const body = await response.json()
 
-    expect(body.price).toBe(24999)
-    expect(body.currency).toBe('MZN')
+    expect(body.name).toBe('Frigorífico de Duas Portas')
+    expect(body.description).toBe('Frigorífico doméstico para conservação de alimentos.')
+    expect(body).not.toHaveProperty('price')
+    expect(body).not.toHaveProperty('currency')
   })
 
   it('rejects a request with no image_url before touching the taxonomy or the model', async () => {
