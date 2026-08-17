@@ -9,6 +9,7 @@ import {
 import { lessonsPrompt, retrieveAppliedLessons } from './flywheel'
 import { createWhatsAppImageResolver } from './image-context'
 import { generateReply } from './generate'
+import { classifyAndPersistCustomerJourney } from './customer-journey-classifier'
 import { evaluateAgentOutput } from './guardrails'
 import { buildSystemPrompt } from './defaults'
 import { buildHandoffSummary } from './handoff'
@@ -565,6 +566,33 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
       await notifyHandoffAssignee(
         `Visita agendada para ${when}.${scheduledVisit.notes ? ` ${scheduledVisit.notes}` : ''}`,
       )
+    }
+
+    try {
+      const journey = await classifyAndPersistCustomerJourney({
+        db,
+        accountId,
+        contactId,
+        conversationId,
+        config,
+        messages,
+        assistantReply: text,
+      })
+      if (journey) {
+        void logAiUsage(db, {
+          accountId,
+          conversationId,
+          mode: 'auto_reply',
+          provider: config.provider,
+          model: config.model,
+          usage: journey.usage,
+        })
+      }
+    } catch (error) {
+      // CRM classification is mandatory to attempt on every successful AI
+      // turn, but it must never turn a delivered customer reply into a
+      // technical handoff merely because the internal classifier failed.
+      console.error('[ai auto-reply] journey classification failed:', error)
     }
 
     finalAction = 'reply'
