@@ -224,6 +224,8 @@ export function MessageThread({
   } | null>(null);
 
   const conversationId = conversation?.id;
+  const isWebsiteConversation =
+    (conversation as (Conversation & { channel?: string }) | null)?.channel === "website";
   const cachedThread = conversationId ? getCachedThread(conversationId) : null;
   // The parent deliberately clears its message array when another thread is
   // selected. Keep the last rendered snapshot for a visited conversation so
@@ -264,6 +266,7 @@ export function MessageThread({
 
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
+    if (isWebsiteConversation) return { expired: false, remaining: "" };
     if (!visibleMessages.length) return { expired: false, remaining: "" };
 
     // Find last customer message
@@ -287,7 +290,7 @@ export function MessageThread({
         : tTimer("xmRemaining", { minutes: Math.floor(hoursLeft * 60) });
 
     return { expired, remaining };
-  }, [visibleMessages, tTimer]);
+  }, [isWebsiteConversation, visibleMessages, tTimer]);
 
   // Store latest callback in a ref so fetchMessages doesn't need to
   // depend on `onMessagesLoaded` — otherwise parent re-renders cause
@@ -1043,16 +1046,18 @@ export function MessageThread({
           </div>
           {/* Session timer badge — hidden on the narrowest phones so
               the name + back arrow keep their room. */}
-          <Badge
-            variant="outline"
-            className={cn(
-              "ml-1 hidden gap-1 border-border text-[10px] sm:inline-flex sm:ml-2",
-              sessionInfo.expired ? "text-red-400" : "text-primary"
-            )}
-          >
-            <Clock className="h-3 w-3" />
-            {sessionInfo.remaining}
-          </Badge>
+          {!isWebsiteConversation && (
+            <Badge
+              variant="outline"
+              className={cn(
+                "ml-1 hidden gap-1 border-border text-[10px] sm:inline-flex sm:ml-2",
+                sessionInfo.expired ? "text-red-400" : "text-primary"
+              )}
+            >
+              <Clock className="h-3 w-3" />
+              {sessionInfo.remaining}
+            </Badge>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -1314,7 +1319,7 @@ export function MessageThread({
       {/* Composer */}
       <MessageComposer
         conversationId={conversation.id}
-        sessionExpired={sessionInfo.expired}
+        sessionExpired={isWebsiteConversation ? false : sessionInfo.expired}
         onSend={handleSend}
         onSendMedia={handleSendMedia}
         onSendInteractive={handleSendInteractive}

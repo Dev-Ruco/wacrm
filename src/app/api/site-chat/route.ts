@@ -10,9 +10,16 @@ const SESSION_MAX_MESSAGES = 200
 type WebsiteChannelRow = {
   id: string
   account_id: string
+  name: string
   public_key: string
   allowed_origins: string[] | null
   is_active: boolean
+}
+
+type WebsiteLead = {
+  name: string
+  phone: string
+  phoneNormalized: string
 }
 
 function requestOrigin(request: Request): string {
@@ -48,6 +55,26 @@ function makeVisitorPhone(visitorId: string) {
   return `900${numeric}`
 }
 
+function parseLead(nameInput: unknown, whatsappInput: unknown): WebsiteLead | null {
+  if (typeof nameInput !== 'string' || typeof whatsappInput !== 'string') return null
+
+  const name = nameInput.trim().replace(/\s+/g, ' ')
+  if (name.length < 2 || name.length > 100) return null
+
+  let digits = whatsappInput.replace(/\D/g, '')
+  // Mozambique local mobile numbers are commonly entered as 84/85/86/87...
+  // without the +258 country code. Canonicalise those to an international
+  // number while still accepting already-international numbers.
+  if (digits.length === 9 && digits.startsWith('8')) digits = `258${digits}`
+  if (digits.length < 8 || digits.length > 15) return null
+
+  return {
+    name,
+    phone: `+${digits}`,
+    phoneNormalized: digits,
+  }
+}
+
 function safeContext(input: unknown): Record<string, unknown> {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return {}
   const source = input as Record<string, unknown>
@@ -79,12 +106,13 @@ async function resolveChannel(
 ): Promise<WebsiteChannelRow | null> {
   let query = admin
     .from('website_channels')
-    .select('id, account_id, public_key, allowed_origins, is_active')
+    .select('id, account_id, name, public_key, allowed_origins, is_active')
     .eq('is_active', true)
 
   if (publicKey) {
     query = query.eq('public_key', publicKey)
-    const { data } = await query.maybeSingle()
+    const { data, error } = await query.maybeSingle()
+    if (error) throw error
     if (!data) return null
     const channel = data as WebsiteChannelRow
     if (!isWebsiteOriginAllowed(origin, channel.allowed_origins)) return null
@@ -92,7 +120,8 @@ async function resolveChannel(
   }
 
   if (!origin) return null
-  const { data } = await query.contains('allowed_origins', [origin]).limit(2)
+  const { data, error } = await query.contains('allowed_origins', [origin]).limit(2)
+  if (error) throw error
   if (!data || data.length !== 1) return null
   return data[0] as WebsiteChannelRow
 }
@@ -103,84 +132,184 @@ async function getSession(
   visitorId: string,
   sessionToken: string,
 ) {
-  const { data } = await admin
+  const { data, error } = await admin
     .from('website_chat_sessions')
     .select('id, conversation_id, session_token_hash')
     .eq('website_channel_id', channelId)
     .eq('visitor_id', visitorId)
     .eq('session_token_hash', hashToken(sessionToken))
     .maybeSingle()
+  if (error) throw error
   return data as { id: string; conversation_id: string; session_token_hash: string } | null
 }
 
-async function ensureSession(
+async function getAccountOwner(
   admin: ReturnType<typeof createAdminClient>,
-  channel: WebsiteChannelRow,
-  visitorId: string,
-  origin: string,
-  context: Record<string, unknown>,
-) {
-  const newToken = randomBytes(32).toString('hex')
-  const newHash = hashToken(newToken)
-
-  const { data: existing } = await admin
-    .from('website_chat_sessions')
-    .select('id, conversation_id')
-    .eq('website_channel_id', channel.id)
-    .eq('visitor_id', visitorId)
-    .maybeSingle()
-
-  if (existing) {
-    await admin
-      .from('website_chat_sessions')
-      .update({ session_token_hash: newHash, last_seen_at: new Date().toISOString(), origin })
-      .eq('id', existing.id)
-
-    return { conversationId: existing.conversation_id as string, sessionToken: newToken }
-  }
-
-  const { data: account, error: accountError } = await admin
+  accountId: string,
+): Promise<string> {
+  const { data, error } = await admin
     .from('accounts')
     .select('owner_user_id')
-    .eq('id', channel.account_id)
+    .eq('id', accountId)
     .single()
 
-  if (accountError || !account?.owner_user_id) {
-    throw new Error('Website channel account is unavailable')
+  if (error || !data?.owner_user_id) {
+    throw error ?? new Error('Website channel account is unavailable')
+  }
+  return data.owner_user_id as string
+}
+
+async function resolveContact(
+  admin: ReturnType<typeof createAdminClient>,
+  channel: WebsiteChannelRow,
+  ownerUserId: string,
+  visitorId: string,
+  lead: WebsiteLead | null,
+): Promise<string> {
+  if (lead) {
+    const { data: existing, error: existingError } = await admin
+      .from('contacts')
+      .select('id, name')
+      .eq('account_id', channel.account_id)
+      .eq('phone_normalized', lead.phoneNormalized)
+      .maybeSingle()
+
+    if (existingError) throw existingError
+    if (existing?.id) {
+      const currentName = typeof existing.name === 'string' ? existing.name.trim() : ''
+      if (!currentName || currentName.startsWith('Visitante')) {
+        const { error: updateError } = await admin
+          .from('contacts')
+          .update({ name: lead.name, updated_at: new Date().toISOString() })
+          .eq('id', existing.id)
+          .eq('account_id', channel.account_id)
+        if (updateError) throw updateError
+      }
+      return existing.id as string
+    }
+
+    const { data: contact, error: contactError } = await admin
+      .from('contacts')
+      .insert({
+        user_id: ownerUserId,
+        account_id: channel.account_id,
+        phone: lead.phone,
+        name: lead.name,
+      })
+      .select('id')
+      .single()
+
+    if (contactError || !contact?.id) {
+      // Another request may have created the same normalized phone between
+      // the lookup and insert. Re-resolve the canonical contact in that case.
+      if ((contactError as { code?: string } | null)?.code === '23505') {
+        const { data: winner, error: winnerError } = await admin
+          .from('contacts')
+          .select('id')
+          .eq('account_id', channel.account_id)
+          .eq('phone_normalized', lead.phoneNormalized)
+          .single()
+        if (winnerError || !winner?.id) throw winnerError ?? contactError
+        return winner.id as string
+      }
+      throw contactError ?? new Error('Failed to create website contact')
+    }
+    return contact.id as string
   }
 
+  // Backward-compatible fallback for an older website build while the new
+  // pre-chat form rolls out. New LC builds always submit a real lead.
   const phone = makeVisitorPhone(visitorId)
-  let contactId: string
-
-  const { data: existingContact } = await admin
+  const { data: existingContact, error: existingError } = await admin
     .from('contacts')
     .select('id')
     .eq('account_id', channel.account_id)
     .eq('phone', phone)
     .maybeSingle()
 
-  if (existingContact?.id) {
-    contactId = existingContact.id as string
-  } else {
-    const { data: contact, error: contactError } = await admin
-      .from('contacts')
-      .insert({
-        user_id: account.owner_user_id,
-        account_id: channel.account_id,
-        phone,
-        name: 'Visitante • Site',
-      })
-      .select('id')
-      .single()
+  if (existingError) throw existingError
+  if (existingContact?.id) return existingContact.id as string
 
-    if (contactError || !contact?.id) throw contactError ?? new Error('Failed to create website contact')
-    contactId = contact.id as string
+  const { data: contact, error: contactError } = await admin
+    .from('contacts')
+    .insert({
+      user_id: ownerUserId,
+      account_id: channel.account_id,
+      phone,
+      name: 'Visitante • Site',
+    })
+    .select('id')
+    .single()
+
+  if (contactError || !contact?.id) throw contactError ?? new Error('Failed to create website contact')
+  return contact.id as string
+}
+
+async function findWebsiteConversation(
+  admin: ReturnType<typeof createAdminClient>,
+  accountId: string,
+  contactId: string,
+) {
+  const { data, error } = await admin
+    .from('conversations')
+    .select('id')
+    .eq('account_id', accountId)
+    .eq('contact_id', contactId)
+    .eq('channel', 'website')
+    .maybeSingle()
+  if (error) throw error
+  return data as { id: string } | null
+}
+
+async function resolveWebsiteConversation(
+  admin: ReturnType<typeof createAdminClient>,
+  channel: WebsiteChannelRow,
+  ownerUserId: string,
+  contactId: string,
+  context: Record<string, unknown>,
+  preferredConversationId?: string,
+): Promise<string> {
+  if (preferredConversationId) {
+    const { data: preferred, error: preferredError } = await admin
+      .from('conversations')
+      .select('id, contact_id, channel')
+      .eq('id', preferredConversationId)
+      .eq('account_id', channel.account_id)
+      .maybeSingle()
+
+    if (preferredError) throw preferredError
+    if (preferred?.id && preferred.channel === 'website' && preferred.contact_id === contactId) {
+      return preferred.id as string
+    }
+
+    const existingTarget = await findWebsiteConversation(admin, channel.account_id, contactId)
+    if (existingTarget?.id) return existingTarget.id
+
+    if (preferred?.id && preferred.channel === 'website') {
+      const { data: relinked, error: relinkError } = await admin
+        .from('conversations')
+        .update({ contact_id: contactId, updated_at: new Date().toISOString() })
+        .eq('id', preferred.id)
+        .eq('account_id', channel.account_id)
+        .eq('channel', 'website')
+        .select('id')
+        .maybeSingle()
+
+      if (!relinkError && relinked?.id) return relinked.id as string
+      if ((relinkError as { code?: string } | null)?.code !== '23505') throw relinkError
+
+      const winner = await findWebsiteConversation(admin, channel.account_id, contactId)
+      if (winner?.id) return winner.id
+    }
   }
+
+  const existing = await findWebsiteConversation(admin, channel.account_id, contactId)
+  if (existing?.id) return existing.id
 
   const { data: conversation, error: conversationError } = await admin
     .from('conversations')
     .insert({
-      user_id: account.owner_user_id,
+      user_id: ownerUserId,
       account_id: channel.account_id,
       contact_id: contactId,
       status: 'open',
@@ -192,20 +321,113 @@ async function ensureSession(
     .single()
 
   if (conversationError || !conversation?.id) {
+    if ((conversationError as { code?: string } | null)?.code === '23505') {
+      const winner = await findWebsiteConversation(admin, channel.account_id, contactId)
+      if (winner?.id) return winner.id
+    }
     throw conversationError ?? new Error('Failed to create website conversation')
   }
+  return conversation.id as string
+}
 
-  const { error: sessionError } = await admin.from('website_chat_sessions').insert({
-    account_id: channel.account_id,
-    website_channel_id: channel.id,
-    conversation_id: conversation.id,
-    visitor_id: visitorId,
-    session_token_hash: newHash,
-    origin,
-  })
+async function mergeConversationMetadata(
+  admin: ReturnType<typeof createAdminClient>,
+  channel: WebsiteChannelRow,
+  conversationId: string,
+  context: Record<string, unknown>,
+  lead: WebsiteLead | null,
+) {
+  const additions: Record<string, unknown> = {
+    ...context,
+    channel_name: channel.name,
+    lead_source: 'website',
+  }
+  if (lead) {
+    additions.customer_name = lead.name
+    additions.customer_whatsapp = lead.phone
+  }
 
-  if (sessionError) throw sessionError
-  return { conversationId: conversation.id as string, sessionToken: newToken }
+  const { data: current, error: currentError } = await admin
+    .from('conversations')
+    .select('source_metadata')
+    .eq('id', conversationId)
+    .eq('account_id', channel.account_id)
+    .eq('channel', 'website')
+    .single()
+  if (currentError) throw currentError
+
+  const existingMetadata =
+    current?.source_metadata && typeof current.source_metadata === 'object' && !Array.isArray(current.source_metadata)
+      ? (current.source_metadata as Record<string, unknown>)
+      : {}
+
+  const { error: updateError } = await admin
+    .from('conversations')
+    .update({
+      source_metadata: { ...existingMetadata, ...additions },
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', conversationId)
+    .eq('account_id', channel.account_id)
+    .eq('channel', 'website')
+  if (updateError) throw updateError
+}
+
+async function ensureSession(
+  admin: ReturnType<typeof createAdminClient>,
+  channel: WebsiteChannelRow,
+  visitorId: string,
+  origin: string,
+  context: Record<string, unknown>,
+  lead: WebsiteLead | null,
+) {
+  const newToken = randomBytes(32).toString('hex')
+  const newHash = hashToken(newToken)
+  const ownerUserId = await getAccountOwner(admin, channel.account_id)
+  const contactId = await resolveContact(admin, channel, ownerUserId, visitorId, lead)
+
+  const { data: existing, error: existingError } = await admin
+    .from('website_chat_sessions')
+    .select('id, conversation_id')
+    .eq('website_channel_id', channel.id)
+    .eq('visitor_id', visitorId)
+    .maybeSingle()
+  if (existingError) throw existingError
+
+  const conversationId = await resolveWebsiteConversation(
+    admin,
+    channel,
+    ownerUserId,
+    contactId,
+    context,
+    existing?.conversation_id as string | undefined,
+  )
+
+  if (existing?.id) {
+    const { error: updateError } = await admin
+      .from('website_chat_sessions')
+      .update({
+        conversation_id: conversationId,
+        session_token_hash: newHash,
+        last_seen_at: new Date().toISOString(),
+        origin,
+      })
+      .eq('id', existing.id)
+    if (updateError) throw updateError
+  } else {
+    const { error: sessionError } = await admin.from('website_chat_sessions').insert({
+      account_id: channel.account_id,
+      website_channel_id: channel.id,
+      conversation_id: conversationId,
+      visitor_id: visitorId,
+      session_token_hash: newHash,
+      origin,
+    })
+    if (sessionError) throw sessionError
+  }
+
+  await mergeConversationMetadata(admin, channel, conversationId, context, lead)
+  return { conversationId, sessionToken: newToken }
 }
 
 export async function OPTIONS(request: Request) {
@@ -221,8 +443,15 @@ export async function POST(request: Request) {
     const suppliedToken = typeof body?.session_token === 'string' ? body.session_token : ''
     const message = typeof body?.message === 'string' ? body.message.trim() : ''
     const context = safeContext(body?.context)
+    const leadName = typeof body?.customer_name === 'string' ? body.customer_name : ''
+    const leadWhatsapp = typeof body?.customer_whatsapp === 'string' ? body.customer_whatsapp : ''
+    const leadWasSupplied = Boolean(leadName.trim() || leadWhatsapp.trim())
+    const lead = parseLead(leadName, leadWhatsapp)
 
     if (!visitorId) return json({ error: 'visitor_id is required' }, 400, origin)
+    if (leadWasSupplied && !lead) {
+      return json({ error: 'Nome completo e número de WhatsApp válidos são obrigatórios' }, 400, origin)
+    }
     if (message.length > MAX_MESSAGE_LENGTH) {
       return json({ error: `Message exceeds ${MAX_MESSAGE_LENGTH} characters` }, 400, origin)
     }
@@ -241,34 +470,28 @@ export async function POST(request: Request) {
       const session = await getSession(admin, channel.id, visitorId, suppliedToken)
       if (!session) return json({ error: 'Invalid chat session' }, 401, origin)
       conversationId = session.conversation_id
-      await admin
+      const { error: touchError } = await admin
         .from('website_chat_sessions')
         .update({ last_seen_at: new Date().toISOString() })
         .eq('id', session.id)
+      if (touchError) throw touchError
+      await mergeConversationMetadata(admin, channel, conversationId, context, lead)
     } else {
-      const session = await ensureSession(admin, channel, visitorId, origin, context)
+      const session = await ensureSession(admin, channel, visitorId, origin, context, lead)
       conversationId = session.conversationId
       sessionToken = session.sessionToken
     }
 
-    if (Object.keys(context).length > 0) {
-      await admin
-        .from('conversations')
-        .update({ source_metadata: context, updated_at: new Date().toISOString() })
-        .eq('id', conversationId)
-        .eq('account_id', channel.account_id)
-        .eq('channel', 'website')
-    }
-
     if (message) {
       const now = new Date().toISOString()
-      const { data: current } = await admin
+      const { data: current, error: currentError } = await admin
         .from('conversations')
         .select('unread_count')
         .eq('id', conversationId)
         .eq('account_id', channel.account_id)
         .eq('channel', 'website')
         .single()
+      if (currentError) throw currentError
 
       const { error: messageError } = await admin.from('messages').insert({
         conversation_id: conversationId,
@@ -281,7 +504,7 @@ export async function POST(request: Request) {
       })
       if (messageError) throw messageError
 
-      await admin
+      const { error: conversationError } = await admin
         .from('conversations')
         .update({
           last_message_text: message,
@@ -291,6 +514,7 @@ export async function POST(request: Request) {
           updated_at: now,
         })
         .eq('id', conversationId)
+      if (conversationError) throw conversationError
     }
 
     return json({ ok: true, session_token: sessionToken, conversation_id: conversationId }, 200, origin)
