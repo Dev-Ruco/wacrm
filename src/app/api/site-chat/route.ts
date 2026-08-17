@@ -614,14 +614,12 @@ export async function POST(request: Request) {
     if (message) {
       const now = new Date().toISOString()
       const externalMessageId = `web_${randomUUID()}`
-      const contextProductName = typeof context.product_name === 'string' ? context.product_name.trim() : ''
       const contextProductImage = safeHttpsUrl(context.product_image)
       const isLegacyProductInterest =
         !productInquiry &&
         context.source === 'product_detail' &&
-        Boolean(contextProductName) &&
         Boolean(contextProductImage) &&
-        message.toLocaleLowerCase('pt-PT').includes(contextProductName.toLocaleLowerCase('pt-PT'))
+        /\btenho\s+interesse\b/i.test(message)
       const messageContentType = isLegacyProductInterest ? 'image' : 'text'
       const messageMediaUrl = isLegacyProductInterest ? contextProductImage : null
       const [{ data: current, error: currentError }, { count: priorCustomerMessageCount }] =
