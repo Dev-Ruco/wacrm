@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ExternalLink, ImageIcon, Loader2, Pencil, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,17 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { AttributeSelect, type AttributeOption } from './attribute-select'
+
+export interface ProductVariant {
+  id: string
+  color: string | null
+  image_url: string | null
+  is_active: boolean
+  size?: string | null
+  sku?: string | null
+  price?: number | string | null
+  stock_quantity?: number | null
+}
 
 export interface Product {
   id: string
@@ -23,6 +34,7 @@ export interface Product {
   stock_quantity: number | null
   is_active: boolean
   catalog_id?: string | null
+  variants?: ProductVariant[]
 }
 
 export interface ProductEditPatch {
@@ -38,6 +50,20 @@ export interface ProductEditPatch {
 }
 
 export type CatalogViewMode = 'list' | 'grid' | 'compact'
+
+interface ColourOption {
+  key: string
+  label: string
+  imageUrl: string | null
+}
+
+function colourKey(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLocaleLowerCase('pt')
+}
 
 export function ProductCard({
   product,
@@ -73,6 +99,36 @@ export function ProductCard({
   const [imageUrl, setImageUrl] = useState(product.image_url ?? '')
   const [productUrl, setProductUrl] = useState(product.product_url ?? '')
   const [saving, setSaving] = useState(false)
+  const [selectedColourKey, setSelectedColourKey] = useState<string | null>(null)
+
+  const colourVariants = useMemo<ColourOption[]>(() => {
+    const colours = new Map<string, ColourOption>()
+
+    for (const variant of product.variants ?? []) {
+      if (variant.is_active === false) continue
+      const label = variant.color?.trim()
+      if (!label) continue
+      const key = colourKey(label)
+      const existing = colours.get(key)
+
+      if (!existing) {
+        colours.set(key, {
+          key,
+          label,
+          imageUrl: variant.image_url || null,
+        })
+      } else if (!existing.imageUrl && variant.image_url) {
+        colours.set(key, { ...existing, imageUrl: variant.image_url })
+      }
+    }
+
+    return Array.from(colours.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt'))
+  }, [product.variants])
+
+  const selectedColour = selectedColourKey
+    ? colourVariants.find((option) => option.key === selectedColourKey) ?? null
+    : null
+  const displayedImage = selectedColour?.imageUrl || product.image_url
 
   const complete = Boolean(product.name && product.category && product.description)
 
@@ -140,10 +196,10 @@ export function ProductCard({
             viewMode === 'compact' && 'aspect-square w-full border-b border-border/70',
           )}
         >
-          {product.image_url ? (
+          {displayedImage ? (
             <img
-              src={product.image_url}
-              alt={product.name}
+              src={displayedImage}
+              alt={selectedColour ? `${product.name} — ${selectedColour.label}` : product.name}
               className="h-full w-full object-contain p-2"
               loading="lazy"
             />
@@ -160,6 +216,11 @@ export function ProductCard({
               {!product.is_active ? (
                 <Badge variant="outline" className="h-5 bg-background/90 text-[10px] backdrop-blur-sm">Inactivo</Badge>
               ) : null}
+            </div>
+          ) : null}
+          {selectedColour && viewMode !== 'list' ? (
+            <div className="absolute bottom-3 left-3 rounded-full bg-background/90 px-2.5 py-1 text-xs font-medium shadow-sm backdrop-blur-sm">
+              {selectedColour.label}
             </div>
           ) : null}
         </div>
@@ -191,6 +252,61 @@ export function ProductCard({
           >
             {product.description || 'Sem descrição comercial.'}
           </p>
+
+          {colourVariants.length > 0 ? (
+            <div className={cn('mt-3 min-w-0', viewMode === 'list' && 'max-w-xl')}>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-[11px] font-medium text-muted-foreground">
+                  Cores disponíveis · {colourVariants.length}
+                </p>
+                {selectedColourKey ? (
+                  <button
+                    type="button"
+                    className="text-[11px] text-primary hover:underline"
+                    onClick={() => setSelectedColourKey(null)}
+                  >
+                    Foto principal
+                  </button>
+                ) : null}
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {colourVariants.map((option) => {
+                  const selected = selectedColourKey === option.key
+                  const thumbnail = option.imageUrl || product.image_url
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => setSelectedColourKey(selected ? null : option.key)}
+                      className={cn(
+                        'group w-[68px] shrink-0 rounded-lg border bg-background p-1.5 text-left transition',
+                        selected
+                          ? 'border-primary ring-2 ring-primary/15'
+                          : 'border-border hover:border-foreground/25',
+                      )}
+                      title={`Ver ${option.label}`}
+                    >
+                      <span className="flex aspect-square w-full items-center justify-center overflow-hidden rounded-md bg-muted/50">
+                        {thumbnail ? (
+                          <img
+                            src={thumbnail}
+                            alt={`${product.name} — ${option.label}`}
+                            className="h-full w-full object-contain p-0.5"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <ImageIcon className="size-5 text-muted-foreground" />
+                        )}
+                      </span>
+                      <span className="mt-1.5 block truncate text-[10px] font-medium text-foreground">
+                        {option.label}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ) : null}
 
           {viewMode !== 'list' ? (
             <div className="mt-auto grid grid-cols-2 gap-3 border-t border-border/70 pt-3">
