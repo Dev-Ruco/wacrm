@@ -143,7 +143,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
               {displayName}
             </h3>
             <p className="text-muted-foreground truncate text-xs">
-              {contact.company || 'Cliente WhatsApp'}
+              {contact.company || 'Cliente'}
             </p>
           </div>
         </div>
