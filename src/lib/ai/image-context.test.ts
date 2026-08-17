@@ -62,9 +62,14 @@ describe('createWhatsAppImageResolver', () => {
     expect(mocks.decrypt).toHaveBeenCalledOnce()
   })
 
-  it('ignores external URLs, unsupported formats and oversized images', async () => {
+  it('accepts public HTTPS images while rejecting unsafe URLs, unsupported formats and oversized Meta media', async () => {
     const resolve = createWhatsAppImageResolver(fakeDb(), 'account-1')
-    await expect(resolve('https://example.com/image.jpg')).resolves.toBeNull()
+    await expect(resolve('https://example.com/image.jpg')).resolves.toEqual({
+      type: 'image_url',
+      url: 'https://example.com/image.jpg',
+    })
+    await expect(resolve('http://example.com/image.jpg')).resolves.toBeNull()
+    await expect(resolve('not-a-url')).resolves.toBeNull()
     expect(mocks.getMediaUrl).not.toHaveBeenCalled()
 
     mocks.downloadMedia.mockResolvedValueOnce({

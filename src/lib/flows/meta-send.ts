@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import {
   sendInteractiveButtons,
   sendInteractiveList,
@@ -18,55 +19,99 @@ import {
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
 
-// ------------------------------------------------------------
-// Flows-side Meta sender (interactive variants).
-//
-// Mirrors src/lib/automations/meta-send.ts (engineSendText /
-// engineSendTemplate) but emits interactive button + list messages.
-// Kept separate from the automations file so the two engines don't
-// fight over each other's shape — once both stabilize, the
-// phone-variant retry + DB persistence are obvious extraction
-// candidates into a shared base.
-//
-// PR #1 ships this in isolation: callers don't exist yet. PR #2
-// brings the flow runner online and wires it up. Shipping it now
-// keeps the foundation PR self-contained and unit-testable.
-// ------------------------------------------------------------
+type EngineDb = ReturnType<typeof supabaseAdmin>
+
+async function conversationChannel(
+  db: EngineDb,
+  accountId: string,
+  conversationId: string,
+): Promise<string> {
+  const { data, error } = await db
+    .from('conversations')
+    .select('channel')
+    .eq('id', conversationId)
+    .eq('account_id', accountId)
+    .maybeSingle()
+
+  if (error || !data) throw new Error('conversation not found for this account')
+  return typeof data.channel === 'string' && data.channel.trim()
+    ? data.channel.trim()
+    : 'whatsapp'
+}
+
+async function persistWebsiteBotMessage(args: {
+  db: EngineDb
+  conversationId: string
+  contentType: 'text' | 'image'
+  contentText: string | null
+  mediaUrl?: string | null
+  aiGenerated?: boolean
+}): Promise<{ whatsapp_message_id: string }> {
+  const externalId = `web_out_${randomUUID()}`
+  const now = new Date().toISOString()
+  const preview =
+    args.contentText?.trim() ||
+    (args.contentType === 'image' ? '📷 Fotografia' : '')
+
+  const { error: msgErr } = await args.db.from('messages').insert({
+    conversation_id: args.conversationId,
+    sender_type: 'bot',
+    content_type: args.contentType,
+    content_text: args.contentText,
+    media_url: args.mediaUrl ?? null,
+    message_id: externalId,
+    status: 'sent',
+    ai_generated: args.aiGenerated ?? false,
+    created_at: now,
+  })
+  if (msgErr) throw new Error(`website message persistence failed: ${msgErr.message}`)
+
+  const { error: convErr } = await args.db
+    .from('conversations')
+    .update({
+      last_message_text: preview,
+      last_message_at: now,
+      updated_at: now,
+    })
+    .eq('id', args.conversationId)
+  if (convErr) throw new Error(`website conversation update failed: ${convErr.message}`)
+
+  // Kept for backwards compatibility with Flow/AI callers. This field now
+  // means the external delivery id and is not necessarily a WhatsApp wamid.
+  return { whatsapp_message_id: externalId }
+}
 
 interface SendTextEngineArgs {
-  /** Account-level tenancy key. Drives contact + whatsapp_config
-   *  lookups so a flow authored by user A still sends through the
-   *  WhatsApp number user B saved on the same account. */
   accountId: string
-  /** Original author of the flow — used for INSERT audit columns
-   *  and for resolving the agent's identity in logs. Not consulted
-   *  for tenancy. */
   userId: string
   conversationId: string
   contactId: string
   text: string
-  /** Marks the persisted message row `ai_generated = true` so the inbox
-   *  badges it as an AI reply. Only the auto-reply bot sets this;
-   *  deterministic Flow/automation sends leave it false. */
   aiGenerated?: boolean
 }
 
 /**
- * Send a plain-text WhatsApp message from the Flows engine.
- *
- * Used by the runner's `send_message` and `collect_input` nodes —
- * both prompt the customer with text and either auto-advance (the
- * send_message case) or suspend awaiting a text reply (collect_input).
- *
- * Wraps the same phone-variant retry + DB persistence pattern as the
- * interactive senders; the duplication will be DRY'd into a shared
- * `engineSendBase` once the v2 features (templates with variables,
- * media sends) settle.
+ * Channel-aware text sender used by Flows and the account AI brain.
+ * Transport changes by conversation channel; the caller does not.
  */
 export async function engineSendText(
   args: SendTextEngineArgs,
 ): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
+  const channel = await conversationChannel(db, args.accountId, args.conversationId)
+
+  if (channel === 'website') {
+    return persistWebsiteBotMessage({
+      db,
+      conversationId: args.conversationId,
+      contentType: 'text',
+      contentText: args.text,
+      aiGenerated: args.aiGenerated,
+    })
+  }
+  if (channel !== 'whatsapp') {
+    throw new Error(`No outbound text adapter configured for channel: ${channel}`)
+  }
 
   const { data: contact, error: contactErr } = await db
     .from('contacts')
@@ -93,7 +138,6 @@ export async function engineSendText(
   }
 
   const accessToken = decrypt(config.access_token)
-
   const attempt = async (phone: string): Promise<string> => {
     const r = await sendTextMessage({
       phoneNumberId: config.phone_number_id,
@@ -151,12 +195,23 @@ export async function engineSendText(
   return { whatsapp_message_id: waMessageId }
 }
 
-/** Best-effort caller-facing typing state used by the live AI path. */
+/** Best-effort typing state. Non-WhatsApp channels simply no-op. */
 export async function engineSendTypingIndicator(args: {
   accountId: string
   inboundMessageId: string
 }): Promise<void> {
   const db = supabaseAdmin()
+  const { data: inbound } = await db
+    .from('messages')
+    .select('conversation_id')
+    .eq('message_id', args.inboundMessageId)
+    .maybeSingle()
+
+  if (inbound?.conversation_id) {
+    const channel = await conversationChannel(db, args.accountId, inbound.conversation_id)
+    if (channel !== 'whatsapp') return
+  }
+
   const { data: config, error } = await db
     .from('whatsapp_config')
     .select('phone_number_id, access_token')
@@ -179,26 +234,33 @@ interface SendMediaEngineArgs {
   conversationId: string
   contactId: string
   kind: MediaKind
-  /** Public URL Meta fetches at send time. */
   link: string
   caption?: string
-  /** Document-only; ignored by Meta for image/video. */
   filename?: string
 }
 
-/**
- * Send an image / video / document from the Flows engine.
- *
- * Used by the runner's `send_media` node. Auto-advances after the
- * send lands (same suspend semantics as send_message). Same
- * phone-variant retry + DB persistence as the text/interactive
- * senders; persists the outgoing message with `content_type` matching
- * the media kind so the inbox renders the right preview.
- */
+/** Channel-aware media sender. Website currently supports product/images. */
 export async function engineSendMedia(
   args: SendMediaEngineArgs,
 ): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
+  const channel = await conversationChannel(db, args.accountId, args.conversationId)
+
+  if (channel === 'website') {
+    if (args.kind !== 'image') {
+      throw new Error(`Website outbound adapter does not support ${args.kind} media yet`)
+    }
+    return persistWebsiteBotMessage({
+      db,
+      conversationId: args.conversationId,
+      contentType: 'image',
+      contentText: args.caption?.trim() || null,
+      mediaUrl: args.link,
+    })
+  }
+  if (channel !== 'whatsapp') {
+    throw new Error(`No outbound media adapter configured for channel: ${channel}`)
+  }
 
   const { data: contact, error: contactErr } = await db
     .from('contacts')
@@ -225,7 +287,6 @@ export async function engineSendMedia(
   }
 
   const accessToken = decrypt(config.access_token)
-
   const attempt = async (phone: string): Promise<string> => {
     const r = await sendMediaMessage({
       phoneNumberId: config.phone_number_id,
@@ -261,10 +322,6 @@ export async function engineSendMedia(
     await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
   }
 
-  // content_type='image'|'video'|'document' — these are already in the
-  // messages_content_type_check constraint (migration 001 + 010).
-  // content_text carries the caption (or empty) so the conversation
-  // list preview shows something meaningful when the user glances at it.
   const preview = args.caption?.trim() || `[${args.kind}]`
   const { error: msgErr } = await db.from('messages').insert({
     conversation_id: args.conversationId,
@@ -313,27 +370,12 @@ interface SendInteractiveListEngineArgs {
   footerText?: string
 }
 
-/**
- * Send an interactive-button WhatsApp message from the Flows engine.
- *
- * Persists the outgoing message to `messages` with
- * `content_type='interactive'` and `sender_type='bot'` so the inbox
- * surfaces it with the "Button reply" affordance and the conversation
- * thread reflects the bot's prompt.
- *
- * Returns the Meta message id so the caller (engine) can stash it on
- * the `flow_runs.last_prompt_message_id` field for later reference.
- */
 export async function engineSendInteractiveButtons(
   args: SendInteractiveButtonsEngineArgs,
 ): Promise<{ whatsapp_message_id: string }> {
   return sendInteractiveViaMeta({ ...args, kind: 'buttons' })
 }
 
-/**
- * Send an interactive-list WhatsApp message from the Flows engine.
- * Used when the flow needs more than 3 options (Meta's button cap).
- */
 export async function engineSendInteractiveList(
   args: SendInteractiveListEngineArgs,
 ): Promise<{ whatsapp_message_id: string }> {
@@ -348,10 +390,11 @@ async function sendInteractiveViaMeta(
   input: SendInput,
 ): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
+  const channel = await conversationChannel(db, input.accountId, input.conversationId)
+  if (channel !== 'whatsapp') {
+    throw new Error(`Interactive Flow messages are not supported on channel: ${channel}`)
+  }
 
-  // Scope the contact + whatsapp_config lookups by account_id —
-  // same defense-in-depth rationale as automations/meta-send.ts.
-  // Migration 017 moved both tables to account-scoped tenancy.
   const { data: contact, error: contactErr } = await db
     .from('contacts')
     .select('id, phone')
@@ -377,7 +420,6 @@ async function sendInteractiveViaMeta(
   }
 
   const accessToken = decrypt(config.access_token)
-
   const attempt = async (phone: string): Promise<string> => {
     if (input.kind === 'buttons') {
       const r = await sendInteractiveButtons({
@@ -404,9 +446,6 @@ async function sendInteractiveViaMeta(
     return r.messageId
   }
 
-  // Same phone-variant retry as automations/meta-send.ts. Numbers
-  // registered with/without a trunk 0 + Meta's sandbox quirks all
-  // need this to reliably land a message.
   const variants = phoneVariants(sanitized)
   let workingPhone = sanitized
   let waMessageId = ''
@@ -429,17 +468,6 @@ async function sendInteractiveViaMeta(
     await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
   }
 
-  // Persist the bot's prompt to the messages table so it appears in
-  // the inbox. content_type='interactive' is supported as of
-  // migration 010; sender_type='bot' distinguishes flow sends from
-  // manual agent sends (the conversation list preview will pick up
-  // last_message_text as a sensible summary).
-  //
-  // We do NOT set interactive_reply_id here — that column is reserved
-  // for the customer's tap on this message, populated by the webhook
-  // when their reply arrives. We DO persist the structured payload so
-  // the inbox thread re-renders the buttons/rows the bot sent (round-
-  // trip), matching the composer + automation send paths.
   const interactivePayload: InteractiveMessagePayload =
     input.kind === 'buttons'
       ? {

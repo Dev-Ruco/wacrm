@@ -1,8 +1,13 @@
 import { createHash, randomUUID } from 'crypto'
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { isWebsiteOriginAllowed } from '@/lib/site-chat/origin'
+import { dispatchInboundThroughAccountBrain } from '@/lib/channels/inbound-brain'
+import { loadEmbeddingsKey } from '@/lib/ai/config'
+import { transcribeAudio } from '@/lib/ai/transcription'
+
+export const maxDuration = 60
 
 const CHAT_MEDIA_BUCKET = 'chat-media'
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -113,6 +118,25 @@ async function getSession(
   return data as { id: string; conversation_id: string } | null
 }
 
+async function transcribeWebsiteAudio(
+  admin: ReturnType<typeof createAdminClient>,
+  accountId: string,
+  bytes: Buffer,
+  mimeType: string,
+): Promise<string | null> {
+  try {
+    const { key } = await loadEmbeddingsKey(admin, accountId)
+    if (!key) return null
+    return await transcribeAudio({ apiKey: key, audio: bytes, mimeType })
+  } catch (error) {
+    console.error(
+      '[site-chat/media] voice-note transcription failed:',
+      error instanceof Error ? error.message : error,
+    )
+    return null
+  }
+}
+
 export async function OPTIONS(request: Request) {
   return new NextResponse(null, { status: 204, headers: corsHeaders(requestOrigin(request)) })
 }
@@ -166,6 +190,7 @@ export async function POST(request: Request) {
     if (!session) return json({ error: 'Invalid chat session' }, 401, origin)
 
     const now = new Date().toISOString()
+    const externalMessageId = `web_${randomUUID()}`
     const extension = extensionForMimeType(mimeType)
     const path = `account-${channel.account_id}/website/${channel.id}/${randomUUID()}.${extension}`
     const bytes = Buffer.from(await fileValue.arrayBuffer())
@@ -184,17 +209,34 @@ export async function POST(request: Request) {
       data: { publicUrl },
     } = admin.storage.from(CHAT_MEDIA_BUCKET).getPublicUrl(path)
 
-    const { data: current, error: currentError } = await admin
-      .from('conversations')
-      .select('unread_count')
-      .eq('id', session.conversation_id)
-      .eq('account_id', channel.account_id)
-      .eq('channel', 'website')
-      .single()
+    // Match WhatsApp behaviour: voice notes become text before the shared
+    // brain sees them. The transport changes, but Flows/Automations/AI receive
+    // the same semantic customer message.
+    const transcription =
+      kind === 'audio'
+        ? await transcribeWebsiteAudio(admin, channel.account_id, bytes, mimeType)
+        : null
+    const contentText = transcription || caption || null
 
-    if (currentError) {
+    const [{ data: current, error: currentError }, { count: priorCustomerMessageCount }] =
+      await Promise.all([
+        admin
+          .from('conversations')
+          .select('unread_count, contact_id, user_id')
+          .eq('id', session.conversation_id)
+          .eq('account_id', channel.account_id)
+          .eq('channel', 'website')
+          .single(),
+        admin
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', session.conversation_id)
+          .eq('sender_type', 'customer'),
+      ])
+
+    if (currentError || !current?.contact_id || !current?.user_id) {
       await admin.storage.from(CHAT_MEDIA_BUCKET).remove([path]).catch(() => {})
-      throw currentError
+      throw currentError ?? new Error('Website conversation routing context is unavailable')
     }
 
     const { data: message, error: messageError } = await admin
@@ -203,9 +245,9 @@ export async function POST(request: Request) {
         conversation_id: session.conversation_id,
         sender_type: 'customer',
         content_type: kind,
-        content_text: caption || null,
+        content_text: contentText,
         media_url: publicUrl,
-        message_id: `web_${randomUUID()}`,
+        message_id: externalMessageId,
         status: 'delivered',
         created_at: now,
       })
@@ -217,13 +259,13 @@ export async function POST(request: Request) {
       throw messageError ?? new Error('Failed to persist website media message')
     }
 
-    const preview = caption || (kind === 'image' ? '📷 Fotografia' : '🎤 Áudio')
+    const preview = contentText || (kind === 'image' ? '📷 Fotografia' : '🎤 Áudio')
     const { error: conversationError } = await admin
       .from('conversations')
       .update({
         last_message_text: preview,
         last_message_at: now,
-        unread_count: Number(current?.unread_count ?? 0) + 1,
+        unread_count: Number(current.unread_count ?? 0) + 1,
         status: 'open',
         updated_at: now,
       })
@@ -237,6 +279,20 @@ export async function POST(request: Request) {
       .from('website_chat_sessions')
       .update({ last_seen_at: now })
       .eq('id', session.id)
+
+    after(async () => {
+      await dispatchInboundThroughAccountBrain({
+        accountId: channel.account_id,
+        conversationId: session.conversation_id,
+        contactId: current.contact_id as string,
+        configOwnerUserId: current.user_id as string,
+        inboundMessageId: externalMessageId,
+        channel: 'website',
+        text: contentText ?? '',
+        contentType: kind,
+        isFirstInboundMessage: (priorCustomerMessageCount ?? 0) === 0,
+      })
+    })
 
     return json({ ok: true, message }, 200, origin)
   } catch (error) {

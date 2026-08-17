@@ -22,9 +22,30 @@ import { ConversationDeleteAction } from './conversation-delete-action';
 
 interface ContactSidebarProps {
   contact: Contact | null;
+  channel?: string | null;
 }
 
-export function ContactSidebar({ contact }: ContactSidebarProps) {
+function contactSubtitle(contact: Contact, channel?: string | null) {
+  const company = contact.company?.trim();
+  const genericLegacyCompany = !company || company === 'Cliente WhatsApp';
+  if (genericLegacyCompany) {
+    if (channel === 'website') return 'Cliente do Site';
+    if (channel === 'instagram') return 'Cliente Instagram';
+    if (channel === 'facebook') return 'Cliente Facebook';
+    if (channel === 'tiktok') return 'Cliente TikTok';
+    if (channel === 'whatsapp') return 'Cliente WhatsApp';
+
+    // Website sessions created before the pre-chat lead form used a private
+    // synthetic phone in the 900 + 12 digits namespace. Do not present those
+    // historical contacts as WhatsApp customers merely because an old generic
+    // company label is still stored on the contact.
+    const digits = contact.phone.replace(/\D/g, '');
+    if (/^900\d{12}$/.test(digits)) return 'Cliente do Site';
+  }
+  return company || 'Cliente';
+}
+
+export function ContactSidebar({ contact, channel }: ContactSidebarProps) {
   const tSidebar = useTranslations('Inbox.sidebar');
   const tThread = useTranslations('Inbox.messageThread');
   const { accountId } = useAuth();
@@ -143,7 +164,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
               {displayName}
             </h3>
             <p className="text-muted-foreground truncate text-xs">
-              {contact.company || 'Cliente'}
+              {contactSubtitle(contact, channel)}
             </p>
           </div>
         </div>

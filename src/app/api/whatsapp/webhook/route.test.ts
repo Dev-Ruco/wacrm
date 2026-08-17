@@ -13,7 +13,7 @@ const h = vi.hoisted(() => ({
     // returns the row; a replayed delivery conflicts and returns [].
     messageUpsertResult: [{ id: 'msg-1' }] as { id: string }[],
     priorCustomerMsgCount: 0,
-    conversation: { id: 'conv-1', unread_count: 0, account_id: 'acc-1' },
+    conversation: { id: 'conv-1', unread_count: 0, account_id: 'acc-1', channel: 'whatsapp' },
     upsertCalls: [] as { row: Record<string, unknown>; options: unknown }[],
     rpcCalls: [] as { name: string; args: Record<string, unknown> }[],
     afterCallbacks: [] as (() => Promise<void> | void)[],
@@ -51,23 +51,23 @@ vi.mock('@supabase/supabase-js', () => ({
                 }),
             }),
           }
-        case 'conversations':
-          // findOrCreateConversation: select().eq().eq().order().limit()
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({
-                  order: () => ({
-                    limit: () =>
-                      Promise.resolve({
-                        data: [h.state.conversation],
-                        error: null,
-                      }),
-                  }),
+        case 'conversations': {
+          // findOrCreateConversation is intentionally channel-scoped:
+          // select().eq(account).eq(contact).eq(channel).order().limit().
+          // Keep eq chainable so this mock also remains stable if another
+          // trusted equality filter is added later.
+          const filtered = {
+            eq: () => filtered,
+            order: () => ({
+              limit: () =>
+                Promise.resolve({
+                  data: [h.state.conversation],
+                  error: null,
                 }),
-              }),
             }),
           }
+          return { select: () => filtered }
+        }
         case 'broadcast_recipients':
           // flagBroadcastReplyIfAny: select().eq().eq().in().order().limit()
           return {
@@ -204,7 +204,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   h.state.messageUpsertResult = [{ id: 'msg-1' }]
   h.state.priorCustomerMsgCount = 0
-  h.state.conversation = { id: 'conv-1', unread_count: 0, account_id: 'acc-1' }
+  h.state.conversation = { id: 'conv-1', unread_count: 0, account_id: 'acc-1', channel: 'whatsapp' }
   h.state.upsertCalls = []
   h.state.rpcCalls = []
   h.state.afterCallbacks = []

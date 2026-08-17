@@ -29,15 +29,27 @@ function supportedMediaType(value: string): AiImageMediaType | null {
     : null
 }
 
+function publicHttpsImage(mediaUrl: string): ChatImagePart | null {
+  if (mediaUrl.length > 4_000) return null
+  try {
+    const url = new URL(mediaUrl)
+    if (url.protocol !== 'https:') return null
+    return { type: 'image_url', url: url.toString() }
+  } catch {
+    return null
+  }
+}
+
 /**
- * Resolve the CRM's authenticated WhatsApp media proxy into a provider-safe
- * data URL. Provider servers cannot open `/api/whatsapp/media/...` because it
- * requires the human operator's session cookie, so this server-side path
- * downloads the bytes from Meta with the account token instead.
+ * Resolve a canonical conversation image into provider-safe input.
  *
- * The account config is loaded lazily and cached for all images in one model
- * context. Failures are isolated per image: callers retain the textual image
- * placeholder and the conversation continues without vision.
+ * Website and future connectors may persist a public HTTPS media URL. Those
+ * URLs can be supplied directly to the multimodal provider. WhatsApp instead
+ * stores an authenticated local proxy path; that path is downloaded
+ * server-side from Meta and converted to a data URL.
+ *
+ * The historical function name is kept to avoid churn in callers, but the
+ * resolver itself is intentionally channel-neutral.
  */
 export function createWhatsAppImageResolver(
   db: WacrmSupabaseClient,
@@ -65,6 +77,9 @@ export function createWhatsAppImageResolver(
   }
 
   return async (mediaUrl: string): Promise<ChatImagePart | null> => {
+    const publicImage = publicHttpsImage(mediaUrl)
+    if (publicImage) return publicImage
+
     const match = mediaUrl.match(WHATSAPP_MEDIA_PATH)
     if (!match) return null
 
