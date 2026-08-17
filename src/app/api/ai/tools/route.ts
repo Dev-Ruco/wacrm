@@ -6,6 +6,10 @@ import {
   type AgentToolKey,
 } from '@/lib/ai/tool-permissions'
 import {
+  normalizeSearchCatalogToolSettings,
+  parseSearchCatalogToolSettingsInput,
+} from '@/lib/ai/tool-settings'
+import {
   isImplementedAgentToolKey,
   loadToolDefinitions,
   type ToolDefinition,
@@ -38,6 +42,10 @@ function fallbackDefinitions(): ToolDefinition[] {
   }))
 }
 
+function settingsForTool(toolKey: string, raw?: unknown) {
+  return toolKey === 'search_catalog' ? normalizeSearchCatalogToolSettings(raw) : {}
+}
+
 function defaultToolsResponse(definitions: readonly ToolDefinition[]) {
   return Object.fromEntries(
     definitions.map((definition) => [
@@ -45,9 +53,33 @@ function defaultToolsResponse(definitions: readonly ToolDefinition[]) {
       {
         enabled: definition.defaultEnabled,
         instructions: null,
+        settings: settingsForTool(definition.key),
       },
     ]),
-  ) as Record<AgentToolKey, { enabled: boolean; instructions: string | null }>
+  ) as Record<AgentToolKey, { enabled: boolean; instructions: string | null; settings: Record<string, unknown> }>
+}
+
+async function loadAgentToolRows(
+  supabase: Awaited<ReturnType<typeof requireRole>>['supabase'],
+  accountId: string,
+  agentId: string,
+) {
+  const withSettings = await supabase
+    .from('agent_tools')
+    .select('tool_key, enabled, instructions, settings')
+    .eq('account_id', accountId)
+    .eq('agent_id', agentId)
+
+  if (!withSettings.error) return withSettings
+
+  // Rolling deploy compatibility: code may reach production before the
+  // settings migration. The screen remains usable with runtime defaults.
+  const legacy = await supabase
+    .from('agent_tools')
+    .select('tool_key, enabled, instructions')
+    .eq('account_id', accountId)
+    .eq('agent_id', agentId)
+  return legacy
 }
 
 export async function GET() {
@@ -68,12 +100,7 @@ export async function GET() {
     }
 
     const [toolRows, recentCalls, skillRows] = await Promise.all([
-      supabase
-        .from('agent_tools')
-        .select('tool_key, enabled, instructions')
-        .eq('account_id', accountId)
-        .eq('agent_id', agentId),
-      // Ordered desc, capped: the first row per tool_key is its most recent call.
+      loadAgentToolRows(supabase, accountId, agentId),
       supabase
         .from('agent_tool_calls')
         .select('tool_key, called_at')
@@ -97,6 +124,7 @@ export async function GET() {
         tools[key] = {
           enabled: Boolean(row.enabled),
           instructions: row.instructions ?? null,
+          settings: settingsForTool(key, (row as { settings?: unknown }).settings),
         }
       }
     }
@@ -144,6 +172,7 @@ export async function PATCH(request: Request) {
     const rawToolKey = typeof body?.tool_key === 'string' ? body.tool_key : ''
     const enabled = body?.enabled
     const rawInstructions = body?.instructions
+    const rawSettings = body?.settings
 
     if (!isImplementedAgentToolKey(rawToolKey) || typeof enabled !== 'boolean') {
       return NextResponse.json(
@@ -157,9 +186,19 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'instructions deve ser texto ou nulo.' }, { status: 400 })
     }
 
-    // null means only that the migration is not readable yet. An empty array is
-    // an authoritative registry with no enabled capabilities and must not fall
-    // back to the static handler list.
+    const settingsProvided = rawSettings !== undefined
+    let settings: Record<string, unknown> | undefined
+    if (settingsProvided) {
+      if (toolKey !== 'search_catalog') {
+        return NextResponse.json({ error: 'Esta ferramenta não possui configurações estruturadas.' }, { status: 400 })
+      }
+      const parsed = parseSearchCatalogToolSettingsInput(rawSettings)
+      if (!parsed) {
+        return NextResponse.json({ error: 'Configuração de pesquisa por fotografia inválida.' }, { status: 400 })
+      }
+      settings = parsed as unknown as Record<string, unknown>
+    }
+
     const registered = await loadToolDefinitions(supabase)
     if (registered !== null && !registered.some((definition) => definition.key === toolKey)) {
       return NextResponse.json({ error: 'Ferramenta não registada ou desactivada.' }, { status: 400 })
@@ -170,8 +209,6 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Configure primeiro o agente de IA.' }, { status: 409 })
     }
 
-    // `instructions` is only included in the upsert payload when the caller
-    // explicitly sent it — omitting it keeps previously saved account guidance.
     const instructionsProvided = rawInstructions !== undefined
     const instructions =
       typeof rawInstructions === 'string' ? rawInstructions.trim() || null : null
@@ -183,6 +220,7 @@ export async function PATCH(request: Request) {
       enabled,
     }
     if (instructionsProvided) upsertPayload.instructions = instructions
+    if (settingsProvided) upsertPayload.settings = settings
 
     const { error } = await supabase
       .from('agent_tools')
@@ -194,6 +232,7 @@ export async function PATCH(request: Request) {
       tool_key: toolKey,
       enabled,
       instructions: instructionsProvided ? instructions : undefined,
+      settings: settingsProvided ? settings : undefined,
     })
   } catch (error) {
     return toErrorResponse(error)

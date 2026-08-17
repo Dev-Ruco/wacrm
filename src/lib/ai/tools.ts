@@ -2,6 +2,11 @@ import type { CatalogProduct } from '@/lib/catalog/types'
 import type { RankedAgentCatalogProduct } from '@/lib/catalog/agent-search'
 import type { AgentToolDefinition, AgentToolCall } from './types'
 import {
+  loadSearchCatalogToolSettings,
+  visualReferenceMeetsMinimumConfidence,
+  type SearchCatalogToolSettings,
+} from './tool-settings'
+import {
   rankCatalogByVisualReference,
   type VisualProductMatch,
 } from './visual-reference-search'
@@ -60,7 +65,7 @@ function augmentSearchCatalogueTool(tool: AgentToolDefinition): AgentToolDefinit
     ...tool,
     description:
       `${tool.description} ` +
-      'When the customer supplied a recent reference photograph and asks you to identify, find, compare or check availability of the visible commercial item, set visual_reference=true. Describe only the target product/object in query; never identify or infer who a person in the photograph is. The server will compare the customer reference against real catalogue photographs and return a confidence level. If one photograph contains multiple products, search one target item at a time.',
+      'When the customer supplied a recent reference photograph and asks you to identify, find, compare or check availability of the visible commercial item, set visual_reference=true. Describe only the target product/object in query; never identify or infer who a person in the photograph is. The server will apply the business visual-search settings, compare against real catalogue photographs when enabled, and return a confidence level. If one photograph contains multiple products, search one target item at a time.',
     parameters: {
       ...parameters,
       properties: {
@@ -68,7 +73,7 @@ function augmentSearchCatalogueTool(tool: AgentToolDefinition): AgentToolDefinit
         visual_reference: {
           type: 'boolean',
           description:
-            'True only when a recent customer image is being used as a visual product/object reference. This triggers server-side comparison against real catalogue and variant photographs. It never infers stock or identity from pixels.',
+            'True only when a recent customer image is being used as a visual product/object reference. The server applies the configured visual-search policy and never infers stock or identity from pixels.',
         },
       },
     },
@@ -108,14 +113,17 @@ function visualMatchPayload(match: VisualProductMatch) {
 
 function instructionForVisualConfidence(
   confidence: 'high' | 'medium' | 'low' | null,
+  settings: SearchCatalogToolSettings,
 ): string {
+  const minimum = settings.visual_reference.minimum_confidence
+  const meetsMinimum = visualReferenceMeetsMinimumConfidence(confidence, minimum)
+  if (!meetsMinimum) {
+    return `The visual result did not meet this business's configured minimum confidence (${minimum}). Do not claim that the reference corresponds to any exact catalogue item. You may present the strongest similar candidates for customer confirmation, using only factual catalogue fields for price, stock, colour and size. Never identify any person in the photograph.`
+  }
   if (confidence === 'high') {
-    return 'Visual comparison found one clearly stronger candidate. You may say the reference appears to correspond to the top catalogue product, but do not claim absolute visual certainty and never identify any person in the photograph. Availability, sizes and prices may be stated only from the factual catalogue fields returned here. If useful, call send_product with the returned product_ref and recommended_image_index to show the matching catalogue/variant photograph.'
+    return 'Visual comparison found one clearly stronger candidate and it meets the configured confidence threshold. You may say the reference appears to correspond to the top catalogue product, but do not claim absolute visual certainty and never identify any person in the photograph. Availability, sizes and prices may be stated only from the factual catalogue fields returned here. If useful, call send_product with the returned product_ref and recommended_image_index to show the matching catalogue/variant photograph.'
   }
-  if (confidence === 'medium') {
-    return 'Visual comparison is plausible but not unique. Do not claim an exact match. Present the best one or two catalogue candidates and ask the customer to confirm which one they mean; use send_product with each candidate product_ref and recommended_image_index when a visual confirmation helps. Availability, sizes and prices must come only from the factual catalogue fields.'
-  }
-  return 'Visual comparison did not establish a reliable exact match. Say honestly that you could not confirm the exact item, and offer the returned similar catalogue candidates only if useful. Never invent identity, availability, price, colour or size from the reference photograph.'
+  return 'Visual comparison is plausible and meets this business minimum threshold, but it is not unique. Do not claim an exact match. Present the best one or two catalogue candidates and ask the customer to confirm which one they mean; use send_product with each candidate product_ref and recommended_image_index when visual confirmation helps. Availability, sizes and prices must come only from factual catalogue fields.'
 }
 
 /**
@@ -128,6 +136,15 @@ export function createAutoReplyTools(
 ): ReturnType<typeof createBaseAutoReplyTools> {
   const base = createBaseAutoReplyTools(args)
   const tools = base.tools.map(augmentSearchCatalogueTool)
+  let settingsPromise: Promise<SearchCatalogToolSettings> | null = null
+  const visualSettings = () => {
+    settingsPromise ??= loadSearchCatalogToolSettings(
+      args.db,
+      args.accountId,
+      args.config.agentId,
+    )
+    return settingsPromise
+  }
 
   const executeTool = async (call: AgentToolCall): Promise<string> => {
     if (call.name !== 'search_catalog') return base.executeTool(call)
@@ -137,16 +154,25 @@ export function createAutoReplyTools(
       return base.executeTool(call)
     }
 
+    const settings = await visualSettings()
+    const visualPolicy = settings.visual_reference
     const baseArguments = { ...requested }
     delete baseArguments.visual_reference
+
     const requestedLimit = typeof baseArguments.limit === 'number' && Number.isFinite(baseArguments.limit)
       ? Math.floor(baseArguments.limit)
-      : 5
-    baseArguments.limit = Math.min(10, Math.max(6, requestedLimit))
+      : visualPolicy.max_candidates
+    const responseLimit = Math.min(
+      visualPolicy.max_candidates,
+      Math.max(1, requestedLimit),
+    )
 
-    // First run the ordinary trusted catalogue retrieval. This creates the
-    // temporary product_ref values inside the base tool set, so send_product
-    // can later use the exact same server-validated products.
+    // Even a visually disabled request still runs ordinary trusted catalogue
+    // retrieval, but never sends the customer image into a visual comparison.
+    baseArguments.limit = visualPolicy.enabled
+      ? visualPolicy.max_candidates
+      : responseLimit
+
     const rawSearch = await base.executeTool({
       ...call,
       arguments: JSON.stringify(baseArguments),
@@ -154,6 +180,21 @@ export function createAutoReplyTools(
     const search = parseSearchResult(rawSearch)
     if (!search || !Array.isArray(search.products) || search.products.length === 0) {
       return rawSearch
+    }
+
+    if (!visualPolicy.enabled) {
+      return JSON.stringify({
+        ...search,
+        products: search.products.slice(0, responseLimit),
+        visual_reference: {
+          requested: true,
+          enabled: false,
+          comparison_succeeded: false,
+          confidence: null,
+        },
+        instruction:
+          'Visual reference search is disabled for this business. The customer photograph was not compared with catalogue images. Use only the ordinary catalogue results and never claim that the photograph was visually matched.',
+      })
     }
 
     const query = typeof search.query === 'string' && search.query.trim()
@@ -169,18 +210,22 @@ export function createAutoReplyTools(
       config: args.config,
       query,
       candidates: asVisualCandidates(search.products),
-      limit: Math.min(5, Math.max(1, requestedLimit)),
+      limit: responseLimit,
+      maxCandidates: visualPolicy.max_candidates,
+      useVariantImages: visualPolicy.use_variant_images,
     })
 
     if (!visual.referenceFound) {
       return JSON.stringify({
         ...search,
-        products: search.products.slice(0, Math.min(5, Math.max(1, requestedLimit))),
+        products: search.products.slice(0, responseLimit),
         visual_reference: {
           requested: true,
+          enabled: true,
           reference_found: false,
           comparison_succeeded: false,
           confidence: null,
+          minimum_confidence: visualPolicy.minimum_confidence,
         },
         instruction:
           'No recent customer photograph could be resolved for visual comparison. Do not pretend that the image was analysed. Continue only with ordinary catalogue facts or ask the customer to resend the reference image.',
@@ -190,12 +235,14 @@ export function createAutoReplyTools(
     if (!visual.comparisonSucceeded || visual.matches.length === 0) {
       return JSON.stringify({
         ...search,
-        products: search.products.slice(0, Math.min(5, Math.max(1, requestedLimit))),
+        products: search.products.slice(0, responseLimit),
         visual_reference: {
           requested: true,
+          enabled: true,
           reference_found: true,
           comparison_succeeded: false,
           confidence: null,
+          minimum_confidence: visualPolicy.minimum_confidence,
         },
         instruction:
           'The customer image was available but the visual catalogue comparison could not be completed reliably. Do not claim an exact match. You may offer the ordinary text-search candidates as possibilities or ask for another photograph.',
@@ -213,6 +260,10 @@ export function createAutoReplyTools(
         visual_match: visualMatchPayload(match.visual),
       }]
     })
+    const meetsMinimum = visualReferenceMeetsMinimumConfidence(
+      visual.confidence,
+      visualPolicy.minimum_confidence,
+    )
 
     return JSON.stringify({
       ...search,
@@ -220,11 +271,16 @@ export function createAutoReplyTools(
       found: visuallyRanked.length > 0,
       visual_reference: {
         requested: true,
+        enabled: true,
         reference_found: true,
         comparison_succeeded: true,
         confidence: visual.confidence,
+        minimum_confidence: visualPolicy.minimum_confidence,
+        meets_minimum_confidence: meetsMinimum,
+        max_candidates: visualPolicy.max_candidates,
+        variant_images_used: visualPolicy.use_variant_images,
       },
-      instruction: instructionForVisualConfidence(visual.confidence),
+      instruction: instructionForVisualConfidence(visual.confidence, settings),
     })
   }
 

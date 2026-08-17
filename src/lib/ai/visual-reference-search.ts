@@ -13,7 +13,7 @@ import { generateReply } from './generate'
 import type { AiConfig, ChatContentPart, ChatImagePart } from './types'
 
 const MAX_RECENT_CUSTOMER_MESSAGES = 4
-const MAX_CANDIDATE_PRODUCTS = 6
+const ABSOLUTE_MAX_CANDIDATE_PRODUCTS = 6
 const MAX_IMAGES_PER_PRODUCT = 3
 const MAX_COMPARISON_IMAGES = 18
 
@@ -68,7 +68,10 @@ function normalizedColor(value: string | null | undefined): string {
     .toLocaleLowerCase('pt-PT')
 }
 
-function productImages(product: CatalogProduct): Omit<VisualCandidateImage, 'candidateId' | 'product' | 'productKey'>[] {
+function productImages(
+  product: CatalogProduct,
+  useVariantImages: boolean,
+): Omit<VisualCandidateImage, 'candidateId' | 'product' | 'productKey'>[] {
   const raw = [
     {
       url: product.imageUrl ?? '',
@@ -77,13 +80,15 @@ function productImages(product: CatalogProduct): Omit<VisualCandidateImage, 'can
       color: null,
       size: null,
     },
-    ...(product.variants ?? []).map((variant) => ({
-      url: variant.imageUrl ?? '',
-      source: 'variant' as const,
-      variantId: variant.id,
-      color: variant.color,
-      size: variant.size,
-    })),
+    ...(useVariantImages
+      ? (product.variants ?? []).map((variant) => ({
+          url: variant.imageUrl ?? '',
+          source: 'variant' as const,
+          variantId: variant.id,
+          color: variant.color,
+          size: variant.size,
+        }))
+      : []),
   ]
 
   const seen = new Set<string>()
@@ -112,10 +117,15 @@ function productImages(product: CatalogProduct): Omit<VisualCandidateImage, 'can
 
 function selectCandidateImages(
   candidates: readonly RankedAgentCatalogProduct[],
+  options: { maxCandidates: number; useVariantImages: boolean },
 ): VisualCandidateImage[] {
-  const productBuckets = candidates.slice(0, MAX_CANDIDATE_PRODUCTS).map((candidate) => ({
+  const maxCandidates = Math.min(
+    ABSOLUTE_MAX_CANDIDATE_PRODUCTS,
+    Math.max(1, Math.floor(options.maxCandidates)),
+  )
+  const productBuckets = candidates.slice(0, maxCandidates).map((candidate) => ({
     candidate,
-    images: productImages(candidate.product).slice(0, MAX_IMAGES_PER_PRODUCT),
+    images: productImages(candidate.product, options.useVariantImages).slice(0, MAX_IMAGES_PER_PRODUCT),
   }))
 
   const selected: VisualCandidateImage[] = []
@@ -203,6 +213,8 @@ export async function rankCatalogByVisualReference(args: {
   query: string
   candidates: readonly RankedAgentCatalogProduct[]
   limit: number
+  maxCandidates: number
+  useVariantImages: boolean
 }): Promise<VisualReferenceSearchResult> {
   const reference = await latestCustomerReferenceImage(
     args.db,
@@ -218,7 +230,10 @@ export async function rankCatalogByVisualReference(args: {
     }
   }
 
-  const candidateImages = selectCandidateImages(args.candidates)
+  const candidateImages = selectCandidateImages(args.candidates, {
+    maxCandidates: args.maxCandidates,
+    useVariantImages: args.useVariantImages,
+  })
   if (candidateImages.length === 0) {
     return {
       referenceFound: true,
@@ -315,7 +330,11 @@ export async function rankCatalogByVisualReference(args: {
     ? visualReferenceConfidence(ranked[0].best.score, ranked[1]?.best.score ?? null)
     : null
 
-  const matches = ranked.slice(0, Math.max(1, Math.min(5, args.limit))).map((entry, index) => ({
+  const resultLimit = Math.max(
+    1,
+    Math.min(5, args.maxCandidates, args.limit),
+  )
+  const matches = ranked.slice(0, resultLimit).map((entry, index) => ({
     ...entry.original,
     visual: {
       score: entry.best.score,

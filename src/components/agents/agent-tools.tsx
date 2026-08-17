@@ -19,9 +19,21 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useCan } from '@/hooks/use-can'
 
+interface VisualReferenceSettings {
+  enabled: boolean
+  minimum_confidence: 'high' | 'medium'
+  max_candidates: number
+  use_variant_images: boolean
+}
+
+interface SearchCatalogSettings {
+  visual_reference: VisualReferenceSettings
+}
+
 interface ToolConfig {
   enabled: boolean
   instructions: string | null
+  settings: Record<string, unknown>
 }
 
 interface ToolDefinition {
@@ -46,6 +58,13 @@ interface ToolState {
 
 type ToolKey = string
 
+const DEFAULT_VISUAL_SETTINGS: VisualReferenceSettings = {
+  enabled: true,
+  minimum_confidence: 'medium',
+  max_candidates: 5,
+  use_variant_images: true,
+}
+
 const TOOL_ICONS: Record<string, typeof Boxes> = {
   search_catalog: Boxes,
   send_product: Image,
@@ -62,6 +81,26 @@ function actionClassLabel(actionClass: ToolDefinition['actionClass']) {
   if (actionClass === 'communication') return 'Comunica com o cliente'
   if (actionClass === 'handoff') return 'Transfere o atendimento'
   return 'Consulta informação'
+}
+
+function visualSettings(tool?: ToolConfig): VisualReferenceSettings {
+  const settings = tool?.settings as Partial<SearchCatalogSettings> | undefined
+  const visual = settings?.visual_reference
+  return {
+    enabled: typeof visual?.enabled === 'boolean' ? visual.enabled : DEFAULT_VISUAL_SETTINGS.enabled,
+    minimum_confidence:
+      visual?.minimum_confidence === 'high' || visual?.minimum_confidence === 'medium'
+        ? visual.minimum_confidence
+        : DEFAULT_VISUAL_SETTINGS.minimum_confidence,
+    max_candidates:
+      typeof visual?.max_candidates === 'number'
+        ? Math.min(6, Math.max(1, Math.floor(visual.max_candidates)))
+        : DEFAULT_VISUAL_SETTINGS.max_candidates,
+    use_variant_images:
+      typeof visual?.use_variant_images === 'boolean'
+        ? visual.use_variant_images
+        : DEFAULT_VISUAL_SETTINGS.use_variant_images,
+  }
 }
 
 export function AgentTools() {
@@ -114,6 +153,47 @@ export function AgentTools() {
         tools: { ...current.tools, [toolKey]: previous },
       } : current))
       toast.error(error instanceof Error ? error.message : 'Não foi possível actualizar a ferramenta.')
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  const saveVisualSettings = async (
+    next: VisualReferenceSettings,
+    successMessage = 'Pesquisa por fotografia actualizada.',
+  ) => {
+    if (!state || saving) return
+    const toolKey = 'search_catalog'
+    const previous = state.tools[toolKey]
+    if (!previous) return
+    const nextSettings: SearchCatalogSettings = { visual_reference: next }
+    setSaving(toolKey)
+    setState((current) => current ? {
+      ...current,
+      tools: {
+        ...current.tools,
+        [toolKey]: { ...previous, settings: nextSettings as unknown as Record<string, unknown> },
+      },
+    } : current)
+    try {
+      const response = await fetch('/api/ai/tools', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tool_key: toolKey,
+          enabled: previous.enabled,
+          settings: nextSettings,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.error ?? 'Não foi possível guardar a pesquisa por fotografia.')
+      toast.success(successMessage)
+    } catch (error) {
+      setState((current) => current ? {
+        ...current,
+        tools: { ...current.tools, [toolKey]: previous },
+      } : current)
+      toast.error(error instanceof Error ? error.message : 'Não foi possível guardar a pesquisa por fotografia.')
     } finally {
       setSaving(null)
     }
@@ -191,12 +271,12 @@ export function AgentTools() {
           const tool = state.tools[toolKey] ?? {
             enabled: definition.defaultEnabled,
             instructions: null,
+            settings: {},
           }
-          // send_product depends on a catalogue result in the current runtime.
-          // This is an execution dependency, not a platform-wide tool allow-list.
           const dependencyBlocked = toolKey === 'send_product' && !state.tools.search_catalog?.enabled
           const rowDisabled = !canEdit || !state.configured || dependencyBlocked
           const editing = editingKey === toolKey
+          const visual = toolKey === 'search_catalog' ? visualSettings(tool) : null
 
           return (
             <CollapsibleEditor
@@ -246,6 +326,78 @@ export function AgentTools() {
                   {definition.externalImpact ? ' · Pode ter impacto externo' : ''}
                 </p>
               </div>
+
+              {visual && (
+                <div className="rounded-xl border border-border bg-muted/25 p-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-medium">Pesquisa por fotografia</p>
+                      <p className="text-xs text-muted-foreground">
+                        Compara uma fotografia enviada pelo cliente com imagens reais do catálogo.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={visual.enabled}
+                      disabled={!canEdit || saving !== null}
+                      onCheckedChange={(enabled) => void saveVisualSettings({ ...visual, enabled })}
+                      aria-label="Pesquisa por fotografia"
+                    />
+                  </div>
+
+                  <div className={`mt-3 grid gap-3 sm:grid-cols-2 ${visual.enabled ? '' : 'opacity-55'}`}>
+                    <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+                      <span>Confiança mínima</span>
+                      <select
+                        value={visual.minimum_confidence}
+                        disabled={!canEdit || saving !== null || !visual.enabled}
+                        onChange={(event) => void saveVisualSettings({
+                          ...visual,
+                          minimum_confidence: event.target.value as 'high' | 'medium',
+                        }, 'Confiança mínima actualizada.')}
+                        className="h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+                      >
+                        <option value="high">Alta</option>
+                        <option value="medium">Média</option>
+                      </select>
+                    </label>
+
+                    <label className="space-y-1.5 text-xs font-medium text-muted-foreground">
+                      <span>Máximo de candidatos</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={6}
+                        value={visual.max_candidates}
+                        disabled={!canEdit || saving !== null || !visual.enabled}
+                        onChange={(event) => {
+                          const value = Math.min(6, Math.max(1, Number(event.target.value) || 1))
+                          void saveVisualSettings({ ...visual, max_candidates: value }, 'Máximo de candidatos actualizado.')
+                        }}
+                        className="h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    </label>
+                  </div>
+
+                  <div className={`mt-3 flex items-center justify-between gap-4 border-t border-border pt-3 ${visual.enabled ? '' : 'opacity-55'}`}>
+                    <div>
+                      <p className="text-sm font-medium">Fotografias das variantes</p>
+                      <p className="text-xs text-muted-foreground">
+                        Inclui fotografias por cor/variante na comparação visual.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={visual.use_variant_images}
+                      disabled={!canEdit || saving !== null || !visual.enabled}
+                      onCheckedChange={(use_variant_images) => void saveVisualSettings(
+                        { ...visual, use_variant_images },
+                        'Uso das fotografias das variantes actualizado.',
+                      )}
+                      aria-label="Fotografias das variantes"
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">
                   Instruções extra para esta ferramenta (opcional)
