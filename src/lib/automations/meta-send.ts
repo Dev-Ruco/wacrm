@@ -3,6 +3,7 @@ import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive'
 import {
   engineSendInteractiveButtons,
   engineSendInteractiveList,
+  engineSendText as engineSendChannelText,
 } from '@/lib/flows/meta-send'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
@@ -13,25 +14,8 @@ import {
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
 
-// ------------------------------------------------------------
-// Automation-side Meta sender.
-//
-// Mirrors the logic in src/app/api/whatsapp/send/route.ts but uses
-// the service-role client (engine has no cookies) and accepts the
-// user / conversation / contact identifiers the engine already has
-// on hand. Kept here (rather than refactoring the user-facing send
-// route) to avoid risk to the working manual-send path — they can
-// converge in a later refactor.
-// ------------------------------------------------------------
-
 interface SendTextArgs {
-  /** Account-level tenancy key. Drives contact + whatsapp_config
-   *  lookups so an automation authored by user A still sends through
-   *  the WhatsApp number user B saved on the same account. */
   accountId: string
-  /** Original author of the automation/flow — used for INSERT audit
-   *  columns (messages.sender_id-ish) and for resolving the agent's
-   *  identity in logs. Not consulted for tenancy. */
   userId: string
   conversationId: string
   contactId: string
@@ -48,8 +32,13 @@ interface SendTemplateArgs {
   params?: string[]
 }
 
+/**
+ * Automation text uses the same conversation-channel router as Flows and AI.
+ * Templates remain a WhatsApp capability until another connector implements
+ * an explicit template equivalent.
+ */
 export async function engineSendText(args: SendTextArgs): Promise<{ whatsapp_message_id: string }> {
-  return sendViaMeta({ ...args, kind: 'text' })
+  return engineSendChannelText(args)
 }
 
 export async function engineSendTemplate(
@@ -66,17 +55,6 @@ interface SendInteractiveArgs {
   payload: InteractiveMessagePayload
 }
 
-/**
- * Send an interactive (reply-buttons or list) message from the
- * automation engine.
- *
- * Delegates to the Flows interactive senders
- * (`engineSendInteractiveButtons` / `engineSendInteractiveList`), which
- * already own the account-scoped lookup, phone-variant retry, and the
- * `messages` insert with `interactive_payload` + `sender_type='bot'`.
- * Both engines want identical behaviour here, so there's one
- * implementation rather than a second hand-rolled copy that could drift.
- */
 export async function engineSendInteractive(
   args: SendInteractiveArgs,
 ): Promise<{ whatsapp_message_id: string }> {
@@ -108,14 +86,6 @@ type SendInput =
 async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
 
-  // Scope the contact + config lookups by account_id, not user_id.
-  // The engine uses the service-role client (bypassing RLS); without
-  // this filter, an authenticated user could fire their own
-  // automations against another tenant's contact UUID and send via
-  // their own WhatsApp config to that contact's phone. The 017
-  // migration moved both tables to account-scoped tenancy, so the
-  // check is the same defense-in-depth as before, just keyed on the
-  // new tenancy column.
   const { data: contact, error: contactErr } = await db
     .from('contacts')
     .select('id, phone')
@@ -163,9 +133,6 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
     return r.messageId
   }
 
-  // Same phone-variant retry as /api/whatsapp/send — Meta sandbox and
-  // numbers registered with/without a trunk 0 both require this to
-  // reliably land a message.
   const variants = phoneVariants(sanitized)
   let workingPhone = sanitized
   let waMessageId = ''
@@ -188,9 +155,6 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
     await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
   }
 
-  // Persist the sent message so it appears in the inbox with a real
-  // Meta message id. sender_type='bot' distinguishes automation sends
-  // from manual agent sends.
   const content_type = input.kind === 'template' ? 'template' : 'text'
   const content_text = input.kind === 'text' ? input.text : null
   const template_name = input.kind === 'template' ? input.templateName : null
@@ -205,8 +169,6 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
     status: 'sent',
   })
   if (msgErr) {
-    // Meta already has the message; record the DB error but don't pretend
-    // the send failed. The engine wraps this in a log line.
     throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
   }
 
