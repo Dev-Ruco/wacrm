@@ -44,14 +44,14 @@ export async function PUT(request: Request) {
       ? body.name.trim().slice(0, 100)
       : 'Website'
 
-    const suppliedOrigins = Array.isArray(body?.allowed_origins)
+    const suppliedOrigins: unknown[] = Array.isArray(body?.allowed_origins)
       ? body.allowed_origins
       : []
     const allowedOrigins = Array.from(
       new Set(
         suppliedOrigins
-          .map(normalizeOrigin)
-          .filter((origin): origin is string => Boolean(origin)),
+          .map((origin: unknown) => normalizeOrigin(origin))
+          .filter((origin: string | null): origin is string => Boolean(origin)),
       ),
     ).slice(0, 20)
 
