@@ -57,6 +57,7 @@ function safeContext(input: unknown): Record<string, unknown> {
     'product_slug',
     'product_price_mt',
     'product_image',
+    'order_number',
   ]
   const out: Record<string, unknown> = {}
   for (const key of allowed) {
