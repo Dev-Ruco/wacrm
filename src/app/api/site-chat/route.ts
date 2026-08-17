@@ -37,10 +37,13 @@ function hashToken(token: string) {
 }
 
 function makeVisitorPhone(visitorId: string) {
-  const digest = createHash('sha256').update(visitorId).digest('hex').slice(0, 15)
-  const numeric = (BigInt(`0x${digest}`) % 1_000_000_000_000n)
-    .toString()
-    .padStart(12, '0')
+  const digest = createHash('sha256').update(visitorId).digest('hex')
+  const numeric = digest
+    .split('')
+    .map((character) => String(Number.parseInt(character, 16) % 10))
+    .join('')
+    .slice(0, 12)
+    .padEnd(12, '0')
   return `900${numeric}`
 }
 
