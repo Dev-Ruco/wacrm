@@ -34,6 +34,13 @@ function contactSubtitle(contact: Contact, channel?: string | null) {
     if (channel === 'facebook') return 'Cliente Facebook';
     if (channel === 'tiktok') return 'Cliente TikTok';
     if (channel === 'whatsapp') return 'Cliente WhatsApp';
+
+    // Website sessions created before the pre-chat lead form used a private
+    // synthetic phone in the 900 + 12 digits namespace. Do not present those
+    // historical contacts as WhatsApp customers merely because an old generic
+    // company label is still stored on the contact.
+    const digits = contact.phone.replace(/\D/g, '');
+    if (/^900\d{12}$/.test(digits)) return 'Cliente do Site';
   }
   return company || 'Cliente';
 }
