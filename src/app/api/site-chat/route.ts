@@ -614,6 +614,14 @@ export async function POST(request: Request) {
     if (message) {
       const now = new Date().toISOString()
       const externalMessageId = `web_${randomUUID()}`
+      const contextProductImage = safeHttpsUrl(context.product_image)
+      const isLegacyProductInterest =
+        !productInquiry &&
+        context.source === 'product_detail' &&
+        Boolean(contextProductImage) &&
+        /\btenho\s+interesse\b/i.test(message)
+      const messageContentType = isLegacyProductInterest ? 'image' : 'text'
+      const messageMediaUrl = isLegacyProductInterest ? contextProductImage : null
       const [{ data: current, error: currentError }, { count: priorCustomerMessageCount }] =
         await Promise.all([
           admin
@@ -636,8 +644,9 @@ export async function POST(request: Request) {
       const { error: messageError } = await admin.from('messages').insert({
         conversation_id: conversationId,
         sender_type: 'customer',
-        content_type: 'text',
+        content_type: messageContentType,
         content_text: message,
+        media_url: messageMediaUrl,
         message_id: externalMessageId,
         status: 'delivered',
         created_at: now,
@@ -665,7 +674,7 @@ export async function POST(request: Request) {
           inboundMessageId: externalMessageId,
           channel: 'website',
           text: message,
-          contentType: 'text',
+          contentType: messageContentType,
           isFirstInboundMessage: (priorCustomerMessageCount ?? 0) === 0,
         })
       })

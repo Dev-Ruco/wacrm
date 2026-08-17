@@ -30,6 +30,7 @@ import {
   conversationCatalogStatePrompt,
   loadConversationCatalogState,
 } from './catalog-state'
+import { loadSiteProductContext, siteProductContextPrompt } from './site-product-context'
 import { engineSendText, engineSendTypingIndicator } from '@/lib/flows/meta-send'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { triggerMatches } from '@/lib/automations/engine'
@@ -320,8 +321,13 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
       },
     })
 
+    const siteProductContext = await loadSiteProductContext(db, accountId, conversationId).catch((error) => {
+      console.error('[ai auto-reply] site product context lookup failed:', error)
+      return null
+    })
+
     const [prefetch, crmContext, memories, lessons, catalogueState] = await Promise.all([
-      effectivePermissions.search_catalog
+      effectivePermissions.search_catalog && !siteProductContext
         ? prefetchCatalogueForConversation({
             db,
             accountId,
@@ -353,13 +359,16 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
         console.error('[ai auto-reply] lessons lookup failed:', error)
         return []
       }),
-      effectivePermissions.search_catalog
+      effectivePermissions.search_catalog && !siteProductContext
         ? loadConversationCatalogState({ db, accountId, conversationId }).catch((error) => {
             console.error('[ai auto-reply] catalogue state lookup failed:', error)
             return null
           })
         : Promise.resolve(null),
     ])
+    const siteProductGrounding = siteProductContext
+      ? siteProductContextPrompt(siteProductContext)
+      : null
     const catalogueGrounding = prefetch
       ? cataloguePrefetchPrompt(prefetch)
       : null
@@ -391,6 +400,7 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
       crmContext,
       memoryContext,
       lessonsContext,
+      siteProductGrounding,
       catalogueStateContext,
       catalogueGrounding,
     ]
@@ -424,7 +434,8 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
 
     const hasPendingActions = agentTools.hasPendingActions()
     const structuredHandoff = agentTools.getHandoffRequest()
-    const catalogueVerified = agentTools.wasCatalogueVerified()
+    const catalogueVerified =
+      agentTools.wasCatalogueVerified() || Boolean(siteProductContext?.canonical)
     const learningRetrievalKind = !catalogueVerified
       ? compositionAttempted
         ? ('composition' as const)
@@ -445,7 +456,10 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
     const guardrail = evaluateAgentOutput({
       text,
       trustedText: config.systemPrompt ?? '',
-      trustedPriceAmounts: agentTools.getTrustedPriceAmounts(),
+      trustedPriceAmounts: [
+        ...agentTools.getTrustedPriceAmounts(),
+        ...(siteProductContext?.canonical ? [siteProductContext.canonical.price] : []),
+      ],
       salesIntent: route.intent === 'sales',
       catalogueVerified,
     })
