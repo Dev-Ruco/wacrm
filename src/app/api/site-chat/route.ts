@@ -590,13 +590,6 @@ export async function POST(request: Request) {
             last_message_at: now,
             unread_count: Number(current.unread_count ?? 0) + 1,
             status: 'open',
-            source_metadata: {
-              ...context,
-              product_id: productInquiry.productId ?? context.product_id,
-              product_name: productInquiry.name,
-              product_price_mt: productInquiry.priceMt ?? context.product_price_mt,
-              product_image: productInquiry.imageUrl ?? context.product_image,
-            },
             updated_at: now,
           })
           .eq('id', conversationId)
