@@ -25,7 +25,7 @@ with catalog_base as (
 unique_catalog_names as (
   select
     normalized_name,
-    min(id) as catalog_product_id,
+    min(id::text)::uuid as catalog_product_id,
     count(*) as match_count
   from catalog_base
   where normalized_name <> ''
