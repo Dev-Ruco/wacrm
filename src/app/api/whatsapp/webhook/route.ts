@@ -912,11 +912,14 @@ async function findOrCreateConversation(
   configOwnerUserId: string,
   contactId: string,
 ) {
+  // A CRM contact is shared across channels, but every transport owns its own
+  // conversation. Never reuse a Website thread for an inbound WhatsApp turn.
   const { data: existingRows, error: findError } = await supabaseAdmin()
     .from('conversations')
     .select('*')
     .eq('account_id', accountId)
     .eq('contact_id', contactId)
+    .eq('channel', 'whatsapp')
     .order('created_at', { ascending: true })
     .limit(1)
 
@@ -935,6 +938,7 @@ async function findOrCreateConversation(
       account_id: accountId,
       user_id: configOwnerUserId,
       contact_id: contactId,
+      channel: 'whatsapp',
     })
     .select()
     .single()
@@ -946,6 +950,7 @@ async function findOrCreateConversation(
         .select('*')
         .eq('account_id', accountId)
         .eq('contact_id', contactId)
+        .eq('channel', 'whatsapp')
         .order('created_at', { ascending: true })
         .limit(1)
       if (raced && raced.length > 0) {
