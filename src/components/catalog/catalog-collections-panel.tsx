@@ -2,22 +2,12 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  AlertCircle,
-  ArrowRight,
-  ChevronDown,
-  FolderOpen,
-  Loader2,
-  Pencil,
-  Plus,
-  Trash2,
-} from 'lucide-react'
+import { AlertCircle, ArrowRight, FolderOpen, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { cn } from '@/lib/utils'
 
 export interface CatalogCollectionSummary {
   id: string
@@ -35,7 +25,6 @@ export function CatalogCollectionsPanel() {
   const [collections, setCollections] = useState<CatalogCollectionSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [savingId, setSavingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -73,7 +62,6 @@ export function CatalogCollectionsPanel() {
   )
 
   function startEditing(collection: CatalogCollectionSummary) {
-    setExpandedId(collection.id)
     setEditingId(collection.id)
     setEditName(collection.name)
     setEditDescription(collection.description ?? '')
@@ -91,17 +79,12 @@ export function CatalogCollectionsPanel() {
       const response = await fetch(`/api/catalog/collections/${collection.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          description: editDescription.trim() || null,
-        }),
+        body: JSON.stringify({ name, description: editDescription.trim() || null }),
       })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(body.error ?? 'Não foi possível actualizar o catálogo.')
       setCollections((current) =>
-        current.map((item) =>
-          item.id === collection.id ? { ...item, ...body.collection } : item,
-        ),
+        current.map((item) => (item.id === collection.id ? { ...item, ...body.collection } : item)),
       )
       setEditingId(null)
       toast.success('Catálogo actualizado.')
@@ -113,21 +96,17 @@ export function CatalogCollectionsPanel() {
   }
 
   async function deleteCollection(collection: CatalogCollectionSummary) {
-    const itemNote =
-      collection.product_count > 0
-        ? ` Os ${collection.product_count} item(ns) serão movidos para outro catálogo, nunca apagados.`
-        : ''
+    const itemNote = collection.product_count > 0
+      ? ` Os ${collection.product_count} item(ns) serão movidos para outro catálogo, nunca apagados.`
+      : ''
     if (!confirm(`Apagar o catálogo “${collection.name}”?${itemNote}`)) return
 
     setDeletingId(collection.id)
     try {
-      const response = await fetch(`/api/catalog/collections/${collection.id}`, {
-        method: 'DELETE',
-      })
+      const response = await fetch(`/api/catalog/collections/${collection.id}`, { method: 'DELETE' })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(body.error ?? 'Não foi possível apagar o catálogo.')
       setCollections((current) => current.filter((item) => item.id !== collection.id))
-      if (expandedId === collection.id) setExpandedId(null)
       if (editingId === collection.id) setEditingId(null)
       if (body.moved_items > 0 && body.fallback?.name) {
         toast.success(`Catálogo apagado. ${body.moved_items} item(ns) movidos para “${body.fallback.name}”.`)
@@ -148,7 +127,7 @@ export function CatalogCollectionsPanel() {
         <div>
           <h2 className="text-lg font-semibold text-foreground">Os seus catálogos</h2>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Organize diferentes linhas de produtos ou negócios em catálogos separados. Os itens só aparecem depois de abrir o catálogo correspondente.
+            Cada catálogo organiza uma linha de ofertas. Clique num catálogo para abrir e rever os respectivos itens.
           </p>
         </div>
         <Button render={<Link href="/catalog/new" />}>
@@ -196,7 +175,7 @@ export function CatalogCollectionsPanel() {
             </div>
             <h3 className="mt-3 text-sm font-semibold">Ainda não há catálogos</h3>
             <p className="mt-1 max-w-md text-sm text-muted-foreground">
-              Crie o primeiro catálogo e depois adicione as fotografias ou itens que o agente deve conhecer.
+              Crie o primeiro catálogo e depois adicione os itens que o agente deve conhecer.
             </p>
             <Button className="mt-4" render={<Link href="/catalog/new" />}>
               <Plus />
@@ -206,108 +185,75 @@ export function CatalogCollectionsPanel() {
         ) : (
           <div className="divide-y divide-border">
             {collections.map((collection) => {
-              const expanded = expandedId === collection.id
               const editing = editingId === collection.id
               return (
                 <div key={collection.id}>
-                  <button
-                    type="button"
-                    onClick={() => setExpandedId(expanded ? null : collection.id)}
-                    className="flex w-full items-center gap-3 px-4 py-4 text-left transition-colors hover:bg-muted/45"
-                    aria-expanded={expanded}
-                  >
-                    <ChevronDown
-                      className={cn(
-                        'size-4 shrink-0 text-muted-foreground transition-transform',
-                        expanded && 'rotate-180',
-                      )}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate text-sm font-semibold text-foreground">
-                          {collection.name}
-                        </span>
-                        {collection.is_default ? (
-                          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-                            Principal
-                          </span>
-                        ) : null}
-                        {!collection.is_active ? (
-                          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                            Inactivo
-                          </span>
-                        ) : null}
+                  <div className="flex items-center gap-2 px-3 py-2 transition-colors hover:bg-muted/35">
+                    <Link href={`/catalog/${collection.id}`} className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-1 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                        <FolderOpen className="size-4" />
                       </div>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {collection.description || 'Sem descrição'}
-                      </p>
-                    </div>
-                    <div className="hidden shrink-0 text-right sm:block">
-                      <p className="text-sm font-medium tabular-nums">{collection.product_count}</p>
-                      <p className="text-[11px] text-muted-foreground">itens</p>
-                    </div>
-                  </button>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="truncate text-sm font-semibold text-foreground">{collection.name}</span>
+                          {collection.is_default ? (
+                            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">Principal</span>
+                          ) : null}
+                          {!collection.is_active ? (
+                            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">Inactivo</span>
+                          ) : null}
+                        </div>
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">{collection.description || 'Sem descrição'}</p>
+                      </div>
+                      <div className="hidden shrink-0 text-right sm:block">
+                        <p className="text-sm font-medium tabular-nums">{collection.product_count}</p>
+                        <p className="text-[11px] text-muted-foreground">itens</p>
+                      </div>
+                      <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+                    </Link>
 
-                  {expanded ? (
-                    <div className="border-t border-border/70 bg-muted/20 px-4 py-4 sm:pl-11">
-                      {editing ? (
-                        <div className="max-w-2xl space-y-3">
-                          <div className="space-y-1.5">
-                            <Label>Nome do catálogo</Label>
-                            <Input value={editName} onChange={(event) => setEditName(event.target.value)} maxLength={160} />
-                          </div>
-                          <div className="space-y-1.5">
-                            <Label>Descrição</Label>
-                            <Textarea
-                              rows={3}
-                              value={editDescription}
-                              onChange={(event) => setEditDescription(event.target.value)}
-                              placeholder="Ex.: Colecção feminina, viaturas para aluguer, electrodomésticos…"
-                              maxLength={1200}
-                            />
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            <Button size="sm" onClick={() => void saveCollection(collection)} disabled={savingId === collection.id}>
-                              {savingId === collection.id ? <Loader2 className="animate-spin" /> : null}
-                              Guardar
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={() => setEditingId(null)} disabled={savingId === collection.id}>
-                              Cancelar
-                            </Button>
-                          </div>
+                    <Button size="icon-sm" variant="ghost" aria-label="Editar catálogo" onClick={() => startEditing(collection)}>
+                      <Pencil />
+                    </Button>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      aria-label="Apagar catálogo"
+                      onClick={() => void deleteCollection(collection)}
+                      disabled={deletingId === collection.id}
+                    >
+                      {deletingId === collection.id ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                    </Button>
+                  </div>
+
+                  {editing ? (
+                    <div className="border-t border-border/70 bg-muted/20 px-4 py-4 sm:pl-16">
+                      <div className="max-w-2xl space-y-3">
+                        <div className="space-y-1.5">
+                          <Label>Nome do catálogo</Label>
+                          <Input value={editName} onChange={(event) => setEditName(event.target.value)} maxLength={160} />
                         </div>
-                      ) : (
-                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                          <div>
-                            <p className="text-sm text-foreground">
-                              {collection.product_count} item(ns) · {collection.active_product_count} activo(s)
-                            </p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              Abra o catálogo para ver, importar, classificar e editar os respectivos itens.
-                            </p>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            <Button size="sm" variant="outline" onClick={() => startEditing(collection)}>
-                              <Pencil />
-                              Editar
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-destructive hover:text-destructive"
-                              onClick={() => void deleteCollection(collection)}
-                              disabled={deletingId === collection.id}
-                            >
-                              {deletingId === collection.id ? <Loader2 className="animate-spin" /> : <Trash2 />}
-                              Apagar
-                            </Button>
-                            <Button size="sm" render={<Link href={`/catalog/${collection.id}`} />}>
-                              Abrir catálogo
-                              <ArrowRight />
-                            </Button>
-                          </div>
+                        <div className="space-y-1.5">
+                          <Label>Descrição</Label>
+                          <Textarea
+                            rows={3}
+                            value={editDescription}
+                            onChange={(event) => setEditDescription(event.target.value)}
+                            placeholder="Ex.: Colecção feminina, viaturas para aluguer, electrodomésticos…"
+                            maxLength={1200}
+                          />
                         </div>
-                      )}
+                        <div className="flex flex-wrap gap-2">
+                          <Button size="sm" onClick={() => void saveCollection(collection)} disabled={savingId === collection.id}>
+                            {savingId === collection.id ? <Loader2 className="animate-spin" /> : null}
+                            Guardar
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditingId(null)} disabled={savingId === collection.id}>
+                            Cancelar
+                          </Button>
+                        </div>
+                      </div>
                     </div>
                   ) : null}
                 </div>

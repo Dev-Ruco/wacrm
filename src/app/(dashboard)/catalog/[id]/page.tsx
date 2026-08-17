@@ -62,7 +62,7 @@ export default function CatalogDetailPage() {
               <ArrowLeft />
               Todos os catálogos
             </Button>
-            <div className="flex items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2.5">
               <FolderOpen className="size-5 shrink-0 text-primary" />
               <h1 className="truncate text-[22px] font-semibold tracking-tight sm:text-2xl">
                 {collection?.name ?? 'Catálogo'}
@@ -72,9 +72,14 @@ export default function CatalogDetailPage() {
                   Principal
                 </span>
               ) : null}
+              {collection ? (
+                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  {products.length} itens
+                </span>
+              ) : null}
             </div>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              {collection?.description || 'Itens e conhecimento comercial deste catálogo.'}
+              {collection?.description || 'Revê e corrige o conhecimento comercial que o agente usa neste catálogo.'}
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
@@ -90,7 +95,9 @@ export default function CatalogDetailPage() {
               A carregar catálogo…
             </div>
           ) : collection ? (
-            <ProductsTab products={products} setProducts={setProducts} catalogId={catalogId} />
+            <div className="[&>div]:flex [&>div]:flex-col [&>div>*:nth-child(1)]:order-3 [&>div>*:nth-child(2)]:order-4 [&>div>*:nth-child(3)]:order-1 [&>div>*:nth-child(4)]:order-2 [&>div>*:nth-child(5)]:order-5">
+              <ProductsTab products={products} setProducts={setProducts} catalogId={catalogId} />
+            </div>
           ) : (
             <div className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
               Não foi possível abrir este catálogo.
