@@ -1,0 +1,78 @@
+name: Site lead UI patch
+
+on:
+  push:
+    branches:
+      - feat/site-lead-capture-final
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[site-lead-ui]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/site-lead-capture-final
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Patch website-only inbox presentation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          thread_path = Path('src/components/inbox/message-thread.tsx')
+          text = thread_path.read_text()
+
+          replacements = [
+              (
+                  '  const conversationId = conversation?.id;\n',
+                  '  const conversationId = conversation?.id;\n  const isWebsiteConversation =\n    (conversation as (Conversation & { channel?: string }) | null)?.channel === "website";\n',
+              ),
+              (
+                  '  const sessionInfo = useMemo(() => {\n    if (!visibleMessages.length) return { expired: false, remaining: "" };',
+                  '  const sessionInfo = useMemo(() => {\n    if (isWebsiteConversation) return { expired: false, remaining: "" };\n    if (!visibleMessages.length) return { expired: false, remaining: "" };',
+              ),
+              (
+                  '  }, [visibleMessages, tTimer]);',
+                  '  }, [isWebsiteConversation, visibleMessages, tTimer]);',
+              ),
+              (
+                  '''          <Badge\n            variant="outline"\n            className={cn(\n              "ml-1 hidden gap-1 border-border text-[10px] sm:inline-flex sm:ml-2",\n              sessionInfo.expired ? "text-red-400" : "text-primary"\n            )}\n          >\n            <Clock className="h-3 w-3" />\n            {sessionInfo.remaining}\n          </Badge>''',
+                  '''          {!isWebsiteConversation && (\n            <Badge\n              variant="outline"\n              className={cn(\n                "ml-1 hidden gap-1 border-border text-[10px] sm:inline-flex sm:ml-2",\n                sessionInfo.expired ? "text-red-400" : "text-primary"\n              )}\n            >\n              <Clock className="h-3 w-3" />\n              {sessionInfo.remaining}\n            </Badge>\n          )}''',
+              ),
+              (
+                  '        sessionExpired={sessionInfo.expired}\n',
+                  '        sessionExpired={isWebsiteConversation ? false : sessionInfo.expired}\n',
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'Expected message-thread snippet not found: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+          thread_path.write_text(text)
+
+          sidebar_path = Path('src/components/inbox/contact-sidebar.tsx')
+          sidebar = sidebar_path.read_text()
+          old = "{contact.company || 'Cliente WhatsApp'}"
+          new = "{contact.company || 'Cliente'}"
+          if old not in sidebar:
+              raise SystemExit('Expected contact sidebar label not found')
+          sidebar_path.write_text(sidebar.replace(old, new, 1))
+          PY
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/inbox/message-thread.tsx src/components/inbox/contact-sidebar.tsx
+          git commit -m "fix(inbox): adaptar canal Site [site-lead-ui]"
+          git push origin HEAD:feat/site-lead-capture-final
