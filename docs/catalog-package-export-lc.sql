@@ -75,7 +75,27 @@ package_products as (
                   ),
                   'price', coalesce(v.price, p.price_mt, 0),
                   'stock_quantity', greatest(coalesce(v.stock, 0), 0),
-                  'image_url', nullif(v.image_url, ''),
+                  'image_url', coalesce(
+                    nullif(v.image_url, ''),
+                    (
+                      select nullif(gallery_item ->> 'url', '')
+                      from jsonb_array_elements(coalesce(p.gallery::jsonb, '[]'::jsonb)) as gallery(gallery_item)
+                      where jsonb_typeof(gallery_item) = 'object'
+                        and nullif(gallery_item ->> 'url', '') is not null
+                        and lower(coalesce(gallery_item ->> 'color', '')) = lower(
+                          coalesce(
+                            nullif(v.custom_fields ->> 'color', ''),
+                            case
+                              when lower(coalesce(v.option_name, '')) in ('color', 'colour', 'cor') then nullif(v.option_value, '')
+                              else null
+                            end,
+                            ''
+                          )
+                        )
+                      limit 1
+                    ),
+                    nullif(p.image_url, '')
+                  ),
                   'is_active', coalesce(v.is_active, true)
                 )
               )
