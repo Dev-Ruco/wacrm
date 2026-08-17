@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { isWebsiteOriginAllowed } from '@/lib/site-chat/origin'
 
 const CHAT_MEDIA_BUCKET = 'chat-media'
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -85,8 +86,7 @@ async function resolveChannel(
     if (!data) return null
 
     const channel = data as WebsiteChannelRow
-    const allowed = channel.allowed_origins ?? []
-    if (allowed.length > 0 && (!origin || !allowed.includes(origin))) return null
+    if (!isWebsiteOriginAllowed(origin, channel.allowed_origins)) return null
     return channel
   }
 
