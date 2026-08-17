@@ -91,7 +91,7 @@ export async function dispatchInboundThroughAccountBrain(
       context: {
         message_text: text,
         conversation_id: args.conversationId,
-        channel: args.channel,
+        vars: { channel: args.channel },
       },
     }).catch((error) => {
       console.error('[channels inbound] automation dispatch failed:', error)
