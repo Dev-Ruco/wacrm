@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { ExternalLink, ImageIcon, Loader2, Pencil, Trash2 } from 'lucide-react'
+import { ExternalLink, ImageIcon, Loader2, Pencil, Sparkles, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -50,6 +50,7 @@ export interface ProductEditPatch {
 }
 
 export type CatalogViewMode = 'list' | 'grid' | 'compact'
+type CatalogEditorialField = 'name' | 'category' | 'color' | 'description'
 
 interface ColourOption {
   key: string
@@ -99,6 +100,8 @@ export function ProductCard({
   const [imageUrl, setImageUrl] = useState(product.image_url ?? '')
   const [productUrl, setProductUrl] = useState(product.product_url ?? '')
   const [saving, setSaving] = useState(false)
+  const [refiningField, setRefiningField] = useState<CatalogEditorialField | null>(null)
+  const [refineError, setRefineError] = useState<string | null>(null)
   const [selectedColourKey, setSelectedColourKey] = useState<string | null>(null)
 
   const colourVariants = useMemo<ColourOption[]>(() => {
@@ -142,7 +145,59 @@ export function ProductCard({
     setStockQuantity(product.stock_quantity == null ? '' : String(product.stock_quantity))
     setImageUrl(product.image_url ?? '')
     setProductUrl(product.product_url ?? '')
+    setRefineError(null)
+    setRefiningField(null)
     setEditing(true)
+  }
+
+  async function refineWithAi(field: CatalogEditorialField) {
+    setRefiningField(field)
+    setRefineError(null)
+    try {
+      const response = await fetch('/api/catalog/refine-field', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          field,
+          name: name.trim(),
+          category: category?.trim() || null,
+          color: color?.trim() || null,
+          description: description.trim(),
+          image_url: imageUrl.trim() || null,
+        }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(body.error ?? 'Não foi possível melhorar este campo com IA.')
+      const value = typeof body.value === 'string' ? body.value.trim() : ''
+      if (!value) throw new Error('A IA não devolveu uma sugestão utilizável.')
+
+      if (field === 'name') setName(value)
+      if (field === 'category') setCategory(value)
+      if (field === 'color') setColor(value)
+      if (field === 'description') setDescription(value)
+    } catch (error) {
+      setRefineError(error instanceof Error ? error.message : 'Erro ao melhorar o campo com IA.')
+    } finally {
+      setRefiningField(null)
+    }
+  }
+
+  function AiFieldButton({ field }: { field: CatalogEditorialField }) {
+    const loading = refiningField === field
+    return (
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="h-7 gap-1 px-2 text-[11px] text-primary"
+        onClick={() => void refineWithAi(field)}
+        disabled={refiningField !== null || saving}
+        title="Melhorar somente este campo com IA"
+      >
+        {loading ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+        Melhorar com IA
+      </Button>
+    )
   }
 
   async function save() {
@@ -404,17 +459,30 @@ export function ProductCard({
         <div className="border-t border-border bg-muted/20 p-4">
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="space-y-1.5 lg:col-span-2">
-              <Label className="text-xs">Nome comercial</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs">Nome comercial</Label>
+                <AiFieldButton field="name" />
+              </div>
               <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={200} />
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs">Categoria</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs">Categoria</Label>
+                <AiFieldButton field="category" />
+              </div>
               <AttributeSelect kind="category" options={categoryOptions} value={category} onChange={setCategory} onCreate={onCreateCategory} />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Cor</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs">Cor</Label>
+                <AiFieldButton field="color" />
+              </div>
               <AttributeSelect kind="color" options={colorOptions} value={color} onChange={setColor} onCreate={onCreateColor} />
+            </div>
+
+            <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground lg:col-span-2">
+              <span className="font-medium text-foreground">IA por campo:</span> melhora apenas o campo escolhido usando os valores actualmente escritos neste formulário. Preço, moeda e stock nunca são enviados à IA.
             </div>
 
             <div className="grid grid-cols-[1fr_100px] gap-2">
@@ -433,8 +501,14 @@ export function ProductCard({
             </div>
 
             <div className="space-y-1.5 lg:col-span-2">
-              <Label className="text-xs">Descrição comercial</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs">Descrição comercial</Label>
+                <AiFieldButton field="description" />
+              </div>
               <Textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={4} maxLength={4000} />
+              <p className="text-[11px] text-muted-foreground">
+                Se alterar o nome acima e depois melhorar a descrição, a IA usa imediatamente esse novo nome como referência, mesmo antes de guardar.
+              </p>
             </div>
             <div className="space-y-1.5 lg:col-span-2">
               <Label className="text-xs">URL da fotografia</Label>
@@ -446,12 +520,18 @@ export function ProductCard({
             </div>
           </div>
 
+          {refineError ? (
+            <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              {refineError}
+            </p>
+          ) : null}
+
           <div className="mt-4 flex gap-2">
-            <Button size="sm" onClick={() => void save()} disabled={saving || !name.trim() || price.trim() === ''}>
+            <Button size="sm" onClick={() => void save()} disabled={saving || refiningField !== null || !name.trim() || price.trim() === ''}>
               {saving ? <Loader2 className="animate-spin" /> : null}
               Guardar alterações
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={saving}>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={saving || refiningField !== null}>
               Cancelar
             </Button>
           </div>
