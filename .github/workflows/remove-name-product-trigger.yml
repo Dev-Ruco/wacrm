@@ -1,0 +1,26 @@
+name: Remove name from legacy product trigger
+
+on:
+  push:
+    branches:
+      - fix/site-chat-legacy-product-image
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/site-chat-legacy-product-image
+      - name: Apply patch
+        run: python .github/scripts/remove-name-product-trigger.py
+      - name: Commit route change
+        run: |
+          git config user.name "Felisberto Ruco"
+          git config user.email "felisberto.ruco10@gmail.com"
+          git add src/app/api/site-chat/route.ts
+          git diff --cached --quiet || git commit -m "fix: identificar consulta de produto sem depender do nome"
+          git push origin HEAD:fix/site-chat-legacy-product-image
