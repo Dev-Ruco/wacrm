@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'crypto'
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { isWebsiteOriginAllowed } from '@/lib/site-chat/origin'
+import { dispatchInboundThroughAccountBrain } from '@/lib/channels/inbound-brain'
 
 const CHAT_MEDIA_BUCKET = 'chat-media'
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -166,6 +167,7 @@ export async function POST(request: Request) {
     if (!session) return json({ error: 'Invalid chat session' }, 401, origin)
 
     const now = new Date().toISOString()
+    const externalMessageId = `web_${randomUUID()}`
     const extension = extensionForMimeType(mimeType)
     const path = `account-${channel.account_id}/website/${channel.id}/${randomUUID()}.${extension}`
     const bytes = Buffer.from(await fileValue.arrayBuffer())
@@ -184,17 +186,25 @@ export async function POST(request: Request) {
       data: { publicUrl },
     } = admin.storage.from(CHAT_MEDIA_BUCKET).getPublicUrl(path)
 
-    const { data: current, error: currentError } = await admin
-      .from('conversations')
-      .select('unread_count')
-      .eq('id', session.conversation_id)
-      .eq('account_id', channel.account_id)
-      .eq('channel', 'website')
-      .single()
+    const [{ data: current, error: currentError }, { count: priorCustomerMessageCount }] =
+      await Promise.all([
+        admin
+          .from('conversations')
+          .select('unread_count, contact_id, user_id')
+          .eq('id', session.conversation_id)
+          .eq('account_id', channel.account_id)
+          .eq('channel', 'website')
+          .single(),
+        admin
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', session.conversation_id)
+          .eq('sender_type', 'customer'),
+      ])
 
-    if (currentError) {
+    if (currentError || !current?.contact_id || !current?.user_id) {
       await admin.storage.from(CHAT_MEDIA_BUCKET).remove([path]).catch(() => {})
-      throw currentError
+      throw currentError ?? new Error('Website conversation routing context is unavailable')
     }
 
     const { data: message, error: messageError } = await admin
@@ -205,7 +215,7 @@ export async function POST(request: Request) {
         content_type: kind,
         content_text: caption || null,
         media_url: publicUrl,
-        message_id: `web_${randomUUID()}`,
+        message_id: externalMessageId,
         status: 'delivered',
         created_at: now,
       })
@@ -223,7 +233,7 @@ export async function POST(request: Request) {
       .update({
         last_message_text: preview,
         last_message_at: now,
-        unread_count: Number(current?.unread_count ?? 0) + 1,
+        unread_count: Number(current.unread_count ?? 0) + 1,
         status: 'open',
         updated_at: now,
       })
@@ -237,6 +247,20 @@ export async function POST(request: Request) {
       .from('website_chat_sessions')
       .update({ last_seen_at: now })
       .eq('id', session.id)
+
+    after(async () => {
+      await dispatchInboundThroughAccountBrain({
+        accountId: channel.account_id,
+        conversationId: session.conversation_id,
+        contactId: current.contact_id as string,
+        configOwnerUserId: current.user_id as string,
+        inboundMessageId: externalMessageId,
+        channel: 'website',
+        text: caption,
+        contentType: kind,
+        isFirstInboundMessage: (priorCustomerMessageCount ?? 0) === 0,
+      })
+    })
 
     return json({ ok: true, message }, 200, origin)
   } catch (error) {
