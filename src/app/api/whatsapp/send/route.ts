@@ -122,21 +122,31 @@ export async function POST(request: Request) {
       )
     }
 
-    // Website threads use the same Inbox composer, but the reply is persisted
+    // Website threads use the same Inbox composer, but replies are persisted
     // directly to Supabase and consumed by the website widget. Meta is never
     // called and WhatsApp's 24-hour customer-service window does not apply.
     if (conversationChannel === 'website') {
-      if (message_type !== 'text') {
+      const supportedWebsiteTypes = new Set(['text', 'image', 'audio'])
+      if (!supportedWebsiteTypes.has(message_type)) {
         return NextResponse.json(
-          { error: 'Website chat currently supports text replies only' },
+          { error: 'Website chat supports text, image and audio replies' },
           { status: 400 }
         )
       }
 
       const text = typeof content_text === 'string' ? content_text.trim() : ''
-      if (!text) {
+      const mediaUrl = typeof media_url === 'string' ? media_url.trim() : ''
+
+      if (message_type === 'text' && !text) {
         return NextResponse.json(
-          { error: 'content_text is required for website chat' },
+          { error: 'content_text is required for website chat text replies' },
+          { status: 400 }
+        )
+      }
+
+      if ((message_type === 'image' || message_type === 'audio') && !mediaUrl) {
+        return NextResponse.json(
+          { error: 'media_url is required for website chat media replies' },
           { status: 400 }
         )
       }
@@ -148,8 +158,9 @@ export async function POST(request: Request) {
           conversation_id: conversationId,
           sender_type: 'agent',
           sender_id: userId,
-          content_type: 'text',
-          content_text: text,
+          content_type: message_type,
+          content_text: text || null,
+          media_url: message_type === 'text' ? null : mediaUrl,
           status: 'sent',
           reply_to_message_id: reply_to_message_id ?? null,
           created_at: now,
@@ -161,10 +172,18 @@ export async function POST(request: Request) {
         throw messageError ?? new Error('Failed to persist website chat reply')
       }
 
+      const preview =
+        text ||
+        (message_type === 'image'
+          ? '📷 Fotografia'
+          : message_type === 'audio'
+            ? '🎤 Áudio'
+            : '')
+
       const { error: updateError } = await supabase
         .from('conversations')
         .update({
-          last_message_text: text,
+          last_message_text: preview,
           last_message_at: now,
           updated_at: now,
         })
