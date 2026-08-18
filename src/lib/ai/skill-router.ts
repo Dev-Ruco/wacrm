@@ -138,9 +138,10 @@ export function parseSkillSelection(
  * instructions are injected later for the selected subset.
  *
  * Failure is availability-safe: account-level tool permissions remain the
- * source of authority, so a routing failure returns no selected skill instead
- * of accidentally disabling the whole agent. Skills can restrict permissions;
- * they can never grant a tool the account did not enable.
+ * sole hard capability boundary. A routing failure therefore returns no
+ * selected skill without disabling tools the account explicitly enabled.
+ * Skills guide behaviour and tool affinity; they never grant or revoke an
+ * account-level capability.
  */
 export async function selectSkillsForTurn(args: {
   skills: AgentSkill[]
