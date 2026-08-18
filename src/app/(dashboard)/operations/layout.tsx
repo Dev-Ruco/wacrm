@@ -6,9 +6,9 @@ export default function OperationsLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-5 lg:flex-row lg:gap-0">
+    <div className="min-w-0 space-y-5">
       <CatalogWorkspaceNav active="operations" />
-      <main className="min-w-0 flex-1 lg:pl-6">{children}</main>
+      <main className="min-w-0">{children}</main>
     </div>
   );
 }
