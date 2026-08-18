@@ -7,12 +7,15 @@ const PRODUCT_INTENT_RE =
   /\b(pre[cç]o|pre[cç]os|custa|custam|quanto|tem|tens|t[eê]m|dispon[ií]vel|disponibilidade|stock|estoque|cat[aá]logo|produto|produtos|modelo|modelos|tamanho|tamanhos|cor|cores|foto|fotos|imagem|imagens|quero|procuro|procurando|mostra|mostrar|manda|enviar|op[cç][aã]o|op[cç][oõ]es)\b/i
 
 const SHORT_CONTINUATION_RE =
-  /^(sim|sim por ?favor|por ?favor|quero|pode|podes|mostra|manda|envia|ent[aã]o|e agora|agora|ok|okay|certo|isso|esse|essa|este|esta)[.!? ]*$/i
+  /^(sim|sim por ?favor|por ?favor|quero|pode|podes|mostra|manda|envia|ent[aã]o|e agora|agora|ok|okay|certo|isso|esse|essa|este|esta|top|outro|outra|mais barato|mais barata|igual|esse mesmo|essa mesma)[.!? ]*$/i
 
 const NUMBER_SELECTION_RE = /^\s*(\d{1,2})\s*[.!?]?\s*$/
+const BARE_SIZE_RE = /^\s*(?:xxs|xs|s|m|l|xl|xxl|xxxl|\d{2,3})\s*[.!?]?\s*$/i
+const ORDINAL_SELECTION_RE =
+  /^\s*(?:(?:o|a)\s+)?(primeir[oa]|segund[oa]|terceir[oa]|quart[oa]|quint[oa]|first|second|third|fourth|fifth)\s*[.!?]?\s*$/i
 
 const CATALOGUE_CONTEXT_RE =
-  /\b(cat[aá]logo|produto|produtos|pre[cç]o|pre[cç]os|stock|estoque|dispon[ií]vel|disponibilidade|modelo|modelos|op[cç][aã]o|op[cç][oõ]es|foto|imagem)\b/i
+  /\b(cat[aá]logo|produto|produtos|pre[cç]o|pre[cç]os|stock|estoque|dispon[ií]vel|disponibilidade|modelo|modelos|op[cç][aã]o|op[cç][oõ]es|foto|imagem|tamanho|cor)\b/i
 
 const PHOTO_CHOICE_RE =
   /\b(foto|fotografia|imagem|envio|enviar|envie|manda|mandar|mostra|mostrar)\b/i
@@ -42,6 +45,26 @@ function numberedProducts(content: string): Map<number, string> {
   return products
 }
 
+function ordinalNumber(value: string): number | null {
+  const normalized = value.toLocaleLowerCase('pt-PT')
+  if (/^(primeiro|primeira|first)$/.test(normalized)) return 1
+  if (/^(segundo|segunda|second)$/.test(normalized)) return 2
+  if (/^(terceiro|terceira|third)$/.test(normalized)) return 3
+  if (/^(quarto|quarta|fourth)$/.test(normalized)) return 4
+  if (/^(quinto|quinta|fifth)$/.test(normalized)) return 5
+  return null
+}
+
+function requestedSelectionNumber(text: string): number | null {
+  const numeric = text.match(NUMBER_SELECTION_RE)
+  if (numeric) {
+    const value = Number(numeric[1])
+    return Number.isInteger(value) && value > 0 ? value : null
+  }
+  const ordinal = text.match(ORDINAL_SELECTION_RE)
+  return ordinal ? ordinalNumber(ordinal[1]) : null
+}
+
 function resolveNumberedSelection(messages: ChatMessage[]): NumberedSelection | null {
   const latestUserIndex = [...messages]
     .map((message, index) => ({ message, index }))
@@ -51,10 +74,8 @@ function resolveNumberedSelection(messages: ChatMessage[]): NumberedSelection | 
 
   const latestUser = messages[latestUserIndex]
   const latestUserText = chatContentText(latestUser.content)
-  const selectionMatch = latestUserText.match(NUMBER_SELECTION_RE)
-  if (!selectionMatch) return null
-  const number = Number(selectionMatch[1])
-  if (!Number.isInteger(number) || number < 1) return null
+  const number = requestedSelectionNumber(latestUserText)
+  if (!number) return null
 
   for (let index = latestUserIndex - 1; index >= 0; index -= 1) {
     const message = messages[index]
@@ -92,12 +113,23 @@ function isLikelyProductTurn(messages: ChatMessage[]): boolean {
   const latestUserText = chatContentText(latestUser.content)
   if (PRODUCT_INTENT_RE.test(latestUserText)) return true
 
-  if (NUMBER_SELECTION_RE.test(latestUserText.trim())) {
-    return Boolean(resolveNumberedSelection(messages))
+  if (requestedSelectionNumber(latestUserText)) {
+    if (resolveNumberedSelection(messages)) return true
+    if (BARE_SIZE_RE.test(latestUserText.trim())) return hasRecentCatalogueContext(messages)
   }
 
+  if (BARE_SIZE_RE.test(latestUserText.trim())) return hasRecentCatalogueContext(messages)
   if (!SHORT_CONTINUATION_RE.test(latestUserText.trim())) return false
   return hasRecentCatalogueContext(messages)
+}
+
+function isContextOnlyContinuation(value: string): boolean {
+  return (
+    SHORT_CONTINUATION_RE.test(value) ||
+    ORDINAL_SELECTION_RE.test(value) ||
+    NUMBER_SELECTION_RE.test(value) ||
+    BARE_SIZE_RE.test(value)
+  )
 }
 
 function candidateQueries(messages: ChatMessage[]): string[] {
@@ -112,11 +144,7 @@ function candidateQueries(messages: ChatMessage[]): string[] {
 
   const queries: string[] = []
   for (const value of userMessages) {
-    if (
-      (SHORT_CONTINUATION_RE.test(value) || NUMBER_SELECTION_RE.test(value)) &&
-      queries.length === 0
-    )
-      continue
+    if (isContextOnlyContinuation(value) && queries.length === 0) continue
     if (!queries.includes(value)) queries.push(value)
     if (queries.length >= 3) break
   }
@@ -177,7 +205,7 @@ export function cataloguePrefetchPrompt(result: CataloguePrefetchResult): string
 
   const selectionInstruction = result.selection
     ? [
-        `The customer's latest numeric reply selected option ${result.selection.number} from a legacy numbered product list.`,
+        `The customer's latest short reply selected option ${result.selection.number} from a legacy numbered product list.`,
         `The selected product name is exactly: ${JSON.stringify(result.selection.productName)}.`,
         'Keep that product as the current referent instead of restarting discovery.',
         ...(result.selection.photoChoice
@@ -195,7 +223,8 @@ export function cataloguePrefetchPrompt(result: CataloguePrefetchResult): string
       'CATALOGUE CONTEXT (advisory):',
       ...selectionInstruction,
       `A lightweight prefetch for ${JSON.stringify(result.query ?? '')} found no candidate.`,
-      'This is not proof that the catalogue is empty. Use search_catalog if current product data is needed, with concise structured category/colour/size constraints when the customer supplied them.',
+      'This is not proof that the catalogue is empty. Use search_catalog if current product data is needed. Preserve the concrete product noun from the active conversation and pass category/colour/size as separate constraints when known.',
+      'If the exact search still fails, broaden progressively rather than replacing the requested product with a generic category immediately.',
       'Never reconstruct an old numbered product list from history.',
     ].join('\n')
   }
@@ -205,7 +234,7 @@ export function cataloguePrefetchPrompt(result: CataloguePrefetchResult): string
     ...selectionInstruction,
     `A lightweight prefetch found possible catalogue data for ${JSON.stringify(result.query ?? '')}.`,
     'Decide yourself whether a catalogue lookup is useful for this turn. search_catalog is retrieval-only and never sends a product automatically.',
-    'When searching, pass explicit category/colour/size constraints separately instead of embedding every customer word in one broad query.',
+    'When searching, preserve the active concrete product and pass explicit category/colour/size constraints separately instead of embedding every customer word in one broad query.',
     'After search_catalog, call send_product only for the products you deliberately choose to show. For "more/other" requests use browse mode; for a specific previously shown product use lookup mode.',
   ].join('\n')
 }
