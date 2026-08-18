@@ -1,1 +1,0 @@
-install testing-library dom
