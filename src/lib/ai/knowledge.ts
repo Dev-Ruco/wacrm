@@ -10,6 +10,40 @@ interface MatchRow {
   content: string
 }
 
+const LOCATION_QUERY_PATTERN = /\b(?:onde\s+fica|onde\s+ficam|localiza(?:c|ç)[aã]o|localizacao|morada|endere(?:c|ç)o|address|location|como\s+chegar|chegar\s+(?:a|à)\s+loja)\b/i
+const LOCATION_CONTENT_PATTERN = /\b(?:morada|endere(?:c|ç)o|address|localiza(?:c|ç)[aã]o|localizacao|loja|avenida|av\.?|rua|estrada|bairro|maputo|matola)\b/i
+
+export function isLocationKnowledgeQuery(query: string): boolean {
+  return LOCATION_QUERY_PATTERN.test(query.trim())
+}
+
+export function expandKnowledgeQuery(query: string): string {
+  const trimmed = query.trim()
+  if (!isLocationKnowledgeQuery(trimmed)) return trimmed
+  return `${trimmed} morada endereço endereco localização localizacao loja como chegar`
+}
+
+async function retrieveLocationFallback(
+  db: WacrmSupabaseClient,
+  accountId: string,
+  limit: number,
+): Promise<MatchRow[]> {
+  try {
+    const { data, error } = await db
+      .from('ai_knowledge_chunks')
+      .select('id, content')
+      .eq('account_id', accountId)
+      .limit(Math.max(20, Math.min(100, limit * 20)))
+    if (error || !Array.isArray(data)) return []
+    return (data as MatchRow[])
+      .filter((row) => typeof row.content === 'string' && LOCATION_CONTENT_PATTERN.test(row.content))
+      .slice(0, limit)
+  } catch (err) {
+    console.error('[ai knowledge] location fallback failed:', err)
+    return []
+  }
+}
+
 export async function ingestDocument(
   db: WacrmSupabaseClient,
   accountId: string,
@@ -106,6 +140,29 @@ export async function retrieveKnowledge(
     } catch (err) {
       console.error('[ai knowledge] lexical retrieval failed:', err)
     }
+  }
+
+  // Normal retrieval remains semantic/model-driven. This is only a lexical
+  // safety net for a very short location query when normal retrieval found
+  // nothing; it is not used to decide the customer's intent.
+  if (isLocationKnowledgeQuery(query) && picked.size === 0) {
+    try {
+      const { data, error } = await db.rpc('match_ai_knowledge_fts', {
+        p_account_id: accountId,
+        p_query: expandKnowledgeQuery(query),
+        p_match_count: k,
+      })
+      if (!error && Array.isArray(data)) {
+        for (const row of data as MatchRow[]) picked.set(row.id, row.content)
+      }
+    } catch (err) {
+      console.error('[ai knowledge] expanded location FTS failed:', err)
+    }
+  }
+
+  if (isLocationKnowledgeQuery(query) && picked.size === 0) {
+    const fallback = await retrieveLocationFallback(db, accountId, k)
+    for (const row of fallback) picked.set(row.id, row.content)
   }
 
   return [...externalKnowledge, ...Array.from(picked.values())].slice(0, k)
