@@ -173,7 +173,7 @@ describe('selectSkillsForTurn', () => {
   })
 })
 
-describe('skill permission narrowing', () => {
+describe('skill tool affinity', () => {
   it('keeps account permissions untouched when no skill was selected', () => {
     const permissions = Object.fromEntries(
       AGENT_TOOL_KEYS.map((key) => [key, true]),
@@ -182,19 +182,18 @@ describe('skill permission narrowing', () => {
     expect(applySkillNarrowing(permissions, [])).toEqual(permissions)
   })
 
-  it('selected skills can restrict but never grant account tools', () => {
+  it('does not let selected skills remove or grant account-level tool permissions', () => {
     const permissions = Object.fromEntries(
       AGENT_TOOL_KEYS.map((key) => [key, false]),
     ) as Record<AgentToolKey, boolean>
     permissions.search_catalog = true
     permissions.send_product = true
     permissions.handoff_human = true
-    // Even though STYLE asks for get_style_opinion, the account did not
-    // enable it globally, so the skill must not grant it.
+
     const result = applySkillNarrowing(permissions, [STYLE])
 
     expect(result.search_catalog).toBe(true)
-    expect(result.send_product).toBe(false)
+    expect(result.send_product).toBe(true)
     expect(result.get_style_opinion).toBe(false)
     expect(result.handoff_human).toBe(true)
   })
