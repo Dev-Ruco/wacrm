@@ -24,6 +24,10 @@ const TOOL_LABELS: Record<AgentToolKey, string> = {
   schedule_visit: 'Agendar visita',
   get_style_opinion: 'Opinião de estilo',
   handoff_human: 'Encaminhar para humano',
+  check_availability: 'Verificar disponibilidade',
+  create_order: 'Criar encomenda',
+  get_order_status: 'Consultar encomenda',
+  update_contact: 'Actualizar contacto',
 }
 
 interface Skill {
