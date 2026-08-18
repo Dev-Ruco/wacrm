@@ -40,6 +40,8 @@ export default function NotificationsPage() {
   }, [accountId]);
 
   useEffect(() => {
+    // Async external-store hydration; setters run after the database request.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
 
