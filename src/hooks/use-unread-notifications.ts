@@ -6,11 +6,12 @@ import type { Notification } from "@/types";
 
 /**
  * Count of unread notifications for the current user. Used by the
- * sidebar to surface a badge on the Notifications nav entry.
+ * sidebar and mobile navigation to surface a notifications badge.
  *
- * RLS on `notifications` already scopes every read to `auth.uid() =
- * user_id`, so no explicit filter is needed here — same pattern as
- * `useTotalUnread` for conversations.
+ * Both navigation variants stay mounted and are switched with CSS, so
+ * more than one hook instance may be active. Give every subscription a
+ * unique Realtime topic to avoid collisions with an already-subscribed
+ * channel on the shared browser Supabase client.
  */
 export function useUnreadNotifications(): number {
   const [count, setCount] = useState(0);
@@ -30,8 +31,9 @@ export function useUnreadNotifications(): number {
       setCount(unreadCount ?? 0);
     })();
 
+    const channelId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const channel = supabase
-      .channel("notifications-unread-count")
+      .channel(`notifications-unread-count:${channelId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "wacrm", table: "notifications" },
