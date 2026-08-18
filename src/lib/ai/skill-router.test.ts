@@ -127,6 +127,39 @@ describe('selectSkillsForTurn', () => {
     )
   })
 
+  it('keeps enough recent context for an elliptical sales follow-up to be resolved', async () => {
+    h.generateReply.mockResolvedValue({
+      text: '{"skill_ids":["skill-sales"]}',
+      handoff: false,
+      usage: null,
+    })
+
+    const messages = [
+      { role: 'user' as const, content: 'Quero um macacão preto.' },
+      { role: 'assistant' as const, content: 'Tenho estas opções.' },
+      { role: 'user' as const, content: 'O segundo.' },
+      { role: 'assistant' as const, content: 'Esse modelo existe em M e L.' },
+      { role: 'user' as const, content: 'M' },
+    ]
+
+    const result = await selectSkillsForTurn({
+      skills: [STYLE, SALES],
+      config: config(),
+      messages,
+    })
+
+    expect(result.skills.map((skill) => skill.id)).toEqual(['skill-sales'])
+    expect(h.generateReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        systemPrompt: expect.stringContaining('inherit the active customer goal'),
+        messages: expect.arrayContaining([
+          expect.objectContaining({ role: 'user', content: 'Quero um macacão preto.' }),
+          expect.objectContaining({ role: 'user', content: 'M' }),
+        ]),
+      }),
+    )
+  })
+
   it('fails availability-safe when the routing model errors', async () => {
     h.generateReply.mockRejectedValue(new Error('provider unavailable'))
 
@@ -175,5 +208,13 @@ describe('buildSkillRouterPrompt', () => {
     expect(prompt).toContain('Quando o cliente pede uma sugestão')
     expect(prompt).not.toContain('Use catálogo real e dê uma opinião de estilo.')
     expect(prompt).toContain('{"skill_ids"')
+  })
+
+  it('explicitly preserves specialised intent across short follow-ups', () => {
+    const prompt = buildSkillRouterPrompt([SALES])
+
+    expect(prompt).toContain('inherit the active customer goal')
+    expect(prompt).toContain('in-progress specialised task should not become skill-less')
+    expect(prompt).toContain('quero esse')
   })
 })
