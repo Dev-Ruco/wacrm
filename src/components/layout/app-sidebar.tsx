@@ -91,6 +91,9 @@ export function AppSidebar() {
 
   useEffect(() => {
     try {
+      // Client-only preference hydration; delaying this read avoids an SSR
+      // mismatch when a device previously collapsed its workspace rail.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCollapsed(localStorage.getItem(COLLAPSE_KEY) === 'true');
     } catch {
       // Device persistence is optional.
