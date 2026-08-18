@@ -33,6 +33,13 @@ interface SearchToolResult {
   [key: string]: unknown
 }
 
+const OPERATIONAL_RUNTIME_TOOLS = new Set([
+  'check_availability',
+  'create_order',
+  'get_order_status',
+  'update_contact',
+])
+
 function parseToolArguments(raw: string): Record<string, unknown> | null {
   try {
     const parsed = JSON.parse(raw) as unknown
@@ -148,6 +155,18 @@ export function createAutoReplyTools(
   }
 
   const executeTool = async (call: AgentToolCall): Promise<string> => {
+    if (OPERATIONAL_RUNTIME_TOOLS.has(call.name)) {
+      const parsed = parseToolArguments(call.arguments)
+      if (!parsed) throw new Error(`Invalid JSON arguments for operational tool: ${call.name}`)
+      // The operational layer consumes the same parsed-object form used by
+      // the mature base handlers internally. Keep the public provider-facing
+      // AgentToolCall contract (JSON string) unchanged at this facade.
+      return base.executeTool({
+        ...call,
+        arguments: parsed as unknown as string,
+      })
+    }
+
     if (call.name !== 'search_catalog') return base.executeTool(call)
 
     const requested = parseToolArguments(call.arguments)
