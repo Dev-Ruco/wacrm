@@ -34,7 +34,7 @@ interface ToolDefinitionRow {
  * tenant can create arbitrary executable tools by inserting a database row.
  */
 export function isImplementedAgentToolKey(value: string): value is AgentToolKey {
-  return AGENT_TOOL_KEYS.includes(value as AgentToolKey)
+  return (AGENT_TOOL_KEYS as readonly string[]).includes(value)
 }
 
 /**
@@ -60,7 +60,7 @@ export async function loadToolDefinitions(
   return ((data ?? []) as ToolDefinitionRow[])
     .filter((row) => isImplementedAgentToolKey(row.key))
     .map((row) => ({
-      key: row.key as AgentToolKey,
+      key: row.key,
       label: row.label,
       description: row.description,
       actionClass: row.action_class,

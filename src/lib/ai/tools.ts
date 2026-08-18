@@ -10,7 +10,7 @@ import {
   rankCatalogByVisualReference,
   type VisualProductMatch,
 } from './visual-reference-search'
-import { createAutoReplyTools as createBaseAutoReplyTools } from './tools/index'
+import { createAutoReplyTools as createBaseAutoReplyTools } from './operational-tools'
 
 export type {
   HandoffToolRequest,
@@ -32,6 +32,13 @@ interface SearchToolResult {
   instruction?: string
   [key: string]: unknown
 }
+
+const OPERATIONAL_RUNTIME_TOOLS = new Set([
+  'check_availability',
+  'create_order',
+  'get_order_status',
+  'update_contact',
+])
 
 function parseToolArguments(raw: string): Record<string, unknown> | null {
   try {
@@ -128,8 +135,9 @@ function instructionForVisualConfidence(
 
 /**
  * Public AI tool facade. The underlying catalogue tool remains the code-owned
- * permission/audit boundary; visual reference search is a read-only mode of
- * search_catalog, so existing tenant permissions and Skills continue to apply.
+ * permission/audit boundary; the operational layer adds generic business
+ * actions, while visual reference search remains a read-only mode of
+ * search_catalog. Existing tenant permissions and Skills continue to apply.
  */
 export function createAutoReplyTools(
   args: Parameters<typeof createBaseAutoReplyTools>[0],
@@ -147,6 +155,18 @@ export function createAutoReplyTools(
   }
 
   const executeTool = async (call: AgentToolCall): Promise<string> => {
+    if (OPERATIONAL_RUNTIME_TOOLS.has(call.name)) {
+      const parsed = parseToolArguments(call.arguments)
+      if (!parsed) throw new Error(`Invalid JSON arguments for operational tool: ${call.name}`)
+      // The operational layer consumes the same parsed-object form used by
+      // the mature base handlers internally. Keep the public provider-facing
+      // AgentToolCall contract (JSON string) unchanged at this facade.
+      return base.executeTool({
+        ...call,
+        arguments: parsed as unknown as string,
+      })
+    }
+
     if (call.name !== 'search_catalog') return base.executeTool(call)
 
     const requested = parseToolArguments(call.arguments)
