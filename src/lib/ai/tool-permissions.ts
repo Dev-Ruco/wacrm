@@ -11,18 +11,22 @@ export const AGENT_TOOL_KEYS = [
   'schedule_visit',
   'get_style_opinion',
   'handoff_human',
+  'check_availability',
+  'create_order',
+  'get_order_status',
+  'update_contact',
 ] as const
 
 export type AgentToolKey = (typeof AGENT_TOOL_KEYS)[number]
 
 /**
- * Tools with no CRM side effect — they only read or queue a WhatsApp send
+ * Tools with no CRM side effect — they only read or queue a channel send
  * that a caller may choose never to dispatch. Used to scope tool access
  * down for surfaces that generate text a human reviews before it becomes
  * real (draft, playground): a preview turn must never silently create a
- * deal, tag a contact, or book a visit before anyone decided to send
- * anything. `handoff_human` is excluded too — there is no live dispatch
- * for it to affect on these surfaces.
+ * deal, tag a contact, book a visit, create an order or update a contact
+ * before anyone decided to send anything. `handoff_human` is excluded too —
+ * there is no live dispatch for it to affect on these surfaces.
  */
 export const PREVIEW_SAFE_TOOL_KEYS: readonly AgentToolKey[] = [
   'search_catalog',
@@ -30,6 +34,8 @@ export const PREVIEW_SAFE_TOOL_KEYS: readonly AgentToolKey[] = [
   'compose_solution',
   'search_knowledge',
   'get_style_opinion',
+  'check_availability',
+  'get_order_status',
 ]
 
 /** Zeroes out every permission not in PREVIEW_SAFE_TOOL_KEYS — used by the
@@ -63,6 +69,11 @@ export const DEFAULT_AGENT_TOOLS: Record<AgentToolKey, boolean> = {
   // This replaces the existing handoff sentinel, so preserve the current
   // automatic safety behaviour for every configured agent.
   handoff_human: true,
+  // Operational reads are safe defaults; writes remain admin opt-in.
+  check_availability: true,
+  create_order: false,
+  get_order_status: true,
+  update_contact: false,
 }
 
 export interface AgentToolPermissions {
