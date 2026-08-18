@@ -6,7 +6,11 @@ vi.mock('@/lib/whatsapp/encryption', () => ({
   decrypt: (v: string) => `plain:${v}`,
 }))
 
-import { loadAiConfig } from './config'
+import {
+  effectiveAutoReplyCap,
+  loadAiConfig,
+  MIN_AUTO_REPLY_CAP_PER_CONVERSATION,
+} from './config'
 
 function dbReturning(row: Record<string, unknown> | null): WacrmSupabaseClient {
   const chain = {
@@ -31,6 +35,17 @@ const ROW = {
   embeddings_api_key: null,
 }
 
+describe('effectiveAutoReplyCap', () => {
+  it('raises legacy low caps so normal multi-turn journeys are not interrupted', () => {
+    expect(effectiveAutoReplyCap(10)).toBe(MIN_AUTO_REPLY_CAP_PER_CONVERSATION)
+    expect(effectiveAutoReplyCap(3)).toBe(MIN_AUTO_REPLY_CAP_PER_CONVERSATION)
+  })
+
+  it('preserves an explicitly configured higher safety cap', () => {
+    expect(effectiveAutoReplyCap(80)).toBe(80)
+  })
+})
+
 describe('loadAiConfig requireActive', () => {
   it('returns null for an inactive config by default', async () => {
     expect(await loadAiConfig(dbReturning(ROW), 'acct')).toBeNull()
@@ -45,6 +60,9 @@ describe('loadAiConfig requireActive', () => {
     expect(config!.apiKey).toBe('plain:enc-key')
     expect(config!.bufferWindowSeconds).toBe(12)
     expect(config!.maxReplyChunks).toBe(3)
+    expect(config!.autoReplyMaxPerConversation).toBe(
+      MIN_AUTO_REPLY_CAP_PER_CONVERSATION,
+    )
   })
 
   it('returns null when there is no row', async () => {
