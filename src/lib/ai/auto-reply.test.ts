@@ -179,6 +179,16 @@ vi.mock('./admin-client', () => ({
       if (table === 'notifications') {
         return { insert: () => Promise.resolve({ error: null }) }
       }
+      if (table === 'messages') {
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          gt: () => chain,
+          limit: () => chain,
+          maybeSingle: () => Promise.resolve({ data: null, error: null }),
+        }
+        return chain
+      }
       return {
         select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: h.state.conv, error: null }) }) }),
         update: (payload: Record<string, unknown>) => {
