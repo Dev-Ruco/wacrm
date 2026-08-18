@@ -31,6 +31,11 @@ export interface GenerateArgs {
 const CATALOGUE_STRATEGY_MARKER =
   'Catalogue strategy — account-level rules for this tenant:'
 
+interface OperationalClaimRequirement {
+  claim: string
+  tools: string[]
+}
+
 function passiveInternalContext(value: string): string {
   const trimmed = value.trim()
   if (!trimmed.startsWith('Working conversation state')) return trimmed
@@ -68,6 +73,85 @@ function hasCatalogueTools(tools: AgentToolDefinition[] | undefined): boolean {
   )
 }
 
+function toolExecutionSucceeded(raw: string): boolean {
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return true
+    const record = parsed as Record<string, unknown>
+    if (record.ok === false) return false
+    if (record.created === false || record.scheduled === false) return false
+    return true
+  } catch {
+    // Existing tools sometimes return human-readable success text. A thrown
+    // executor error remains the authoritative failure signal in that case.
+    return true
+  }
+}
+
+function hasPositiveReservationClaim(text: string): boolean {
+  if (/\bn[aã]o\s+(?:ficou|foi|est[aá])\s+reservad[oa]\b/i.test(text)) return false
+  return /\b(?:j[aá]\s+)?(?:ficou|foi|est[aá])\s+reservad[oa]\b|\breserva\s+(?:foi|ficou|est[aá])\s+(?:feita|confirmada|registada|registrada)\b/i.test(
+    text,
+  )
+}
+
+function hasPositiveScheduleClaim(text: string): boolean {
+  if (/\bn[aã]o\s+(?:ficou|foi|est[aá])\s+agendad[oa]\b/i.test(text)) return false
+  return /\b(?:j[aá]\s+)?(?:ficou|foi|est[aá])\s+agendad[oa]\b|\bagendamento\s+(?:foi|ficou|est[aá])\s+(?:feito|confirmado|registado|registrado)\b/i.test(
+    text,
+  )
+}
+
+function operationalClaimRequirements(text: string): OperationalClaimRequirement[] {
+  const requirements: OperationalClaimRequirement[] = []
+  if (hasPositiveReservationClaim(text)) {
+    requirements.push({
+      claim: 'reservation completed',
+      tools: ['create_order', 'schedule_visit'],
+    })
+  }
+  if (hasPositiveScheduleClaim(text)) {
+    requirements.push({ claim: 'visit scheduled', tools: ['schedule_visit'] })
+  }
+  if (
+    !/\bpedido\s+n[aã]o\s+(?:foi|ficou|est[aá])\s+(?:criado|registado|registrado|confirmado)\b/i.test(text) &&
+    /\bpedido\s+(?:foi|ficou|est[aá])\s+(?:criado|registado|registrado|confirmado)\b/i.test(text)
+  ) {
+    requirements.push({ claim: 'order created', tools: ['create_order'] })
+  }
+  if (
+    /\b(?:dados|contacto|contato|perfil)\s+(?:foram|foi|ficou|est[aá])\s+(?:actualizad[oa]s?|atualizad[oa]s?|guardad[oa]s?|salv[oa]s?)\b/i.test(text)
+  ) {
+    requirements.push({ claim: 'contact updated', tools: ['update_contact'] })
+  }
+  if (
+    /\b(?:neg[oó]cio|oportunidade|deal)\s+(?:foi|ficou|est[aá])\s+(?:criad[oa]|registad[oa]|registrad[oa])\b/i.test(text)
+  ) {
+    requirements.push({ claim: 'deal created', tools: ['create_deal'] })
+  }
+  return requirements
+}
+
+export function unsupportedOperationalClaims(
+  text: string,
+  successfulTools: ReadonlySet<string>,
+): OperationalClaimRequirement[] {
+  return operationalClaimRequirements(text).filter(
+    (requirement) =>
+      !requirement.tools.some((toolName) => successfulTools.has(toolName)),
+  )
+}
+
+function mergeUsage(first: AiUsage | null, second: AiUsage | null): AiUsage | null {
+  if (!first) return second
+  if (!second) return first
+  return {
+    promptTokens: first.promptTokens + second.promptTokens,
+    completionTokens: first.completionTokens + second.completionTokens,
+    totalTokens: first.totalTokens + second.totalTokens,
+  }
+}
+
 export async function generateReply(args: GenerateArgs): Promise<GenerateResult> {
   const {
     config,
@@ -93,10 +177,18 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
   const effectiveSystemPrompt = [systemPrompt, catalogueStrategy, internalContext]
     .filter((part): part is string => Boolean(part))
     .join('\n\n')
-  const effectiveExecutor = executorWithTenantPolicy({
+  const tenantExecutor = executorWithTenantPolicy({
     executeTool,
     strategy: config.commercialStrategy,
   })
+  const successfulTools = new Set<string>()
+  const effectiveExecutor: AgentToolExecutor | undefined = tenantExecutor
+    ? async (call) => {
+        const result = await tenantExecutor(call)
+        if (toolExecutionSucceeded(result)) successfulTools.add(call.name)
+        return result
+      }
+    : undefined
 
   const trace = getAgentTraceContext()
   trace?.setRuntime(config.provider, config.model)
@@ -159,22 +251,56 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
     onLifecycleEvent,
   }
 
-  try {
-    let result: { text: string; usage: AiUsage | null }
+  const callProvider = async (prompt: string) => {
+    const currentArgs = { ...providerArgs, systemPrompt: prompt }
     switch (config.provider) {
       case 'openai':
-        result = await generateOpenAi(providerArgs)
-        break
+        return generateOpenAi(currentArgs)
       case 'anthropic':
-        result = await generateAnthropic(providerArgs)
-        break
+        return generateAnthropic(currentArgs)
       default:
         throw new AiError(`Unsupported AI provider: ${config.provider}`, {
           code: 'unsupported_provider',
           status: 400,
         })
     }
-    return parseGeneration(result.text, result.usage)
+  }
+
+  try {
+    const first = await callProvider(effectiveSystemPrompt)
+    let parsed = parseGeneration(first.text, first.usage)
+    let unsupported = parsed.handoff
+      ? []
+      : unsupportedOperationalClaims(parsed.text, successfulTools)
+
+    if (unsupported.length > 0) {
+      trace?.recordEvent(
+        'operational_claim_repair',
+        'Afirmação operacional sem confirmação foi enviada para autocorrecção',
+        {
+          claims: unsupported.map((item) => item.claim),
+          successful_tools: Array.from(successfulTools),
+        },
+      )
+      const repairPrompt = [
+        effectiveSystemPrompt,
+        'Operational grounding correction: a previous draft in this SAME turn claimed that an operational action was completed without a successful confirming tool call. Do not repeat that unsupported completion claim. If the corresponding enabled tool is available and the customer has supplied all facts required to act safely, use the tool now. Otherwise say naturally that the action is not yet confirmed/completed and ask only for the next genuinely required detail. Never imply that a reservation, order, schedule, CRM update or deal exists merely because the customer requested it.',
+        `Unsupported claims to correct: ${unsupported.map((item) => item.claim).join(', ')}.`,
+      ].join('\n\n')
+      const repaired = await callProvider(repairPrompt)
+      parsed = parseGeneration(repaired.text, mergeUsage(first.usage, repaired.usage))
+      unsupported = parsed.handoff
+        ? []
+        : unsupportedOperationalClaims(parsed.text, successfulTools)
+      if (unsupported.length > 0) {
+        throw new AiError(
+          'The model repeated an operational completion claim without tool confirmation.',
+          { code: 'ungrounded_operational_claim', status: 502 },
+        )
+      }
+    }
+
+    return parsed
   } catch (error) {
     trace?.recordEvent(
       'llm_generation_failed',
