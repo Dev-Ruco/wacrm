@@ -16,6 +16,7 @@ import { fetchAccountMembers } from '@/lib/account/members';
 
 export const MASKED_KEY = '••••••••••••••••';
 export const HANDOFF_QUEUE = '__queue__';
+export const DEFAULT_AGENT_REPLY_CAP = 50;
 
 /**
  * All state + load/save logic for the account's single ai_configs row,
@@ -47,7 +48,7 @@ export function useAgentConfig() {
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isActive, setIsActive] = useState(false);
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
-  const [maxPerConversation, setMaxPerConversation] = useState(3);
+  const [maxPerConversation, setMaxPerConversation] = useState(DEFAULT_AGENT_REPLY_CAP);
   const [bufferWindowSeconds, setBufferWindowSeconds] = useState(12);
   const [maxReplyChunks, setMaxReplyChunks] = useState(3);
   const [usdToMznRate, setUsdToMznRate] = useState(63.91);
@@ -100,7 +101,7 @@ export function useAgentConfig() {
         setSystemPrompt(data.system_prompt ?? '');
         setIsActive(data.is_active);
         setAutoReplyEnabled(data.auto_reply_enabled);
-        setMaxPerConversation(data.auto_reply_max_per_conversation ?? 3);
+        setMaxPerConversation(data.auto_reply_max_per_conversation ?? DEFAULT_AGENT_REPLY_CAP);
         setBufferWindowSeconds(data.buffer_window_seconds ?? 12);
         setMaxReplyChunks(data.max_reply_chunks ?? 3);
         setUsdToMznRate(data.usd_to_mzn_rate ?? 63.91);
@@ -136,6 +137,7 @@ export function useAgentConfig() {
             : 'conversation_first',
         );
       } else {
+        setMaxPerConversation(DEFAULT_AGENT_REPLY_CAP);
         resetCommercialStrategy();
       }
     } catch {
@@ -259,6 +261,7 @@ export function useAgentConfig() {
         setKeyEdited(false);
         setIsActive(false);
         setAutoReplyEnabled(false);
+        setMaxPerConversation(DEFAULT_AGENT_REPLY_CAP);
         setBufferWindowSeconds(12);
         setMaxReplyChunks(3);
         setSystemPrompt('');
