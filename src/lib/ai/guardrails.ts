@@ -6,6 +6,7 @@ import {
 
 export type GuardrailViolation =
   | 'control_marker'
+  | 'internal_placeholder'
   | 'system_prompt_leak'
   | 'credential_or_secret'
   | 'payment_card'
@@ -83,6 +84,15 @@ function hasPaymentCard(text: string): boolean {
   return (text.match(/(?:\d[ -]?){13,19}/g) ?? []).some(luhnValid)
 }
 
+function hasInternalPlaceholder(text: string): boolean {
+  if (/\{\{[^{}\n]{1,120}\}\}/.test(text)) return true
+  if (/\$\{[^{}\n]{1,120}\}/.test(text)) return true
+
+  return /\[(?=[^\]\n]{1,180}\])[^\]\n]*\b(?:placeholder|todo|preencher|inserir|substituir|confirmar|buscar|procurar|consultar|preciso|necess[aá]rio|morada|endere[cç]o|localiza[cç][aã]o|hor[aá]rio|pre[cç]o)\b[^\]\n]*\]/i.test(
+    text,
+  )
+}
+
 function amountIsTrusted(amount: number, trusted: number[]): boolean {
   return trusted.some((candidate) => Math.abs(candidate - amount) < 0.01)
 }
@@ -107,6 +117,9 @@ export function evaluateAgentOutput(args: {
 
   if (/\[\[[A-Z][A-Z0-9_:-]{1,40}\]\]/.test(withoutSplits)) {
     violations.add('control_marker')
+  }
+  if (hasInternalPlaceholder(withoutHistoryAnnotations)) {
+    violations.add('internal_placeholder')
   }
   // buildConversationContext annotates past media/interactive messages with
   // bracketed markers like "[Opção interactiva no WhatsApp]" so the model
