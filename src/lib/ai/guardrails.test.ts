@@ -51,6 +51,19 @@ describe('AI output guardrails', () => {
     ).not.toContain('internal_placeholder')
   })
 
+  it('blocks raw tool payloads and internal tool names from reaching the customer', () => {
+    expect(
+      evaluateAgentOutput({
+        text: '{"ok":true,"query":"legging","found":true,"products":[]}',
+      }).violations,
+    ).toContain('raw_tool_payload')
+    expect(
+      evaluateAgentOutput({
+        text: 'Vou usar search_catalog para confirmar.',
+      }).violations,
+    ).toContain('tool_name_leak')
+  })
+
   it('marks an isolated history annotation leak as recoverable when useful text remains', () => {
     const result = evaluateAgentOutput({
       text: 'Veja estas opções:\n\n[Opção interactiva no WhatsApp]\nSeleccione este produto abaixo.',
