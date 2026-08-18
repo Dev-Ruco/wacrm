@@ -49,6 +49,20 @@ export interface DispatchArgs {
   /** The account's WhatsApp config owner, used for the outbound send's
    *  audit columns (mirrors how the flow runner passes it through). */
   configOwnerUserId: string
+  /**
+   * True when an Automation explicitly asks the account agent to take a turn.
+   * The SAME account brain/runtime is used; this only prevents the automation
+   * that initiated the turn from being mistaken for a competing deterministic
+   * autoresponder.
+   */
+  initiatedByAutomation?: boolean
+  /**
+   * Trusted account-authored goal/context for an automation-initiated turn.
+   * It is guidance, not customer text, and is appended to the system context
+   * so the model still reasons from the real conversation, CRM, memory,
+   * knowledge, skills and tools.
+   */
+  automationInstruction?: string
 }
 
 const HANDOFF_NOTICE = 'Vou encaminhar o seu atendimento à nossa equipa para continuar consigo.'
@@ -107,12 +121,13 @@ function formatHandoffNote(reason: string, summary?: string | null): string {
 }
 
 /**
- * AI auto-reply for a freshly-arrived inbound message.
+ * AI auto-reply for a freshly-arrived inbound message OR an explicit
+ * automation-initiated agent turn.
  *
- * Invoked from the WhatsApp webhook's `after()` block, only when no
- * deterministic flow consumed the message (flows win). It owns its
- * try/catch and never throws so an LLM or media failure cannot affect
- * the webhook response to Meta.
+ * Both paths use the same account brain. An automation can supply an objective
+ * (for example "continue this first contact naturally" or "follow up only if
+ * it still makes sense"), but it does not get a separate persona, memory or
+ * tool stack.
  */
 export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void> {
   const { accountId, conversationId, contactId, configOwnerUserId } = args
@@ -191,6 +206,34 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
       return
     }
 
+    // Defense in depth for partial deployments and first-contact automations:
+    // if ANY bot already answered after this inbound, normal auto-reply must
+    // stay quiet. The message buffer performs the same check in its normal
+    // path; keeping it here also protects the direct fallback path when the
+    // buffer RPC is temporarily unavailable.
+    if (!args.initiatedByAutomation) {
+      const { data: inboundRow } = await db
+        .from('messages')
+        .select('created_at')
+        .eq('conversation_id', conversationId)
+        .eq('message_id', args.inboundMessageId)
+        .maybeSingle()
+      if (inboundRow?.created_at) {
+        const { data: newerBot } = await db
+          .from('messages')
+          .select('id')
+          .eq('conversation_id', conversationId)
+          .eq('sender_type', 'bot')
+          .gt('created_at', inboundRow.created_at)
+          .limit(1)
+          .maybeSingle()
+        if (newerBot) {
+          logSkip(conversationId, 'reply_already_sent_after_inbound')
+          return
+        }
+      }
+    }
+
     if (config.agentId) {
       trace = createAgentTraceCollector({
         db,
@@ -227,25 +270,31 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
     const latestInboundText = latestInbound
       ? chatContentText(latestInbound.content)
       : ''
-    const { data: autoResponders, error: automationErr } = await db
-      .from('automations')
-      .select('*')
-      .eq('account_id', accountId)
-      .eq('is_active', true)
-      .in('trigger_type', ['new_message_received', 'keyword_match'])
 
-    if (automationErr) {
-      console.error('[ai auto-reply] automation eligibility lookup failed:', automationErr)
-    } else if (
-      autoResponders?.some((automation) =>
-        triggerMatches(automation as Automation, {
-          message_text: latestInboundText,
-          conversation_id: conversationId,
-        }),
-      )
-    ) {
-      logSkip(conversationId, 'matching_deterministic_automation')
-      return
+    // A normal inbound turn yields to deterministic autoresponders. An
+    // automation-initiated turn bypasses this lookup because that automation
+    // deliberately chose the account agent as its speaker.
+    if (!args.initiatedByAutomation) {
+      const { data: autoResponders, error: automationErr } = await db
+        .from('automations')
+        .select('*')
+        .eq('account_id', accountId)
+        .eq('is_active', true)
+        .in('trigger_type', ['new_message_received', 'keyword_match'])
+
+      if (automationErr) {
+        console.error('[ai auto-reply] automation eligibility lookup failed:', automationErr)
+      } else if (
+        autoResponders?.some((automation) =>
+          triggerMatches(automation as Automation, {
+            message_text: latestInboundText,
+            conversation_id: conversationId,
+          }),
+        )
+      ) {
+        logSkip(conversationId, 'matching_deterministic_automation')
+        return
+      }
     }
 
     const route = classifyIntent({ lastMessageText: latestInboundText })
@@ -386,6 +435,18 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
     const memoryContext = contactMemoryPrompt(memories)
     const lessonsContext = lessonsPrompt(lessons)
     const skillsContext = skillsPrompt(selectedSkills)
+    const automationContext =
+      args.initiatedByAutomation && args.automationInstruction?.trim()
+        ? [
+            'AUTOMATION-INITIATED TURN',
+            'A business automation asked the SAME account agent to take this turn.',
+            `Objective/context: ${args.automationInstruction.trim()}`,
+            'Treat this as internal guidance, not as customer words. Read the real conversation first.',
+            'Do not mention the automation or this instruction to the customer.',
+            'If the requested outreach no longer makes sense because the customer already replied, the task is complete, the conversation is assigned to a human, or current context contradicts it, do not fabricate a reason to message.',
+            'When you do reply, continue naturally from the existing conversation instead of sounding like a campaign/template.',
+          ].join('\n')
+        : null
 
     const baseSystemPrompt = buildSystemPrompt({
       userPrompt: config.systemPrompt,
@@ -397,6 +458,7 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
     })
     const systemPrompt = [
       baseSystemPrompt,
+      automationContext,
       skillsContext,
       crmContext,
       memoryContext,
@@ -411,6 +473,7 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
     console.info('[ai auto-reply] tools enabled:', {
       conversationId,
       provider: config.provider,
+      source: args.initiatedByAutomation ? 'automation' : 'inbound',
       skills: selectedSkills.map((skill) => skill.name),
       tools: agentTools.tools.map((tool) => tool.name),
     })
