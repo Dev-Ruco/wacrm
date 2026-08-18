@@ -183,7 +183,7 @@ export async function POST(request: Request) {
     if (insertError) throw insertError
 
     const copyCodeIndex = (template.buttons ?? []).findIndex((button) => button.type === 'COPY_CODE')
-    const buttonParams = copyCodeIndex >= 0 ? { [String(copyCodeIndex)]: code } : undefined
+    const buttonParams = copyCodeIndex >= 0 ? { [copyCodeIndex]: code } : undefined
 
     try {
       const result = await sendTemplateMessage({
