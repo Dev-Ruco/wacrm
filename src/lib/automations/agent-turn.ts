@@ -7,6 +7,16 @@ export interface AutomationAgentTurnArgs {
   conversationId: string
   contactId: string
   instruction: string
+  /**
+   * Optional ISO timestamp used by delayed follow-ups. If a newer customer
+   * message exists, the automation is stale and the agent is not invoked.
+   */
+  onlyIfNoCustomerReplyAfter?: string
+}
+
+export interface AutomationAgentTurnResult {
+  invoked: boolean
+  reason: 'invoked' | 'customer_replied' | 'no_customer_message'
 }
 
 /**
@@ -19,7 +29,7 @@ export interface AutomationAgentTurnArgs {
  */
 export async function runAutomationAgentTurn(
   args: AutomationAgentTurnArgs,
-): Promise<void> {
+): Promise<AutomationAgentTurnResult> {
   const instruction = args.instruction.trim()
   if (!instruction) throw new Error('agent message needs an objective/instruction')
 
@@ -40,7 +50,7 @@ export async function runAutomationAgentTurn(
   // reuse this identifier to resolve the conversation and expose "writing".
   const { data: inbound, error: inboundError } = await db
     .from('messages')
-    .select('message_id')
+    .select('message_id, created_at')
     .eq('conversation_id', args.conversationId)
     .eq('sender_type', 'customer')
     .not('message_id', 'is', null)
@@ -49,7 +59,20 @@ export async function runAutomationAgentTurn(
     .maybeSingle()
   if (inboundError) throw new Error(`agent message inbound lookup failed: ${inboundError.message}`)
   if (!inbound?.message_id) {
-    throw new Error('agent message requires an existing customer message')
+    return { invoked: false, reason: 'no_customer_message' }
+  }
+
+  if (args.onlyIfNoCustomerReplyAfter) {
+    const baseline = Date.parse(args.onlyIfNoCustomerReplyAfter)
+    const latestInboundAt = Date.parse(inbound.created_at)
+    if (Number.isFinite(baseline) && Number.isFinite(latestInboundAt) && latestInboundAt > baseline) {
+      console.info('[automations] stale agent follow-up suppressed:', {
+        conversationId: args.conversationId,
+        baseline: args.onlyIfNoCustomerReplyAfter,
+        latestInboundAt: inbound.created_at,
+      })
+      return { invoked: false, reason: 'customer_replied' }
+    }
   }
 
   await dispatchInboundToAiReply({
@@ -61,4 +84,6 @@ export async function runAutomationAgentTurn(
     initiatedByAutomation: true,
     automationInstruction: instruction,
   })
+
+  return { invoked: true, reason: 'invoked' }
 }
