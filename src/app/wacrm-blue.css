@@ -1,0 +1,130 @@
+/* WACRM Blue — product identity tokens.
+ * This layer sits on top of the existing theme system. It intentionally keeps
+ * semantic Tailwind tokens intact while giving the new workspace shell a
+ * stable brand palette led by #366775.
+ */
+
+:root,
+html[data-mode="light"],
+html[data-mode="dark"] {
+  --wacrm-primary: #366775;
+  --wacrm-primary-hover: #2f5a66;
+  --wacrm-primary-pressed: #274b55;
+  --wacrm-primary-soft: #ddeaec;
+  --wacrm-primary-softest: #f2f7f8;
+
+  --wacrm-sidebar: #102229;
+  --wacrm-sidebar-secondary: #163039;
+  --wacrm-sidebar-hover: #1c3b45;
+  --wacrm-sidebar-foreground: #eaf1f3;
+  --wacrm-sidebar-muted: #9fb4bd;
+
+  --wacrm-surface: #ffffff;
+  --wacrm-background: #f7f9fa;
+  --wacrm-border: #e3e8ec;
+  --wacrm-foreground: #17242b;
+  --wacrm-muted-foreground: #5e7380;
+
+  --wacrm-success: #1f8a70;
+  --wacrm-warning: #d4a72c;
+  --wacrm-danger: #c94b4b;
+}
+
+/* Official WACRM blue accent. Existing accent themes remain available;
+ * data-theme="wacrm" makes the new identity usable through the same semantic
+ * bg-primary/text-primary/ring-primary utilities already used by the app.
+ */
+html[data-theme="wacrm"] {
+  --primary: #366775;
+  --primary-foreground: #ffffff;
+  --primary-hover: #2f5a66;
+  --primary-soft: rgb(54 103 117 / 0.12);
+  --primary-soft-2: rgb(54 103 117 / 0.2);
+  --ring: #366775;
+  --chart-1: #366775;
+  --sidebar-primary: #366775;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-ring: #366775;
+}
+
+html[data-theme="wacrm"][data-mode="light"] {
+  --background: #f7f9fa;
+  --foreground: #17242b;
+  --card: #ffffff;
+  --card-2: #f1f4f6;
+  --card-foreground: #17242b;
+  --popover: #ffffff;
+  --popover-foreground: #17242b;
+  --secondary: #eef3f5;
+  --secondary-foreground: #274b55;
+  --muted: #f2f7f8;
+  --muted-foreground: #5e7380;
+  --accent: #eef3f5;
+  --accent-foreground: #274b55;
+  --border: #e3e8ec;
+  --input: #d3dce2;
+  --sidebar: #102229;
+  --sidebar-foreground: #eaf1f3;
+  --sidebar-accent: #1c3b45;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgb(255 255 255 / 0.08);
+}
+
+html[data-theme="wacrm"][data-mode="dark"] {
+  --background: #0f171b;
+  --foreground: #eaf1f3;
+  --card: #162127;
+  --card-2: #1b2a31;
+  --card-foreground: #eaf1f3;
+  --popover: #162127;
+  --popover-foreground: #eaf1f3;
+  --secondary: #1b2a31;
+  --secondary-foreground: #eaf1f3;
+  --muted: #1a2930;
+  --muted-foreground: #9fb4bd;
+  --accent: #1c3038;
+  --accent-foreground: #eaf1f3;
+  --border: #233740;
+  --input: #2d4650;
+  --sidebar: #0b1418;
+  --sidebar-foreground: #eaf1f3;
+  --sidebar-accent: #173039;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgb(255 255 255 / 0.08);
+}
+
+/* Shared workspace primitives used throughout the redesign. */
+.wacrm-page {
+  width: 100%;
+  max-width: 1600px;
+  margin-inline: auto;
+}
+
+.wacrm-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.wacrm-surface {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.875rem;
+}
+
+.wacrm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+}
+
+@media (max-width: 1023px) {
+  .wacrm-page-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
