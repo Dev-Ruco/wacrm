@@ -6,6 +6,8 @@ const h = vi.hoisted(() => ({
   loadAiConfig: vi.fn(),
   dispatchInboundToAiReply: vi.fn(),
   rpc: vi.fn(),
+  from: vi.fn(),
+  outboundLookup: vi.fn(),
 }))
 
 vi.mock('./config', () => ({ loadAiConfig: h.loadAiConfig }))
@@ -13,7 +15,7 @@ vi.mock('./auto-reply', () => ({
   dispatchInboundToAiReply: h.dispatchInboundToAiReply,
 }))
 vi.mock('./admin-client', () => ({
-  supabaseAdmin: () => ({ rpc: h.rpc }),
+  supabaseAdmin: () => ({ rpc: h.rpc, from: h.from }),
 }))
 
 import {
@@ -48,11 +50,38 @@ function aiConfig(overrides: Partial<AiConfig> = {}): AiConfig {
   }
 }
 
+function messageQuery() {
+  let inboundLookup = false
+  const query = {
+    select: vi.fn(() => query),
+    eq: vi.fn((column: string) => {
+      if (column === 'message_id') inboundLookup = true
+      return query
+    }),
+    gt: vi.fn(() => query),
+    limit: vi.fn(() => query),
+    maybeSingle: vi.fn(() =>
+      inboundLookup
+        ? Promise.resolve({
+            data: { created_at: '2026-08-18T09:00:00.000Z' },
+            error: null,
+          })
+        : h.outboundLookup(),
+    ),
+  }
+  return query
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.clearAllMocks()
   h.loadAiConfig.mockResolvedValue(aiConfig())
   h.dispatchInboundToAiReply.mockResolvedValue(undefined)
+  h.outboundLookup.mockResolvedValue({ data: null, error: null })
+  h.from.mockImplementation((table: string) => {
+    if (table !== 'messages') throw new Error(`Unexpected table: ${table}`)
+    return messageQuery()
+  })
   h.rpc.mockImplementation((name: string) => {
     if (name === 'schedule_ai_dispatch') {
       return Promise.resolve({ data: 1, error: null })
@@ -99,6 +128,24 @@ describe('AI message buffer', () => {
     })
     expect(h.dispatchInboundToAiReply).toHaveBeenCalledOnce()
     expect(h.dispatchInboundToAiReply).toHaveBeenCalledWith(DISPATCH_ARGS)
+  })
+
+  it('suppresses the AI when a deterministic bot reply was already sent after the inbound', async () => {
+    h.outboundLookup.mockResolvedValue({
+      data: { id: 'deterministic-reply-1' },
+      error: null,
+    })
+
+    const pending = dispatchBufferedInboundToAiReply({
+      ...DISPATCH_ARGS,
+      generation: 1,
+    })
+
+    await vi.runAllTimersAsync()
+    await pending
+
+    expect(h.outboundLookup).toHaveBeenCalledOnce()
+    expect(h.dispatchInboundToAiReply).not.toHaveBeenCalled()
   })
 
   it('lets only the newest rapid fragment dispatch after rebuilding context', async () => {
