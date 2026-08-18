@@ -4,6 +4,7 @@ import {
   engineSendInteractiveButtons,
   engineSendInteractiveList,
   engineSendText as engineSendChannelText,
+  engineSendTypingIndicator,
 } from '@/lib/flows/meta-send'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
@@ -20,6 +21,12 @@ interface SendTextArgs {
   conversationId: string
   contactId: string
   text: string
+  /**
+   * Conversational automation messages default to a short, proportional
+   * writing cadence. Set false only for machine-like/system notices where an
+   * instant delivery is intentional.
+   */
+  humanize?: boolean
 }
 
 interface SendTemplateArgs {
@@ -32,12 +39,51 @@ interface SendTemplateArgs {
   params?: string[]
 }
 
+function conversationalDelayMs(text: string): number {
+  // Long enough to avoid the "instant autoresponder" signature, short enough
+  // not to punish customers. The upper bound prevents long templates from
+  // pretending that someone typed for tens of seconds.
+  return Math.min(2200, Math.max(550, 450 + text.trim().length * 11))
+}
+
+async function humanizeAutomationText(args: SendTextArgs): Promise<void> {
+  if (args.humanize === false) return
+  const db = supabaseAdmin()
+  try {
+    const { data: inbound } = await db
+      .from('messages')
+      .select('message_id')
+      .eq('conversation_id', args.conversationId)
+      .eq('sender_type', 'customer')
+      .not('message_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (inbound?.message_id) {
+      await engineSendTypingIndicator({
+        accountId: args.accountId,
+        inboundMessageId: inbound.message_id,
+      })
+    }
+  } catch (error) {
+    // Presence is best-effort. A Meta/website activity failure must never
+    // prevent the actual automation message from being delivered.
+    console.warn('[automations] typing indicator failed:', error)
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, conversationalDelayMs(args.text)))
+}
+
 /**
  * Automation text uses the same conversation-channel router as Flows and AI.
+ * Conversational fixed messages also use the same presence layer, so an
+ * automation does not reveal itself merely by replying at machine speed.
  * Templates remain a WhatsApp capability until another connector implements
  * an explicit template equivalent.
  */
 export async function engineSendText(args: SendTextArgs): Promise<{ whatsapp_message_id: string }> {
+  await humanizeAutomationText(args)
   return engineSendChannelText(args)
 }
 
