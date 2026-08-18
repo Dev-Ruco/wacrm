@@ -1,6 +1,11 @@
 import type { WacrmSupabaseClient } from '@/lib/supabase/types'
 import { loadOfferingAttributeDefinitions } from '@/lib/offerings/attributes'
 
+/** Runtime authority for executable tool keys. Keep this list explicit even
+ * though AgentToolKey is open-ended so layered tool facades can extend the
+ * mature core catalogue without forcing its private definition map to know
+ * every future capability. All permission/registry entry points validate
+ * against this array before accepting a tool key. */
 export const AGENT_TOOL_KEYS = [
   'search_catalog',
   'send_product',
@@ -17,7 +22,7 @@ export const AGENT_TOOL_KEYS = [
   'update_contact',
 ] as const
 
-export type AgentToolKey = (typeof AGENT_TOOL_KEYS)[number]
+export type AgentToolKey = string
 
 /**
  * Tools with no CRM side effect — they only read or queue a channel send
@@ -161,8 +166,8 @@ async function loadRuntimeRegistryDefaults(
 
     const registry = new Map<AgentToolKey, boolean>()
     for (const row of (data ?? []) as RegisteredToolRow[]) {
-      if (AGENT_TOOL_KEYS.includes(row.key as AgentToolKey)) {
-        registry.set(row.key as AgentToolKey, Boolean(row.default_enabled))
+      if ((AGENT_TOOL_KEYS as readonly string[]).includes(row.key)) {
+        registry.set(row.key, Boolean(row.default_enabled))
       }
     }
     return registry
@@ -209,8 +214,8 @@ export async function loadAgentToolPermissions(
 
   const instructions: Partial<Record<AgentToolKey, string>> = {}
   for (const row of toolRows.data ?? []) {
-    if (!AGENT_TOOL_KEYS.includes(row.tool_key as AgentToolKey)) continue
-    const key = row.tool_key as AgentToolKey
+    if (!(AGENT_TOOL_KEYS as readonly string[]).includes(row.tool_key)) continue
+    const key = row.tool_key
     if (!registry || registry.has(key)) {
       permissions[key] = Boolean(row.enabled)
       const rowInstructions = (row as { instructions?: string | null }).instructions
