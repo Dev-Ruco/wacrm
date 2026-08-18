@@ -4,7 +4,13 @@ import type {
   KeywordMatchTriggerConfig,
   TagTriggerConfig,
 } from '@/types'
-import type { AutomationContext } from './engine-types'
+
+/** Minimal context needed to decide whether an automation trigger matches. */
+export interface AutomationMatchContext {
+  message_text?: string
+  tag_id?: string
+  interactive_reply_id?: string
+}
 
 /** Letter, digit or underscore in any script — the "inside a word" test. */
 const WORD_CHAR = '[\\p{L}\\p{N}_]'
@@ -29,7 +35,7 @@ export function matchesWholeWord(
 
 export function triggerMatches(
   automation: Automation,
-  ctx: AutomationContext | undefined,
+  ctx: AutomationMatchContext | undefined,
 ): boolean {
   if (automation.trigger_type === 'keyword_match') {
     const cfg = automation.trigger_config as KeywordMatchTriggerConfig
