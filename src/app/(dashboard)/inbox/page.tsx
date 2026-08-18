@@ -17,8 +17,13 @@ import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// Remembers the agent's show/hide choice for the desktop contact panel
+// across reloads and sessions (device-scoped, like the theme prefs).
 const CONTACT_PANEL_STORAGE_KEY = "wacrm:inbox:contact-panel-open";
 
+// `useSearchParams` (the `?c=<id>` deep link below) requires a Suspense
+// boundary or the production build bails to CSR and errors out. Thin
+// wrapper supplies it; the inner component holds all the inbox state.
 export default function InboxPage() {
   return (
     <Suspense fallback={null}>
@@ -31,6 +36,11 @@ function InboxPageInner() {
   const t = useTranslations("Inbox.page");
   const router = useRouter();
   const searchParams = useSearchParams();
+  /**
+   * `?c=<id>` deep-link support. Used when landing here from the
+   * dashboard's recent-conversations list so the right thread opens
+   * automatically instead of showing the empty center panel.
+   */
   const deepLinkConvId = searchParams.get("c");
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -41,14 +51,31 @@ function InboxPageInner() {
   const [whatsappConnected, setWhatsappConnected] = useState<boolean | null>(
     null
   );
+  /**
+   * Bumped whenever we want children (ConversationList, MessageThread)
+   * to refetch from the DB — used as a safety net against missed
+   * realtime events. Bumped on WS reconnect and on tab visibility →
+   * visible. The initial mount fetches don't depend on this; they fire
+   * once on conversationId-change as usual.
+   */
   const [resyncToken, setResyncToken] = useState(0);
-  const [contactPanelOpen, setContactPanelOpen] = useState(true);
 
+  /**
+   * Whether the desktop contact sidebar (tags / deals / notes) is shown.
+   * Defaults to `true` (the historical behaviour) and is restored from
+   * localStorage after mount. We deliberately do NOT read localStorage in
+   * the initializer: the server renders with `true`, so reading a stored
+   * `false` synchronously would produce a hydration mismatch. The effect
+   * below reconciles to the stored value right after mount instead.
+   */
+  const [contactPanelOpen, setContactPanelOpen] = useState(true);
   useEffect(() => {
     try {
       const stored = localStorage.getItem(CONTACT_PANEL_STORAGE_KEY);
       if (stored !== null) setContactPanelOpen(stored === "true");
-    } catch {}
+    } catch {
+      // localStorage can throw in private-browsing / sandboxed contexts.
+    }
   }, []);
 
   const handleToggleContactPanel = useCallback(() => {
@@ -56,21 +83,51 @@ function InboxPageInner() {
       const next = !prev;
       try {
         localStorage.setItem(CONTACT_PANEL_STORAGE_KEY, String(next));
-      } catch {}
+      } catch {
+        // Persistence is best-effort; ignore storage failures.
+      }
       return next;
     });
   }, []);
 
+  // Fire the deep-link auto-select exactly once per URL — subsequent
+  // list refreshes (realtime, manual refetch) must not snap the user
+  // back to the deep-linked conversation if they've already clicked
+  // elsewhere.
   const autoSelectedForDeepLinkRef = useRef<string | null>(null);
-  const hydratingConvIdsRef = useRef<Set<string>>(new Set());
-  const knownConvIdsRef = useRef<Set<string>>(new Set());
 
+  // Tracks conversations whose hydrate fetch is currently in flight. The
+  // conv-INSERT and the first-message-INSERT events both call into
+  // hydrateConversation; the dedupe here keeps it at one refetch per
+  // new conversation even when both events arrive within milliseconds.
+  const hydratingConvIdsRef = useRef<Set<string>>(new Set());
+
+  /**
+   * Synchronous mirror of the conversation ids currently in `conversations`
+   * state. Event handlers need to know "do we already have this conv?"
+   * without waiting for a setState updater to run — updaters fire during
+   * reconciliation, *after* the synchronous handler code returns, so a
+   * `let foundInList = false; setState(p => { foundInList = ...; return ... })`
+   * flag reads as `false` in the same tick (this exact bug shipped in #105
+   * and caused #106: every incoming message and every status flip fired a
+   * redundant DB hydrate, swamping the supabase client and starving the
+   * realtime channel). The ref is kept in sync via the effect below.
+   */
+  const knownConvIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const next = new Set<string>();
     for (const c of conversations) next.add(c.id);
     knownConvIdsRef.current = next;
   }, [conversations]);
 
+  // Pull the conversation row with its `contact` joined and merge it
+  // into state. Needed because Supabase Realtime payloads only carry the
+  // row's own columns — a brand-new conversation arrives without a
+  // contact, which surfaced as "Unknown" names, empty avatars, and
+  // (when the conv-INSERT event was delayed past the message-INSERT)
+  // conversations stuck on "No messages yet" until the user reloaded.
+  // Also self-heals if a realtime event was missed: callers can invoke
+  // this whenever they reference a conversation id they don't recognise.
   const hydrateConversation = useCallback(async (convId: string) => {
     if (hydratingConvIdsRef.current.has(convId)) return;
     hydratingConvIdsRef.current.add(convId);
@@ -82,6 +139,8 @@ function InboxPageInner() {
         .eq("id", convId)
         .maybeSingle();
       if (error) {
+        // Supabase errors have non-enumerable properties — log fields
+        // explicitly so the console message isn't just `{}`.
         console.error("Failed to hydrate conversation:", {
           message: error.message,
           details: error.details,
@@ -95,10 +154,15 @@ function InboxPageInner() {
       setConversations((prev) => {
         const existing = prev.find((c) => c.id === fetched.id);
         if (existing) {
+          // Already in state — keep its fields (a realtime UPDATE may
+          // have landed while the fetch was in flight and patched
+          // last_message_text / unread_count to fresher values than
+          // the row we just read). Only backfill `contact`, which the
+          // realtime payloads never carry.
           return prev.map((c) =>
             c.id === fetched.id
               ? { ...c, contact: c.contact ?? fetched.contact }
-              : c
+              : c,
           );
         }
         return [fetched, ...prev];
@@ -108,6 +172,7 @@ function InboxPageInner() {
     }
   }, []);
 
+  // Check WhatsApp connection status on mount
   useEffect(() => {
     const checkConnection = async () => {
       const supabase = createClient();
@@ -115,8 +180,15 @@ function InboxPageInner() {
         data: { session },
       } = await supabase.auth.getSession();
       const user = session?.user;
+
       if (!user) return;
 
+      // whatsapp_config is one-row-per-account post-multi-user, so
+      // the previous `.eq('user_id', user.id)` would miss the row
+      // for any teammate who didn't personally save the config —
+      // the "WhatsApp not connected" banner would show in the
+      // shared inbox even though the admin had it configured.
+      // Resolve account_id via the profile and query by that.
       const { data: profile } = await supabase
         .from("profiles")
         .select("account_id")
@@ -140,17 +212,21 @@ function InboxPageInner() {
     checkConnection();
   }, []);
 
+  // Handle realtime message events
   const handleMessageEvent = useCallback(
     (event: { eventType: string; new: Message; old: Partial<Message> }) => {
       const newMsg = event.new;
 
       if (event.eventType === "INSERT") {
+        // Add to messages if it belongs to active conversation
         if (
           activeConversation &&
           newMsg.conversation_id === activeConversation.id
         ) {
           setMessages((prev) => {
+            // Avoid duplicates
             if (prev.some((m) => m.id === newMsg.id)) return prev;
+            // Replace optimistic message if it exists
             const withoutOptimistic = prev.filter(
               (m) => !m.id.startsWith("temp-")
             );
@@ -158,6 +234,11 @@ function InboxPageInner() {
           });
         }
 
+        // Update conversation list preview. We need to know *synchronously*
+        // whether the conv is already in state to decide between patching
+        // the preview and triggering a hydrate — see the comment on
+        // knownConvIdsRef for why a closure flag inside the updater would
+        // always read false here.
         if (knownConvIdsRef.current.has(newMsg.conversation_id)) {
           setConversations((prev) =>
             prev.map((c) =>
@@ -171,15 +252,21 @@ function InboxPageInner() {
                         ? 0
                         : c.unread_count + 1,
                   }
-                : c
-            )
+                : c,
+            ),
           );
         } else {
+          // First time we're seeing this conv: the conv-INSERT event
+          // hasn't landed yet, or was missed. Hydrate from the DB so
+          // the row surfaces with its `contact` joined; the conv-UPDATE
+          // event the webhook emits right after the message INSERT will
+          // converge state when it arrives.
           hydrateConversation(newMsg.conversation_id);
         }
       }
 
       if (event.eventType === "UPDATE") {
+        // Update message status
         setMessages((prev) =>
           prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m))
         );
@@ -188,6 +275,7 @@ function InboxPageInner() {
     [activeConversation, hydrateConversation]
   );
 
+  // Handle realtime conversation events
   const handleConversationEvent = useCallback(
     (event: {
       eventType: string;
@@ -197,6 +285,11 @@ function InboxPageInner() {
       const conv = event.new;
 
       if (event.eventType === "INSERT") {
+        // Prepend immediately for snappy UX so the new conv shows in the
+        // list right away, then hydrate to fill in the `contact` join
+        // (realtime payloads never include joins). Skip both if we
+        // already have the row — that shouldn't happen normally, but
+        // out-of-order delivery would have us prepending a duplicate.
         if (!knownConvIdsRef.current.has(conv.id)) {
           setConversations((prev) => {
             if (prev.some((c) => c.id === conv.id)) return prev;
@@ -208,6 +301,11 @@ function InboxPageInner() {
 
       if (event.eventType === "UPDATE") {
         if (knownConvIdsRef.current.has(conv.id)) {
+          // If this UPDATE is for the conv the user is currently viewing,
+          // suppress the incoming unread_count — the user is reading it
+          // RIGHT NOW, so any positive value would just flicker the badge
+          // back on for the ~100ms it takes for the reset effect's server
+          // UPDATE to round-trip. Non-active convs take the value as-is.
           const isActive = activeConversation?.id === conv.id;
           setConversations((prev) =>
             prev.map((c) =>
@@ -217,13 +315,18 @@ function InboxPageInner() {
                     ...conv,
                     unread_count: isActive ? 0 : conv.unread_count,
                   }
-                : c
-            )
+                : c,
+            ),
           );
         } else {
+          // UPDATE arrived before the INSERT (or after a missed INSERT)
+          // — fetch the row so it surfaces with its contact joined. The
+          // patch contained in `conv` will already be reflected in what
+          // the hydrate fetch returns.
           hydrateConversation(conv.id);
         }
 
+        // Update active conversation if it changed
         if (activeConversation && conv.id === activeConversation.id) {
           setActiveConversation((prev) =>
             prev ? { ...prev, ...conv } : prev
@@ -234,6 +337,10 @@ function InboxPageInner() {
     [activeConversation, hydrateConversation]
   );
 
+  // Subscribe to realtime. The `isConnected` flag below feeds the
+  // reconnect resync: realtime is best-effort and events sent while the
+  // WS was disconnected (laptop sleep, network blip, background-tab
+  // throttle) are simply lost. We need a way to catch up.
   const { isConnected } = useRealtime({
     channelName: "inbox-realtime",
     onMessageEvent: handleMessageEvent,
@@ -241,10 +348,21 @@ function InboxPageInner() {
     enabled: true,
   });
 
+  /**
+   * Bump `resyncToken` whenever the realtime channel transitions from
+   * disconnected → connected *after* the initial connect. The initial
+   * connect is covered by the children's on-mount fetches; only later
+   * reconnects need a manual refetch to fill the gap.
+   *
+   * Tracked via a `was-connected` ref rather than a count so that React
+   * strict-mode's dev-only effect double-fire doesn't read as a
+   * reconnect.
+   */
   const wasConnectedRef = useRef(false);
   const initialConnectDoneRef = useRef(false);
   useEffect(() => {
     if (isConnected && !wasConnectedRef.current) {
+      // false → true transition
       if (initialConnectDoneRef.current) {
         setResyncToken((n) => n + 1);
       } else {
@@ -254,6 +372,12 @@ function InboxPageInner() {
     wasConnectedRef.current = isConnected;
   }, [isConnected]);
 
+  /**
+   * Refetch when the tab regains focus. Background tabs may have their
+   * WS throttled by the browser even without a full disconnect, so a
+   * visibilitychange → visible is a reliable signal that we may have
+   * missed events. Cheap to fire; the children dedupe on their own.
+   */
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
@@ -266,6 +390,12 @@ function InboxPageInner() {
     };
   }, []);
 
+  /**
+   * Manual refresh trigger for the thread-header refresh button.
+   * Bumps the same resyncToken the reconnect / visibility paths use,
+   * so it goes through the existing dedupe & refetch plumbing — no
+   * separate code path to keep in sync.
+   */
   const handleManualRefresh = useCallback(() => {
     setResyncToken((n) => n + 1);
   }, []);
@@ -273,60 +403,75 @@ function InboxPageInner() {
   const handleConversationsLoaded = useCallback(
     (loaded: Conversation[]) => {
       setConversations(loaded);
-
       if (
-        deepLinkConvId &&
-        autoSelectedForDeepLinkRef.current !== deepLinkConvId
+        !deepLinkConvId ||
+        autoSelectedForDeepLinkRef.current === deepLinkConvId
       ) {
-        const target = loaded.find((c) => c.id === deepLinkConvId);
-        if (target) {
-          autoSelectedForDeepLinkRef.current = deepLinkConvId;
-          setActiveConversation(target);
-          setActiveContact(target.contact ?? null);
-        }
+        return;
       }
+      const target = loaded.find((c) => c.id === deepLinkConvId);
+      if (!target) return;
+      autoSelectedForDeepLinkRef.current = deepLinkConvId;
+      setActiveConversation(target);
+      setActiveContact(target.contact ?? null);
     },
-    [deepLinkConvId]
+    [deepLinkConvId],
   );
 
-  const handleSelectConversation = useCallback((conversation: Conversation) => {
-    setActiveConversation(conversation);
-    setActiveContact(conversation.contact ?? null);
-  }, []);
+  const handleSelectConversation = useCallback(
+    (conversation: Conversation) => {
+      setActiveConversation(conversation);
+      setActiveContact(conversation.contact ?? null);
+      if (conversation.unread_count > 0) {
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === conversation.id ? { ...c, unread_count: 0 } : c,
+          ),
+        );
+      }
+    },
+    [],
+  );
 
   const handleBackToList = useCallback(() => {
     setActiveConversation(null);
     setActiveContact(null);
+    router.replace("/inbox");
+  }, [router]);
+
+  const handleContactUpdated = useCallback((contact: Contact) => {
+    setActiveContact(contact);
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.contact_id === contact.id ? { ...c, contact } : c,
+      ),
+    );
   }, []);
 
   const handleStatusChange = useCallback(
-    async (status: ConversationStatus) => {
-      if (!activeConversation) return;
-      const supabase = createClient();
-      const { error } = await supabase
-        .from("conversations")
-        .update({ status })
-        .eq("id", activeConversation.id);
-
-      if (error) {
-        toast.error(t("statusUpdateFailed"));
-        return;
-      }
-
-      setActiveConversation((prev) => (prev ? { ...prev, status } : prev));
+    (status: ConversationStatus) => {
+      setActiveConversation((prev) =>
+        prev ? { ...prev, status } : prev,
+      );
       setConversations((prev) =>
         prev.map((c) =>
-          c.id === activeConversation.id ? { ...c, status } : c
-        )
+          c.id === activeConversation?.id ? { ...c, status } : c,
+        ),
       );
     },
-    [activeConversation, t]
+    [activeConversation?.id],
   );
 
+  // Responsive: on small screens selecting a conversation hides the list
+  // and gives the thread full width. MessageThread's back button then returns
+  // it back to the list. On lg+ both panes render side-by-side as
+  // before, unchanged.
   const hasActiveConv = !!activeConversation;
 
   return (
     <div className="-m-4 flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden sm:-m-6 lg:-m-7 lg:h-screen">
+      {/* WhatsApp connection banner — in the flex column, not absolute,
+          so it pushes the panels down instead of overlapping them. */}
       {whatsappConnected === false && (
         <div className="flex shrink-0 items-center justify-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2">
           <WifiOff className="h-4 w-4 text-amber-400" />
@@ -336,11 +481,14 @@ function InboxPageInner() {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 overflow-hidden bg-background">
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left panel: Conversation list.
+            Hidden on mobile when a conversation is selected so the
+            thread can occupy the full width. Always visible on lg+. */}
         <div
           className={cn(
             "flex h-full flex-1 lg:flex-none",
-            hasActiveConv ? "hidden lg:flex" : "flex"
+            hasActiveConv ? "hidden lg:flex" : "flex",
           )}
         >
           <ConversationList
@@ -352,33 +500,34 @@ function InboxPageInner() {
           />
         </div>
 
+        {/* Center panel: message thread. Hidden on mobile until selected. */}
         <div
           className={cn(
             "min-w-0 flex-1",
-            hasActiveConv ? "flex" : "hidden lg:flex"
+            hasActiveConv ? "flex" : "hidden lg:flex",
           )}
         >
           <MessageThread
             conversation={activeConversation}
-            contact={activeContact}
             messages={messages}
             onMessagesChange={setMessages}
-            onConversationChange={setActiveConversation}
             onStatusChange={handleStatusChange}
             onBack={handleBackToList}
-            onToggleContactPanel={handleToggleContactPanel}
             contactPanelOpen={contactPanelOpen}
+            onToggleContactPanel={handleToggleContactPanel}
             onManualRefresh={handleManualRefresh}
             resyncToken={resyncToken}
           />
         </div>
 
+        {/* Right panel: contact details. Desktop-only; the thread header
+            exposes the toggle. Hidden below xl to keep chat usable. */}
         {activeContact && contactPanelOpen ? (
           <div className="hidden xl:flex">
             <ContactSidebar
               contact={activeContact}
               conversation={activeConversation}
-              onClose={handleToggleContactPanel}
+              onContactUpdated={handleContactUpdated}
             />
           </div>
         ) : null}
