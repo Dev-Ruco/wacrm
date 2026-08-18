@@ -11,6 +11,7 @@ import {
   type VisualProductMatch,
 } from './visual-reference-search'
 import { createAutoReplyTools as createBaseAutoReplyTools } from './operational-tools'
+import { setWebsiteActivityIfWebsite } from '@/lib/site-chat/activity'
 
 export type {
   HandoffToolRequest,
@@ -155,6 +156,11 @@ export function createAutoReplyTools(
   }
 
   const executeTool = async (call: AgentToolCall): Promise<string> => {
+    if (call.name === 'search_catalog') {
+      await setWebsiteActivityIfWebsite(args.db, args.conversationId, 'searching_catalog').catch((error) =>
+        console.error('[website activity] catalogue state failed:', error),
+      )
+    }
     if (OPERATIONAL_RUNTIME_TOOLS.has(call.name)) {
       const parsed = parseToolArguments(call.arguments)
       if (!parsed) throw new Error(`Invalid JSON arguments for operational tool: ${call.name}`)

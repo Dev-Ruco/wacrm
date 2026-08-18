@@ -6,6 +6,7 @@ import { isWebsiteOriginAllowed } from '@/lib/site-chat/origin'
 import { dispatchInboundThroughAccountBrain } from '@/lib/channels/inbound-brain'
 import { loadEmbeddingsKey } from '@/lib/ai/config'
 import { transcribeAudio } from '@/lib/ai/transcription'
+import { setWebsiteActivity } from '@/lib/site-chat/activity'
 
 export const maxDuration = 60
 
@@ -274,6 +275,8 @@ export async function POST(request: Request) {
       .eq('channel', 'website')
 
     if (conversationError) throw conversationError
+
+    await setWebsiteActivity(admin, session.conversation_id, 'analyzing')
 
     await admin
       .from('website_chat_sessions')

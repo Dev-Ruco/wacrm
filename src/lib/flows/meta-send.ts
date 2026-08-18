@@ -18,6 +18,8 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
+import { setWebsiteActivity } from '@/lib/site-chat/activity'
+import { notifyWebsiteCustomerIfOffline } from '@/lib/site-chat/offline-notify'
 
 type EngineDb = ReturnType<typeof supabaseAdmin>
 
@@ -41,6 +43,7 @@ async function conversationChannel(
 
 async function persistWebsiteBotMessage(args: {
   db: EngineDb
+  accountId: string
   conversationId: string
   contentType: 'text' | 'image'
   contentText: string | null
@@ -76,6 +79,16 @@ async function persistWebsiteBotMessage(args: {
     .eq('id', args.conversationId)
   if (convErr) throw new Error(`website conversation update failed: ${convErr.message}`)
 
+  await setWebsiteActivity(args.db, args.conversationId, null).catch((error) =>
+    console.error('[website activity] clear failed:', error),
+  )
+  await notifyWebsiteCustomerIfOffline({
+    db: args.db,
+    accountId: args.accountId,
+    conversationId: args.conversationId,
+    preview: preview || 'Tem uma nova resposta no atendimento.',
+  }).catch((error) => console.error('[website offline] notify failed:', error))
+
   // Kept for backwards compatibility with Flow/AI callers. This field now
   // means the external delivery id and is not necessarily a WhatsApp wamid.
   return { whatsapp_message_id: externalId }
@@ -103,6 +116,7 @@ export async function engineSendText(
   if (channel === 'website') {
     return persistWebsiteBotMessage({
       db,
+      accountId: args.accountId,
       conversationId: args.conversationId,
       contentType: 'text',
       contentText: args.text,
@@ -209,6 +223,10 @@ export async function engineSendTypingIndicator(args: {
 
   if (inbound?.conversation_id) {
     const channel = await conversationChannel(db, args.accountId, inbound.conversation_id)
+    if (channel === 'website') {
+      await setWebsiteActivity(db, inbound.conversation_id, 'writing')
+      return
+    }
     if (channel !== 'whatsapp') return
   }
 
@@ -252,6 +270,7 @@ export async function engineSendMedia(
     }
     return persistWebsiteBotMessage({
       db,
+      accountId: args.accountId,
       conversationId: args.conversationId,
       contentType: 'image',
       contentText: args.caption?.trim() || null,

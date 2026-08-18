@@ -4,6 +4,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { isWebsiteOriginAllowed } from '@/lib/site-chat/origin'
 import { dispatchInboundThroughAccountBrain } from '@/lib/channels/inbound-brain'
+import { freshWebsiteActivity, setWebsiteActivity } from '@/lib/site-chat/activity'
+import { hashSiteChatToken } from '@/lib/site-chat/public-server'
 
 const MAX_MESSAGE_LENGTH = 4000
 const SESSION_MAX_MESSAGES = 200
@@ -15,6 +17,10 @@ type WebsiteChannelRow = {
   public_key: string
   allowed_origins: string[] | null
   is_active: boolean
+  require_whatsapp_verification: boolean
+  otp_template_id: string | null
+  offline_whatsapp_enabled: boolean
+  offline_reply_template_id: string | null
 }
 
 type WebsiteLead = {
@@ -157,7 +163,7 @@ async function resolveChannel(
 ): Promise<WebsiteChannelRow | null> {
   let query = admin
     .from('website_channels')
-    .select('id, account_id, name, public_key, allowed_origins, is_active')
+    .select('id, account_id, name, public_key, allowed_origins, is_active, require_whatsapp_verification, otp_template_id, offline_whatsapp_enabled, offline_reply_template_id')
     .eq('is_active', true)
 
   if (publicKey) {
@@ -492,6 +498,7 @@ export async function POST(request: Request) {
     const visitorId = typeof body?.visitor_id === 'string' ? body.visitor_id.slice(0, 128) : ''
     const publicKey = typeof body?.channel_key === 'string' ? body.channel_key.slice(0, 128) : null
     const suppliedToken = typeof body?.session_token === 'string' ? body.session_token : ''
+    const verificationToken = typeof body?.verification_token === 'string' ? body.verification_token : ''
     const message = typeof body?.message === 'string' ? body.message.trim() : ''
     const productInquiryWasSupplied = body?.product_inquiry !== undefined
     const productInquiry = parseProductInquiry(body?.product_inquiry)
@@ -519,6 +526,28 @@ export async function POST(request: Request) {
     const channel = await resolveChannel(admin, publicKey, origin)
     if (!channel) return json({ error: 'Website chat channel not found for this site' }, 404, origin)
 
+    let verifiedChallengeId: string | null = null
+    if (!suppliedToken && channel.require_whatsapp_verification) {
+      if (!lead || !verificationToken) {
+        return json({ error: 'Verifique o seu número de WhatsApp antes de iniciar o chat.', code: 'whatsapp_verification_required' }, 403, origin)
+      }
+      const { data: verified, error: verifiedError } = await admin
+        .from('website_chat_otp_challenges')
+        .select('id')
+        .eq('website_channel_id', channel.id)
+        .eq('visitor_id', visitorId)
+        .eq('phone_normalized', lead.phoneNormalized)
+        .eq('verification_token_hash', hashSiteChatToken(verificationToken))
+        .not('verified_at', 'is', null)
+        .gt('verification_expires_at', new Date().toISOString())
+        .maybeSingle()
+      if (verifiedError) throw verifiedError
+      if (!verified?.id) {
+        return json({ error: 'A verificação do WhatsApp expirou. Verifique o número novamente.', code: 'whatsapp_verification_required' }, 403, origin)
+      }
+      verifiedChallengeId = verified.id as string
+    }
+
     let conversationId: string
     let sessionToken = suppliedToken
 
@@ -536,6 +565,28 @@ export async function POST(request: Request) {
       const session = await ensureSession(admin, channel, visitorId, origin, context, lead)
       conversationId = session.conversationId
       sessionToken = session.sessionToken
+    }
+
+    if (verifiedChallengeId) {
+      const { data: verifiedConversation, error: verifiedConversationError } = await admin
+        .from('conversations')
+        .select('contact_id')
+        .eq('id', conversationId)
+        .eq('account_id', channel.account_id)
+        .single()
+      if (verifiedConversationError) throw verifiedConversationError
+      if (verifiedConversation?.contact_id) {
+        const { error: verifiedContactError } = await admin
+          .from('contacts')
+          .update({ whatsapp_verified_at: new Date().toISOString() })
+          .eq('id', verifiedConversation.contact_id)
+          .eq('account_id', channel.account_id)
+        if (verifiedContactError) throw verifiedContactError
+      }
+    }
+
+    if (productInquiry || message) {
+      await setWebsiteActivity(admin, conversationId, 'analyzing')
     }
 
     if (productInquiry) {
@@ -694,6 +745,7 @@ export async function GET(request: Request) {
     const visitorId = (url.searchParams.get('visitor_id') ?? '').slice(0, 128)
     const sessionToken = url.searchParams.get('session_token') ?? ''
     const publicKey = url.searchParams.get('channel_key')?.slice(0, 128) ?? null
+    const visible = url.searchParams.get('visible') !== '0'
 
     if (!visitorId || !sessionToken) {
       return json({ error: 'visitor_id and session_token are required' }, 400, origin)
@@ -709,16 +761,38 @@ export async function GET(request: Request) {
     const session = await getSession(admin, channel.id, visitorId, sessionToken)
     if (!session) return json({ error: 'Invalid chat session' }, 401, origin)
 
-    const { data, error } = await admin
-      .from('messages')
-      .select('id, sender_type, content_type, content_text, media_url, status, created_at')
-      .eq('conversation_id', session.conversation_id)
-      .order('created_at', { ascending: true })
-      .limit(SESSION_MAX_MESSAGES)
+    const now = new Date().toISOString()
+    const sessionTouch: Record<string, string> = { last_seen_at: now }
+    if (visible) sessionTouch.last_visible_at = now
+    const { error: touchError } = await admin
+      .from('website_chat_sessions')
+      .update(sessionTouch)
+      .eq('id', session.id)
+    if (touchError) throw touchError
+
+    const [{ data, error }, { data: activityRow, error: activityError }] = await Promise.all([
+      admin
+        .from('messages')
+        .select('id, sender_type, content_type, content_text, media_url, status, created_at')
+        .eq('conversation_id', session.conversation_id)
+        .order('created_at', { ascending: true })
+        .limit(SESSION_MAX_MESSAGES),
+      admin
+        .from('conversations')
+        .select('website_activity_state, website_activity_updated_at')
+        .eq('id', session.conversation_id)
+        .eq('channel', 'website')
+        .maybeSingle(),
+    ])
 
     if (error) throw error
+    if (activityError) throw activityError
 
-    return json({ messages: data ?? [] }, 200, origin)
+    const activity = freshWebsiteActivity({
+      state: activityRow?.website_activity_state,
+      updatedAt: activityRow?.website_activity_updated_at,
+    })
+    return json({ messages: data ?? [], activity }, 200, origin)
   } catch (error) {
     console.error('[site-chat] GET failed', error)
     return json({ error: 'Unable to load website chat messages' }, 500, origin)

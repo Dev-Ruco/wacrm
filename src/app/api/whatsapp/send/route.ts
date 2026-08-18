@@ -12,6 +12,8 @@ import {
   SendMessageError,
 } from '@/lib/whatsapp/send-message'
 import { getCustomerServiceWindow } from '@/lib/whatsapp/customer-service-window'
+import { setWebsiteActivity } from '@/lib/site-chat/activity'
+import { notifyWebsiteCustomerIfOffline } from '@/lib/site-chat/offline-notify'
 
 export async function POST(request: Request) {
   try {
@@ -191,6 +193,16 @@ export async function POST(request: Request) {
         .eq('account_id', accountId)
 
       if (updateError) throw updateError
+
+      await setWebsiteActivity(supabase, conversationId, null).catch((activityError) =>
+        console.error('[website activity] clear failed:', activityError),
+      )
+      await notifyWebsiteCustomerIfOffline({
+        db: supabase,
+        accountId,
+        conversationId,
+        preview: preview || 'Tem uma nova resposta no atendimento.',
+      }).catch((notifyError) => console.error('[website offline] notify failed:', notifyError))
 
       return NextResponse.json({
         success: true,
