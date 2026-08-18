@@ -1,4 +1,3 @@
-import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { supabaseAdmin } from './admin-client'
 
 export interface AutomationAgentTurnArgs {
@@ -22,10 +21,9 @@ export interface AutomationAgentTurnResult {
 /**
  * Ask the account's existing AI agent to take a conversational turn.
  *
- * This is intentionally a bridge, not a second automation-specific model.
- * Identity, behaviour, Skills, Knowledge, memory, CRM context, commercial
- * strategy, tools, guardrails and tracing all remain owned by the same
- * dispatchInboundToAiReply runtime used for ordinary inbound messages.
+ * The AI runtime is imported lazily so the automation execution engine never
+ * forms a static module cycle with auto-reply. This remains the same account
+ * brain — not a second automation-specific model or persona.
  */
 export async function runAutomationAgentTurn(
   args: AutomationAgentTurnArgs,
@@ -45,9 +43,6 @@ export async function runAutomationAgentTurn(
     throw new Error('agent message conversation/contact mismatch')
   }
 
-  // Meta's native typing indicator is tied to a customer wamid. Use the most
-  // recent inbound message in this conversation. Website conversations also
-  // reuse this identifier to resolve the conversation and expose "writing".
   const { data: inbound, error: inboundError } = await db
     .from('messages')
     .select('message_id, created_at')
@@ -75,6 +70,7 @@ export async function runAutomationAgentTurn(
     }
   }
 
+  const { dispatchInboundToAiReply } = await import('@/lib/ai/auto-reply')
   await dispatchInboundToAiReply({
     accountId: args.accountId,
     conversationId: args.conversationId,
