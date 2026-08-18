@@ -63,7 +63,7 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
               !fullBleed && "wacrm-workspace-shell"
             )}
           >
-            {children}
+            {fullBleed ? children : <div className="wacrm-page">{children}</div>}
           </main>
         </div>
       </div>
