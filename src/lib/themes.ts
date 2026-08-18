@@ -1,19 +1,14 @@
 /**
  * Single source of truth for the color-theme catalog.
  *
- * The CSS variables themselves live in `src/app/globals.css` under
- * `html[data-theme="..."]` blocks — that file is the one we paste
- * theme tokens into. This module only carries the metadata the UI
- * (settings picker, no-flash boot script) needs.
- *
- * Adding a new theme is a two-step change:
- *   1. Append the new `html[data-theme="<id>"]` block in globals.css
- *      with every token from an existing theme (use violet as the
- *      shape reference).
- *   2. Add an entry below. The order here drives the picker grid.
+ * The CSS variables themselves live in `src/app/globals.css` and product
+ * identity overrides can live in dedicated layers such as `wacrm-blue.css`.
+ * This module carries the metadata the UI, no-flash boot script and theme
+ * provider need.
  */
 
 export const THEME_IDS = [
+  "wacrm",
   "violet",
   "emerald",
   "cobalt",
@@ -24,27 +19,20 @@ export const THEME_IDS = [
 
 export type ThemeId = (typeof THEME_IDS)[number];
 
-export const DEFAULT_THEME: ThemeId = "violet";
+export const DEFAULT_THEME: ThemeId = "wacrm";
 
 export const STORAGE_KEY = "wacrm.theme";
 
 /**
  * MODE — the light/dark dimension, orthogonal to the accent theme.
- *
- * The CSS variables live in `src/app/globals.css` under
- * `html[data-mode="..."]` blocks (neutral surfaces only). Applied
- * at runtime via `document.documentElement.dataset.mode`. Dark is
- * the historical default and stays the app's identity; light is the
- * opt-in eye-strain-friendly alternative.
- *
- * Persisted under its own localStorage key so it composes freely
- * with the accent choice (you can run Violet-light or Violet-dark).
+ * Persisted under its own localStorage key so it composes freely with the
+ * accent choice.
  */
 export const MODES = ["light", "dark"] as const;
 
 export type Mode = (typeof MODES)[number];
 
-export const DEFAULT_MODE: Mode = "dark";
+export const DEFAULT_MODE: Mode = "light";
 
 export const MODE_STORAGE_KEY = "wacrm.mode";
 
@@ -58,20 +46,21 @@ export interface ThemeMeta {
   id: ThemeId;
   name: string;
   tagline: string;
-  /**
-   * Static swatch color for the picker chip. Hard-coded so the boot
-   * script / picker cards don't need a getComputedStyle round trip
-   * before the page settles. Must mirror `--primary` of the same
-   * theme in globals.css.
-   */
+  /** Static swatch color shown by the appearance picker. */
   swatch: string;
 }
 
 export const THEMES: ReadonlyArray<ThemeMeta> = [
   {
+    id: "wacrm",
+    name: "WACRM Blue",
+    tagline: "Identidade oficial — sóbria, empresarial e orientada ao atendimento.",
+    swatch: "#366775",
+  },
+  {
     id: "violet",
     name: "Violet",
-    tagline: "The default — confident, slightly playful.",
+    tagline: "The original default — confident, slightly playful.",
     swatch: "oklch(0.526 0.247 293)",
   },
   {

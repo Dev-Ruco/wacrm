@@ -50,18 +50,15 @@ export default function VisitsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/scheduled-visits', {
-        cache: 'no-store',
-      });
+      const response = await fetch('/api/scheduled-visits', { cache: 'no-store' });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok)
+      if (!response.ok) {
         throw new Error(data.error ?? 'Não foi possível carregar as visitas.');
+      }
       setVisits(data.visits ?? []);
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : 'Não foi possível carregar as visitas.'
+        error instanceof Error ? error.message : 'Não foi possível carregar as visitas.'
       );
     } finally {
       setLoading(false);
@@ -84,163 +81,179 @@ export default function VisitsPage() {
         body: JSON.stringify({ status }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok)
+      if (!response.ok) {
         throw new Error(data.error ?? 'Não foi possível actualizar a visita.');
+      }
       setVisits(
         (current) =>
-          current?.map((visit) =>
-            visit.id === id ? { ...visit, status } : visit
-          ) ?? null
+          current?.map((visit) => (visit.id === id ? { ...visit, status } : visit)) ?? null
       );
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : 'Não foi possível actualizar a visita.'
+        error instanceof Error ? error.message : 'Não foi possível actualizar a visita.'
       );
     } finally {
       setActing(null);
     }
   };
 
-  const upcoming = (visits ?? []).filter(
-    (visit) => visit.status === 'scheduled'
-  );
+  const upcoming = (visits ?? []).filter((visit) => visit.status === 'scheduled');
   const past = (visits ?? []).filter((visit) => visit.status !== 'scheduled');
 
   return (
-    <div>
-      <div className="flex items-center gap-2">
-        <CalendarClock className="text-primary h-6 w-6" />
-        <h1 className="text-page-title">Visitas agendadas</h1>
-      </div>
-      <p className="text-muted-foreground mt-1 text-sm">
-        Visitas à loja marcadas pelo agente de IA (ferramenta &quot;Agendar
-        visita&quot;) ou pela equipa.
-      </p>
+    <div className="space-y-5">
+      <header className="wacrm-page-header">
+        <div>
+          <p className="text-label text-primary">CRM</p>
+          <div className="mt-1 flex items-center gap-2.5">
+            <CalendarClock className="size-5 text-primary" />
+            <h1 className="text-[28px] font-semibold tracking-tight text-foreground">
+              Visitas agendadas
+            </h1>
+          </div>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            Visitas à loja marcadas pelo agente de IA ou pela equipa.
+          </p>
+        </div>
+      </header>
+
+      <section className="wacrm-kpi-grid">
+        <VisitMetric label="Por vir" value={upcoming.length} />
+        <VisitMetric label="Histórico" value={past.length} />
+        <VisitMetric
+          label="Concluídas"
+          value={past.filter((visit) => visit.status === 'completed').length}
+        />
+        <VisitMetric
+          label="Canceladas / faltas"
+          value={past.filter((visit) => visit.status !== 'completed').length}
+        />
+      </section>
 
       {loading ? (
-        <div className="mt-8 flex min-h-32 items-center justify-center">
-          <Loader2 className="text-muted-foreground h-5 w-5 animate-spin" />
+        <div className="wacrm-surface flex min-h-40 items-center justify-center">
+          <Loader2 className="size-5 animate-spin text-primary" />
         </div>
       ) : (
-        <div className="mt-6 space-y-8">
+        <div className="space-y-6">
           <section>
-            <h2 className="text-foreground mb-2 text-sm font-medium">
-              Por vir ({upcoming.length})
-            </h2>
+            <div className="mb-3">
+              <h2 className="text-section-title">Próximas visitas</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Compromissos que ainda precisam de atendimento ou confirmação.
+              </p>
+            </div>
             {upcoming.length === 0 ? (
-              <div className="border-border bg-muted/40 text-muted-foreground rounded-lg border px-3 py-2 text-sm">
+              <div className="wacrm-surface border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
                 Nenhuma visita marcada ainda.
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Data e hora</TableHead>
-                    <TableHead>Notas</TableHead>
-                    <TableHead>Estado</TableHead>
-                    {canManage && (
-                      <TableHead className="text-right">Acções</TableHead>
-                    )}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {upcoming.map((visit) => (
-                    <TableRow key={visit.id}>
-                      <TableCell>
-                        <p className="text-foreground font-medium">
-                          {visit.contact?.name || 'Sem nome'}
-                        </p>
-                        <p className="text-muted-foreground text-xs">
-                          {visit.contact?.phone}
-                        </p>
-                      </TableCell>
-                      <TableCell>
-                        {DATE_FORMATTER.format(new Date(visit.scheduled_at))}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground max-w-xs truncate">
-                        {visit.notes || '—'}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={STATUS_META[visit.status].variant}>
-                          {STATUS_META[visit.status].label}
-                        </Badge>
-                      </TableCell>
-                      {canManage && (
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1.5">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={acting === visit.id}
-                              onClick={() =>
-                                void setStatus(visit.id, 'completed')
-                              }
-                            >
-                              <Check className="h-3.5 w-3.5" /> Concluída
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={acting === visit.id}
-                              onClick={() =>
-                                void setStatus(visit.id, 'cancelled')
-                              }
-                            >
-                              <X className="h-3.5 w-3.5" /> Cancelar
-                            </Button>
-                          </div>
-                        </TableCell>
-                      )}
+              <div className="wacrm-surface overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>Cliente</TableHead>
+                      <TableHead>Data e hora</TableHead>
+                      <TableHead>Notas</TableHead>
+                      <TableHead>Estado</TableHead>
+                      {canManage ? <TableHead className="text-right">Acções</TableHead> : null}
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {upcoming.map((visit) => (
+                      <TableRow key={visit.id}>
+                        <TableCell>
+                          <p className="font-medium text-foreground">
+                            {visit.contact?.name || 'Sem nome'}
+                          </p>
+                          <p className="text-xs text-muted-foreground">{visit.contact?.phone}</p>
+                        </TableCell>
+                        <TableCell>{DATE_FORMATTER.format(new Date(visit.scheduled_at))}</TableCell>
+                        <TableCell className="max-w-xs truncate text-muted-foreground">
+                          {visit.notes || '—'}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={STATUS_META[visit.status].variant}>
+                            {STATUS_META[visit.status].label}
+                          </Badge>
+                        </TableCell>
+                        {canManage ? (
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1.5">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={acting === visit.id}
+                                onClick={() => void setStatus(visit.id, 'completed')}
+                              >
+                                <Check className="size-3.5" /> Concluída
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={acting === visit.id}
+                                onClick={() => void setStatus(visit.id, 'cancelled')}
+                              >
+                                <X className="size-3.5" /> Cancelar
+                              </Button>
+                            </div>
+                          </TableCell>
+                        ) : null}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </section>
 
-          {past.length > 0 && (
+          {past.length > 0 ? (
             <section>
-              <h2 className="text-foreground mb-2 text-sm font-medium">
-                Histórico
-              </h2>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Data e hora</TableHead>
-                    <TableHead>Estado</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {past.map((visit) => (
-                    <TableRow key={visit.id}>
-                      <TableCell>
-                        <p className="text-foreground">
-                          {visit.contact?.name || 'Sem nome'}
-                        </p>
-                        <p className="text-muted-foreground text-xs">
-                          {visit.contact?.phone}
-                        </p>
-                      </TableCell>
-                      <TableCell>
-                        {DATE_FORMATTER.format(new Date(visit.scheduled_at))}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={STATUS_META[visit.status].variant}>
-                          {STATUS_META[visit.status].label}
-                        </Badge>
-                      </TableCell>
+              <div className="mb-3">
+                <h2 className="text-section-title">Histórico</h2>
+              </div>
+              <div className="wacrm-surface overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>Cliente</TableHead>
+                      <TableHead>Data e hora</TableHead>
+                      <TableHead>Estado</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {past.map((visit) => (
+                      <TableRow key={visit.id}>
+                        <TableCell>
+                          <p className="text-foreground">{visit.contact?.name || 'Sem nome'}</p>
+                          <p className="text-xs text-muted-foreground">{visit.contact?.phone}</p>
+                        </TableCell>
+                        <TableCell>{DATE_FORMATTER.format(new Date(visit.scheduled_at))}</TableCell>
+                        <TableCell>
+                          <Badge variant={STATUS_META[visit.status].variant}>
+                            {STATUS_META[visit.status].label}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </section>
-          )}
+          ) : null}
         </div>
       )}
+    </div>
+  );
+}
+
+function VisitMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="wacrm-surface p-4 sm:p-5">
+      <p className="text-meta">{label}</p>
+      <p className="mt-2 text-2xl font-semibold tabular-nums text-foreground">
+        {value.toLocaleString()}
+      </p>
     </div>
   );
 }

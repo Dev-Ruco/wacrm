@@ -5,9 +5,14 @@ import type {
   TagTriggerConfig,
 } from '@/types'
 
-/** Minimal context needed to decide whether an automation trigger matches. */
+/**
+ * Lightweight event context used to decide whether an automation trigger
+ * matches. `conversation_id` is carried by message-trigger callers even though
+ * the current deterministic predicates do not need to inspect it yet.
+ */
 export interface AutomationMatchContext {
   message_text?: string
+  conversation_id?: string
   tag_id?: string
   interactive_reply_id?: string
 }
