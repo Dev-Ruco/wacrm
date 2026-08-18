@@ -47,7 +47,7 @@ const BUSINESS_FACT_RULES: Record<BusinessKnowledgeDomain, BusinessKnowledgeDoma
     expansion: 'pagamento pagamentos formas métodos pagar mpesa emola cartão transferência numerário',
   },
   delivery: {
-    query: /\b(?:entrega|entregam|delivery|levantar|levantamento|recolha|pickup|buscar|vir buscar|receber em casa|envio)\b/i,
+    query: /\b(?:entrega|entregas|entregam|fazem\s+entregas|delivery|levantar|levantamento|recolha|pickup|buscar|vir buscar|receber em casa|envio)\b/i,
     content: /\b(?:entrega|delivery|levantamento|recolha|pickup|envio|taxa de entrega|domic[ií]lio)\b/i,
     expansion: 'entrega delivery levantamento recolha pickup envio condições taxa zonas',
   },
