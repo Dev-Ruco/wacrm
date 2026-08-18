@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react"
 import { useRouter } from "next/navigation"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
 import { toast } from "sonner"
 import {
   ArrowLeft,
@@ -140,6 +140,43 @@ const TRIGGER_OPTIONS: { value: AutomationTriggerType }[] = [
   { value: "time_based" },
 ]
 
+const CONVERSATION_COPY = {
+  pt: {
+    action: "Acção",
+    wait: "Espera",
+    condition: "Condição",
+    messageMode: "Quem escreve a mensagem",
+    agentMode: "Pedir ao Agente",
+    fixedMode: "Texto fixo",
+    agentInstruction: "Objectivo / instrução para o agente",
+    agentPlaceholder: "Ex.: Retoma esta conversa naturalmente e responde ao pedido real do cliente. Não repitas perguntas já respondidas.",
+    agentHint: "Usa o mesmo agente da conta, com identidade, contexto da conversa, CRM, memória, Knowledge, Skills, estratégia e ferramentas. Escreve o objectivo; não escrevas a resposta final ao cliente.",
+    fixedText: "Texto da mensagem",
+    fixedHint: "Envia exactamente este texto. Use apenas quando a mensagem precisa de ser determinística; para conversa normal, prefira Pedir ao Agente.",
+    typing: "Mostrar «a escrever…» antes de enviar",
+    typingHint: "Aplica uma pausa curta e proporcional antes de mensagens fixas conversacionais. Modelos oficiais do WhatsApp continuam imediatos.",
+  },
+  en: {
+    action: "Action",
+    wait: "Wait",
+    condition: "Condition",
+    messageMode: "Who writes the message",
+    agentMode: "Ask the Agent",
+    fixedMode: "Fixed text",
+    agentInstruction: "Goal / instruction for the agent",
+    agentPlaceholder: "E.g. Continue this conversation naturally and answer the customer's real request. Do not repeat answered questions.",
+    agentHint: "Uses the same account agent with conversation context, CRM, memory, Knowledge, Skills, strategy and tools. Write the goal, not the final customer reply.",
+    fixedText: "Message text",
+    fixedHint: "Sends exactly this text. Use it when wording must be deterministic; for normal conversation prefer Ask the Agent.",
+    typing: "Show typing before sending",
+    typingHint: "Adds a short proportional pause before conversational fixed text. Official WhatsApp templates remain immediate.",
+  },
+} as const
+
+function conversationCopy(locale: string) {
+  return locale.toLowerCase().startsWith("pt") ? CONVERSATION_COPY.pt : CONVERSATION_COPY.en
+}
+
 function cid(): string {
   return (
     "c_" +
@@ -164,7 +201,9 @@ function asInteractive(cfg: Record<string, unknown>): InteractiveMessagePayload 
 function blankConfig(type: AutomationStepType): Record<string, unknown> {
   switch (type) {
     case "send_message":
-      return { text: "" }
+      // New conversational automations default to the account brain. Existing
+      // rows without `mode` remain fixed text in the runtime and editor.
+      return { text: "", mode: "agent" }
     case "send_buttons":
       return toStepConfig(blankButtonsPayload())
     case "send_list":
@@ -1089,6 +1128,8 @@ function StepRenderer({
   parentPath: StepPath
 } & Omit<StepListProps, "steps" | "parentPath">) {
   const t = useTranslations("Automations.builder")
+  const locale = useLocale()
+  const copy = conversationCopy(locale)
   const path: StepPath = [
     ...parentPath,
     parentScope.kind === "root"
@@ -1099,6 +1140,7 @@ function StepRenderer({
   const Icon = meta.icon
   const expanded = props.expandedId === step.cid
   const isCondition = step.step_type === "condition"
+  const kindLabel = isCondition ? copy.condition : step.step_type === "wait" ? copy.wait : copy.action
   // Card widths on mobile fill the full canvas column (max-w-2xl px-4
   // still keeps them reasonable). On sm+ the original fixed widths
   // come back so the flow visual stays recognisable.
@@ -1126,7 +1168,7 @@ function StepRenderer({
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                {isCondition ? "Condition" : step.step_type === "wait" ? "Wait" : "Action"}
+                {kindLabel}
               </div>
               <div className="truncate text-sm font-medium text-foreground">{t(`steps.${meta.label}`)}</div>
               <div className="truncate text-[11px] text-muted-foreground">{previewFor(step)}</div>
@@ -1290,22 +1332,75 @@ function StepEditor({
   onChange: (s: BuilderStep) => void
 }) {
   const t = useTranslations("Automations.builder")
+  const locale = useLocale()
+  const copy = conversationCopy(locale)
   const cfg = step.step_config
   const set = (patch: Record<string, unknown>) =>
     onChange({ ...step, step_config: { ...cfg, ...patch } })
 
   switch (step.step_type) {
-    case "send_message":
+    case "send_message": {
+      // Backwards compatibility: historical send_message rows have no mode and
+      // must keep sending the exact saved text until an admin deliberately
+      // changes them. Newly-added steps default to agent mode in blankConfig.
+      const mode = cfg.mode === "agent" ? "agent" : "fixed"
       return (
-        <FieldBlock label={t("config.messageText")}>
-          <Textarea
-            value={(cfg.text as string) ?? ""}
-            onChange={(e) => set({ text: e.target.value })}
-            placeholder={t("config.placeholderMessageText")}
-            className="min-h-24 bg-muted text-foreground"
-          />
-        </FieldBlock>
+        <div className="space-y-3">
+          <FieldBlock label={copy.messageMode}>
+            <select
+              value={mode}
+              onChange={(e) => set({ mode: e.target.value })}
+              className={SELECT_CLASS}
+            >
+              <option value="agent">{copy.agentMode}</option>
+              <option value="fixed">{copy.fixedMode}</option>
+            </select>
+          </FieldBlock>
+
+          {mode === "agent" ? (
+            <>
+              <FieldBlock label={copy.agentInstruction}>
+                <Textarea
+                  value={(cfg.text as string) ?? ""}
+                  onChange={(e) => set({ text: e.target.value })}
+                  placeholder={copy.agentPlaceholder}
+                  className="min-h-28 bg-muted text-foreground"
+                />
+              </FieldBlock>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {copy.agentHint}
+              </p>
+            </>
+          ) : (
+            <>
+              <FieldBlock label={copy.fixedText}>
+                <Textarea
+                  value={(cfg.text as string) ?? ""}
+                  onChange={(e) => set({ text: e.target.value })}
+                  placeholder={t("config.placeholderMessageText")}
+                  className="min-h-24 bg-muted text-foreground"
+                />
+              </FieldBlock>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {copy.fixedHint}
+              </p>
+              <div className="flex items-start justify-between gap-4 rounded-md border border-border p-3">
+                <div>
+                  <p className="text-xs font-medium text-foreground">{copy.typing}</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    {copy.typingHint}
+                  </p>
+                </div>
+                <Switch
+                  checked={cfg.humanize !== false}
+                  onCheckedChange={(value) => set({ humanize: !!value })}
+                />
+              </div>
+            </>
+          )}
+        </div>
       )
+    }
     case "send_buttons":
     case "send_list":
       // The whole step_config IS the interactive payload; the shared
@@ -1465,7 +1560,7 @@ function StepEditor({
             />
           </FieldBlock>
           {(cfg.subject === "contact_field" || cfg.subject === "message_content") && (
-            <FieldBlock label="Value">
+            <FieldBlock label={t("config.valueLabel")}>
               <Input
                 value={(cfg.value as string) ?? ""}
                 onChange={(e) => set({ value: e.target.value })}
