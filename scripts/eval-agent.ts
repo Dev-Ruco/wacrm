@@ -4,6 +4,7 @@ import {
   CATALOG_GOLDEN_SET,
   DEFAULT_GOLDEN_SET,
 } from '../src/lib/ai/eval/golden-set'
+import { CONVERSATION_REGRESSION_SET } from '../src/lib/ai/eval/regression-set'
 import { runEvalSuite } from '../src/lib/ai/eval/run'
 import {
   DEFAULT_CUSTOMER_PERSONAS,
@@ -47,7 +48,11 @@ function loadConfig(): AiConfig {
 
 async function main() {
   const config = loadConfig()
-  const goldenSet = [...DEFAULT_GOLDEN_SET, ...CATALOG_GOLDEN_SET]
+  const goldenSet = [
+    ...DEFAULT_GOLDEN_SET,
+    ...CATALOG_GOLDEN_SET,
+    ...CONVERSATION_REGRESSION_SET,
+  ]
   const result = await runEvalSuite(config, goldenSet, {
     baselineScore: optionalNumber('WACRM_EVAL_BASELINE'),
     minimumScore: optionalNumber('WACRM_EVAL_MINIMUM') ?? 0.75,
