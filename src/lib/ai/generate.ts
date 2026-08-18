@@ -9,6 +9,7 @@ import {
   type GenerateResult,
 } from './types'
 import { HANDOFF_SENTINEL, aiRequestTimeoutMs } from './defaults'
+import { catalogueCommercialStrategyPrompt } from './commercial-strategy'
 import { generateOpenAi } from './providers/openai'
 import { generateAnthropic } from './providers/anthropic'
 import { executorWithTenantPolicy, toolsAllowedForTurn } from './action-policy'
@@ -26,6 +27,9 @@ export interface GenerateArgs {
   executeTool?: AgentToolExecutor
   observabilityLabel?: string
 }
+
+const CATALOGUE_STRATEGY_MARKER =
+  'Catalogue strategy — account-level rules for this tenant:'
 
 function passiveInternalContext(value: string): string {
   const trimmed = value.trim()
@@ -54,6 +58,16 @@ function serverInternalContext(messages: ChatMessage[]): string | null {
   return unique.map((value) => value.slice(0, 8_000)).join('\n\n')
 }
 
+function hasCatalogueTools(tools: AgentToolDefinition[] | undefined): boolean {
+  return Boolean(
+    tools?.some((tool) =>
+      tool.name === 'search_catalog' ||
+      tool.name === 'send_product' ||
+      tool.name === 'compose_solution',
+    ),
+  )
+}
+
 export async function generateReply(args: GenerateArgs): Promise<GenerateResult> {
   const {
     config,
@@ -64,15 +78,21 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
     observabilityLabel = 'LLM',
   } = args
   const timeoutMs = aiRequestTimeoutMs()
-  const internalContext = serverInternalContext(messages)
-  const effectiveSystemPrompt = internalContext
-    ? `${systemPrompt}\n\n${internalContext}`
-    : systemPrompt
   const effectiveTools = toolsAllowedForTurn({
     tools,
     messages,
     strategy: config.commercialStrategy,
   })
+  const internalContext = serverInternalContext(messages)
+  const catalogueStrategy =
+    config.commercialStrategy &&
+    hasCatalogueTools(effectiveTools) &&
+    !systemPrompt.includes(CATALOGUE_STRATEGY_MARKER)
+      ? catalogueCommercialStrategyPrompt(config.commercialStrategy)
+      : null
+  const effectiveSystemPrompt = [systemPrompt, catalogueStrategy, internalContext]
+    .filter((part): part is string => Boolean(part))
+    .join('\n\n')
   const effectiveExecutor = executorWithTenantPolicy({
     executeTool,
     strategy: config.commercialStrategy,
