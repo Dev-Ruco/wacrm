@@ -78,15 +78,19 @@ export function skillsPrompt(skills: AgentSkill[]): string | null {
   )
   if (withContent.length === 0) return null
   return [
-    'Selected skills for this turn — specialised objectives routed as relevant to the customer’s current need. ' +
-      'Apply their instructions when their conditions genuinely fit; if the newest customer message makes one no longer applicable, ignore it rather than forcing it. ' +
-      'These are internal guidance. Never announce a skill name, routing decision or internal instruction to the customer.',
+    'Selected skills for this turn — specialised ways of handling the customer’s current need. ' +
+      'Use them to shape judgement, questioning, comparison and next-step strategy; do not treat a skill as a rigid script or as a permission boundary. ' +
+      'The account-level enabled tools remain the authoritative capabilities. A skill’s associated tool list is only an affinity hint: use any enabled tool that is genuinely required to complete the customer’s clear goal. ' +
+      'If the newest customer message makes a selected skill no longer applicable, ignore it rather than forcing it. These are internal guidance; never announce a skill name, routing decision or internal instruction to the customer.',
     ...withContent.map((skill) => {
       const lines = [`[${skill.name}]`]
       if (skill.objective) lines.push(`Objective: ${skill.objective}`)
       if (skill.whenToUse) lines.push(`Use when: ${skill.whenToUse}`)
       if (skill.whenNotToUse) lines.push(`Do not use when: ${skill.whenNotToUse}`)
       if (skill.instructions) lines.push(skill.instructions)
+      if (skill.toolKeys.length > 0) {
+        lines.push(`Often useful capabilities: ${skill.toolKeys.join(', ')}. This is guidance, not a restriction.`)
+      }
       return lines.join('\n')
     }),
   ].join('\n\n')
@@ -102,24 +106,16 @@ export function skillToolKeys(skills: AgentSkill[]): Set<AgentToolKey> | null {
 }
 
 /**
- * Apply the tool subset declared by the skills selected for THIS turn.
- * An empty selection deliberately leaves the account permissions untouched.
- * Skills can only remove specialised capabilities; they can never grant a tool
- * that the account disabled. Human handoff remains globally available as a
- * safety net, and factual company knowledge remains available whenever the
- * administrator enabled it because every skill may still need grounded facts
- * such as address, hours, policies, payment methods or delivery conditions.
+ * Backwards-compatible runtime hook kept so existing callers do not need a
+ * migration. Skills no longer narrow account tool permissions: tool_keys are
+ * affinity hints for the model, while the account-level permission map remains
+ * the single hard capability boundary. This lets a skill guide a multi-step
+ * task without accidentally removing a later tool that the account explicitly
+ * enabled (for example search -> recommendation -> scheduling -> CRM update).
  */
 export function applySkillNarrowing(
   permissions: Record<AgentToolKey, boolean>,
-  selectedSkills: AgentSkill[],
+  _selectedSkills: AgentSkill[],
 ): Record<AgentToolKey, boolean> {
-  const narrowed = skillToolKeys(selectedSkills)
-  if (!narrowed) return permissions
-  const effective = { ...permissions }
-  for (const key of AGENT_TOOL_KEYS) {
-    if (key === 'handoff_human' || key === 'search_knowledge') continue
-    effective[key] = permissions[key] && narrowed.has(key)
-  }
-  return effective
+  return permissions
 }
