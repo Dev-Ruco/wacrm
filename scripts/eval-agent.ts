@@ -1,6 +1,9 @@
 import { DEFAULT_COMMERCIAL_STRATEGY } from '../src/lib/ai/commercial-strategy'
 import { AI_PROVIDER_DEFAULT_MODEL } from '../src/lib/ai/defaults'
-import { DEFAULT_GOLDEN_SET } from '../src/lib/ai/eval/golden-set'
+import {
+  CATALOG_GOLDEN_SET,
+  DEFAULT_GOLDEN_SET,
+} from '../src/lib/ai/eval/golden-set'
 import { runEvalSuite } from '../src/lib/ai/eval/run'
 import {
   DEFAULT_CUSTOMER_PERSONAS,
@@ -44,7 +47,8 @@ function loadConfig(): AiConfig {
 
 async function main() {
   const config = loadConfig()
-  const result = await runEvalSuite(config, DEFAULT_GOLDEN_SET, {
+  const goldenSet = [...DEFAULT_GOLDEN_SET, ...CATALOG_GOLDEN_SET]
+  const result = await runEvalSuite(config, goldenSet, {
     baselineScore: optionalNumber('WACRM_EVAL_BASELINE'),
     minimumScore: optionalNumber('WACRM_EVAL_MINIMUM') ?? 0.75,
     allowedRegression:
@@ -65,6 +69,7 @@ async function main() {
     provider: config.provider,
     model: config.model,
     generated_at: new Date().toISOString(),
+    cases: goldenSet.length,
     evaluation: result,
     simulations,
   }
