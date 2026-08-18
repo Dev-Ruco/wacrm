@@ -13,7 +13,6 @@ import {
   FileText,
   MessageCircle,
   Clock,
-  Users,
   PhoneCall,
   Loader2,
   LayoutTemplate,
@@ -21,7 +20,7 @@ import {
 
 import { createClient } from '@/lib/supabase/client';
 import { useCan } from '@/hooks/use-can';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import type { Automation } from '@/types';
 import { Button } from '@/components/ui/button';
 import { GatedButton } from '@/components/ui/gated-button';
@@ -48,22 +47,69 @@ import {
 import { triggerMeta, formatRelative } from '@/lib/automations/trigger-meta';
 import { cn } from '@/lib/utils';
 
+// Only templates that are safe recommendations for the modern agent runtime.
+// The legacy keyword-based lead qualifier still exists for old deep links and
+// saved automations, but is intentionally not promoted until Automations have
+// a semantic intent trigger instead of language-specific keywords.
 const TEMPLATE_ORDER: TemplateSlug[] = [
   'welcome_message',
   'out_of_office',
-  'lead_qualifier',
   'follow_up_reminder',
 ];
 
 const TEMPLATE_ICON: Record<TemplateSlug, typeof Zap> = {
   welcome_message: MessageCircle,
   out_of_office: Clock,
-  lead_qualifier: Users,
+  lead_qualifier: Zap,
   follow_up_reminder: PhoneCall,
 };
 
+const QUICK_START_COPY = {
+  pt: {
+    welcome_message: {
+      name: 'Primeiro contacto inteligente',
+      description: 'Deixa o agente responder naturalmente à primeira mensagem, com contexto e sem saudação pré-fabricada.',
+    },
+    out_of_office: {
+      name: 'Atendimento fora do horário',
+      description: 'Mantém o agente a ajudar fora do horário e só fala da equipa física quando isso for realmente necessário.',
+    },
+    follow_up_reminder: {
+      name: 'Seguimento contextual',
+      description: 'Retoma uma conversa parada através do mesmo agente e do contexto real, em vez de enviar um lembrete genérico.',
+    },
+  },
+  en: {
+    welcome_message: {
+      name: 'Smart first contact',
+      description: 'Let the agent answer the real first message naturally, with context and without a canned greeting.',
+    },
+    out_of_office: {
+      name: 'After-hours agent',
+      description: 'Keep the agent useful after hours and mention human or physical availability only when it matters.',
+    },
+    follow_up_reminder: {
+      name: 'Contextual follow-up',
+      description: 'Resume a quiet conversation through the same agent and real context instead of a generic reminder.',
+    },
+  },
+} as const;
+
+function quickStartCopy(locale: string, slug: TemplateSlug) {
+  const lang = locale.toLowerCase().startsWith('pt') ? 'pt' : 'en';
+  const copy = QUICK_START_COPY[lang];
+  if (slug === 'lead_qualifier') {
+    return {
+      name: AUTOMATION_TEMPLATES[slug].name,
+      description: AUTOMATION_TEMPLATES[slug].description,
+    };
+  }
+  return copy[slug];
+}
+
 export default function AutomationsPage() {
   const router = useRouter();
+  const locale = useLocale();
   const canCreate = useCan('send-messages');
   const t = useTranslations('Automations.list');
   const [automations, setAutomations] = useState<Automation[] | null>(null);
@@ -204,9 +250,9 @@ export default function AutomationsPage() {
                   </Button>
                 }
               />
-              <DropdownMenuContent align="end" className="w-72">
+              <DropdownMenuContent align="end" className="w-80">
                 {TEMPLATE_ORDER.map((slug) => {
-                  const template = AUTOMATION_TEMPLATES[slug];
+                  const copy = quickStartCopy(locale, slug);
                   const Icon = TEMPLATE_ICON[slug];
                   return (
                     <DropdownMenuItem
@@ -217,10 +263,10 @@ export default function AutomationsPage() {
                       <Icon className="text-primary mt-0.5 size-4 shrink-0" />
                       <span className="min-w-0">
                         <span className="block text-sm font-medium">
-                          {template.name}
+                          {copy.name}
                         </span>
                         <span className="text-muted-foreground mt-0.5 block text-xs leading-snug">
-                          {template.description}
+                          {copy.description}
                         </span>
                       </span>
                     </DropdownMenuItem>
