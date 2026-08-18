@@ -43,29 +43,37 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#020617",
+  themeColor: "#102229",
   colorScheme: "dark light",
 };
 
-// Inline boot script — runs before React hydrates so the user's
-// chosen accent (data-theme) AND mode (data-mode) are on the <html>
-// element before first paint. Without this every page load flashes
-// the server-rendered defaults for a frame before the React tree
-// mounts and applies the picked values.
+/*
+ * Before React paints we resolve appearance. The one-time product migration
+ * below moves existing installations from the historical violet/dark default
+ * to the new WACRM Blue/light identity. After that first migration users are
+ * free to change theme or mode again and their choices remain respected.
+ */
 const THEME_BOOT_SCRIPT = `
 (function(){
   var d = document.documentElement;
   try {
     var THEME_KEY = ${JSON.stringify(STORAGE_KEY)};
-    var THEME_DEFAULT = ${JSON.stringify(DEFAULT_THEME)};
-    var THEMES = ${JSON.stringify(THEME_IDS)};
-    var savedTheme = localStorage.getItem(THEME_KEY);
-    d.dataset.theme = THEMES.indexOf(savedTheme) !== -1 ? savedTheme : THEME_DEFAULT;
-
     var MODE_KEY = ${JSON.stringify(MODE_STORAGE_KEY)};
+    var MIGRATION_KEY = 'wacrm.design.identity.v2';
+    var THEME_DEFAULT = ${JSON.stringify(DEFAULT_THEME)};
     var MODE_DEFAULT = ${JSON.stringify(DEFAULT_MODE)};
+    var THEMES = ${JSON.stringify(THEME_IDS)};
     var MODES = ${JSON.stringify(MODES)};
+
+    if (localStorage.getItem(MIGRATION_KEY) !== 'done') {
+      localStorage.setItem(THEME_KEY, THEME_DEFAULT);
+      localStorage.setItem(MODE_KEY, MODE_DEFAULT);
+      localStorage.setItem(MIGRATION_KEY, 'done');
+    }
+
+    var savedTheme = localStorage.getItem(THEME_KEY);
     var savedMode = localStorage.getItem(MODE_KEY);
+    d.dataset.theme = THEMES.indexOf(savedTheme) !== -1 ? savedTheme : THEME_DEFAULT;
     d.dataset.mode = MODES.indexOf(savedMode) !== -1 ? savedMode : MODE_DEFAULT;
   } catch (_e) {
     d.dataset.theme = ${JSON.stringify(DEFAULT_THEME)};
