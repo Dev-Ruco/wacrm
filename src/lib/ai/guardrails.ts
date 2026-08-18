@@ -14,6 +14,8 @@ export type GuardrailViolation =
   | 'unverified_availability'
   | 'unsafe_promise'
   | 'history_annotation_leak'
+  | 'raw_tool_payload'
+  | 'tool_name_leak'
 
 export interface GuardrailResult {
   safe: boolean
@@ -93,6 +95,40 @@ function hasInternalPlaceholder(text: string): boolean {
   )
 }
 
+function looksLikeRawToolPayload(text: string): boolean {
+  const trimmed = text.trim()
+  if (!(trimmed.startsWith('{') && trimmed.endsWith('}'))) return false
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false
+    const keys = Object.keys(parsed as Record<string, unknown>)
+    const toolish = new Set([
+      'ok',
+      'query',
+      'found',
+      'products',
+      'matches',
+      'instruction',
+      'filters',
+      'policy_blocked',
+      'scheduled',
+      'scheduled_at',
+      'handoff_requested',
+      'product_ref',
+      'matched_attributes',
+    ])
+    return keys.filter((key) => toolish.has(key)).length >= 2
+  } catch {
+    return false
+  }
+}
+
+function exposesToolName(text: string): boolean {
+  return /\b(?:search_catalog|send_product|search_knowledge|compose_solution|get_style_opinion|schedule_visit|create_deal|add_tag|handoff_human|check_availability|get_order_status|update_contact)\b/.test(
+    text,
+  )
+}
+
 function amountIsTrusted(amount: number, trusted: number[]): boolean {
   return trusted.some((candidate) => Math.abs(candidate - amount) < 0.01)
 }
@@ -120,6 +156,12 @@ export function evaluateAgentOutput(args: {
   }
   if (hasInternalPlaceholder(withoutHistoryAnnotations)) {
     violations.add('internal_placeholder')
+  }
+  if (looksLikeRawToolPayload(withoutHistoryAnnotations)) {
+    violations.add('raw_tool_payload')
+  }
+  if (exposesToolName(withoutHistoryAnnotations)) {
+    violations.add('tool_name_leak')
   }
   // buildConversationContext annotates past media/interactive messages with
   // bracketed markers like "[Opção interactiva no WhatsApp]" so the model
