@@ -8,15 +8,16 @@ import { TopNav } from "@/components/layout/top-nav";
 import { ContextualSubmenu } from "@/components/layout/contextual-submenu";
 import { findActiveArea } from "@/lib/navigation/nav-areas";
 import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
+import { cn } from "@/lib/utils";
 
-// Auth-gated dashboard shell. Desktop uses the permanent WACRM workspace
-// sidebar; mobile keeps the existing compact top navigation while the wider
-// redesign is rolled out module by module.
 function DashboardShellInner({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const activeArea = findActiveArea(pathname);
+  const isInbox = pathname === "/inbox" || pathname.startsWith("/inbox/");
+  const isCanvas = pathname.startsWith("/flows/");
+  const fullBleed = isInbox || isCanvas;
 
   useEffect(() => {
     if (!loading && !user) {
@@ -40,7 +41,6 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <PresenceHeartbeat />
-
       <AppSidebar />
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -49,12 +49,20 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          {activeArea?.submenu?.length ? (
+          {activeArea?.submenu?.length && !isInbox ? (
             <div className="lg:hidden">
               <ContextualSubmenu area={activeArea} />
             </div>
           ) : null}
-          <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-7">
+
+          <main
+            className={cn(
+              "min-h-0 flex-1 bg-background",
+              fullBleed ? "overflow-hidden p-0" : "overflow-y-auto p-4 sm:p-6 lg:p-7",
+              isInbox && "wacrm-inbox-shell",
+              !fullBleed && "wacrm-workspace-shell"
+            )}
+          >
             {children}
           </main>
         </div>
