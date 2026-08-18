@@ -31,6 +31,23 @@ interface AiConfigRow {
 const CONFIG_COLUMNS =
   'id, provider, model, api_key, system_prompt, commercial_strategy, is_active, auto_reply_enabled, auto_reply_max_per_conversation, buffer_window_seconds, max_reply_chunks, handoff_agent_id, embeddings_api_key, usd_to_mzn_rate, temperature, agent_name, agent_role, agent_language, agent_description'
 
+/**
+ * A modern agent can legitimately need many short WhatsApp turns to complete
+ * one sale or service journey. Historical tenants often still have very low
+ * caps (for example 10), which now interrupt healthy conversations mid-task.
+ * Keep the persisted field as a cost/safety ceiling, but never allow a legacy
+ * value below this runtime floor to force a premature human handoff.
+ */
+export const MIN_AUTO_REPLY_CAP_PER_CONVERSATION = 50
+
+export function effectiveAutoReplyCap(value: unknown): number {
+  const parsed = Number(value)
+  const configured = Number.isFinite(parsed) && parsed > 0
+    ? Math.floor(parsed)
+    : MIN_AUTO_REPLY_CAP_PER_CONVERSATION
+  return Math.max(MIN_AUTO_REPLY_CAP_PER_CONVERSATION, configured)
+}
+
 export async function loadAiConfig(
   db: WacrmSupabaseClient,
   accountId: string,
@@ -79,7 +96,9 @@ export async function loadAiConfig(
     commercialStrategy,
     isActive: row.is_active,
     autoReplyEnabled: row.auto_reply_enabled,
-    autoReplyMaxPerConversation: row.auto_reply_max_per_conversation,
+    autoReplyMaxPerConversation: effectiveAutoReplyCap(
+      row.auto_reply_max_per_conversation,
+    ),
     bufferWindowSeconds: row.buffer_window_seconds,
     maxReplyChunks: row.max_reply_chunks,
     handoffAgentId: row.handoff_agent_id,
