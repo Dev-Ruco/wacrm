@@ -22,6 +22,7 @@ import { supabaseAdmin } from './admin-client'
 import { addContactTagIfAbsent } from '@/lib/contacts/tag-write'
 import { MAX_TAG_CHAIN_DEPTH, getTagChainDepth } from '@/lib/contacts/tag-chain'
 import { engineSendText, engineSendTemplate, engineSendInteractive } from './meta-send'
+import { runAutomationAgentTurn } from './agent-turn'
 import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 
@@ -366,24 +367,44 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
   }
 }
 
+type ConversationalMessageConfig = SendMessageStepConfig & {
+  /** Fixed text (default) or ask the account's existing agent brain to reply. */
+  mode?: 'fixed' | 'agent'
+  /** Fixed conversational messages use typing cadence by default. */
+  humanize?: boolean
+}
+
 async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string> {
   const db = supabaseAdmin()
 
   switch (step.step_type) {
     case 'send_message': {
-      const cfg = step.step_config as SendMessageStepConfig
+      const cfg = step.step_config as ConversationalMessageConfig
       if (!args.contactId) throw new Error('send_message needs a contact')
       const text = interpolate(cfg.text, args)
       if (!text.trim()) throw new Error('send_message has empty text')
       const conversationId = await resolveConversationId(args)
+
+      if (cfg.mode === 'agent') {
+        await runAutomationAgentTurn({
+          accountId: args.automation.account_id,
+          userId: args.automation.user_id,
+          conversationId,
+          contactId: args.contactId,
+          instruction: text,
+        })
+        return 'account agent turn requested'
+      }
+
       const { whatsapp_message_id } = await engineSendText({
         accountId: args.automation.account_id,
         userId: args.automation.user_id,
         conversationId,
         contactId: args.contactId,
         text,
+        humanize: cfg.humanize !== false,
       })
-      return `sent via Meta (${whatsapp_message_id})`
+      return `sent via channel (${whatsapp_message_id})`
     }
 
     case 'send_buttons':
