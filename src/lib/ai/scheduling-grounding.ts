@@ -1,16 +1,16 @@
 const DATE_PATTERNS = [
   /\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/i,
   /\b\d{4}-\d{2}-\d{2}\b/i,
-  /\b(?:hoje|amanha|amanhã|depois de amanha|depois de amanhã)\b/i,
-  /\b(?:segunda(?:-feira)?|terca(?:-feira)?|terça(?:-feira)?|quarta(?:-feira)?|quinta(?:-feira)?|sexta(?:-feira)?|sabado|sábado|domingo)\b/i,
+  /(?:^|\s)(?:hoje|amanha|amanhã|depois de amanha|depois de amanhã)(?=$|\s|[,.?!;:])/i,
+  /(?:^|\s)(?:segunda(?:-feira)?|terca(?:-feira)?|terça(?:-feira)?|quarta(?:-feira)?|quinta(?:-feira)?|sexta(?:-feira)?|sabado|sábado|domingo)(?=$|\s|[,.?!;:])/i,
   /\bdia\s+\d{1,2}\b/i,
-  /\b\d{1,2}\s+de\s+(?:janeiro|fevereiro|marco|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/i,
+  /\b\d{1,2}\s+de\s+(?:janeiro|fevereiro|marco|março|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)(?=$|\s|[,.?!;:])/i,
 ]
 
 const TIME_PATTERNS = [
   /\b(?:[01]?\d|2[0-3]):[0-5]\d\b/,
   /\b(?:[01]?\d|2[0-3])h(?:[0-5]\d)?\b/i,
-  /\b(?:as|às|pelas?)\s+(?:[01]?\d|2[0-3])(?:\s*horas?)?\b/i,
+  /(?:^|\s)(?:as|às|pelas?)\s+(?:[01]?\d|2[0-3])(?:[:h](?:[0-5]\d)?)?(?:\s*horas?)?(?=$|\s|[,.?!;:])/i,
 ]
 
 function hasPattern(text: string, patterns: readonly RegExp[]): boolean {
