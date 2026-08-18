@@ -67,7 +67,7 @@ export async function notifyWebsiteCustomerIfOffline(args: {
     conversationId: args.conversationId,
     title: channel.name || 'Nova resposta',
     body: preview,
-    url: '/',
+    url: '/?chat=1',
   }).catch((error) => console.error('[site-chat offline] push failed:', error))
 
   if (!channel.offline_whatsapp_enabled || !channel.offline_reply_template_id) return
