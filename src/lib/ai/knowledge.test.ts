@@ -7,13 +7,16 @@ vi.mock('./embeddings', () => ({
   toVectorLiteral: (v: number[]) => `[${v.join(',')}]`,
 }))
 
-import { retrieveKnowledge, ingestDocument } from './knowledge'
+import { retrieveKnowledge, ingestDocument, expandKnowledgeQuery, isLocationKnowledgeQuery } from './knowledge'
 
 interface FakeState {
   semantic: { id: string; content: string }[]
   fts: { id: string; content: string }[]
+  expandedFts: { id: string; content: string }[]
+  chunks: { id: string; content: string }[]
   chunkCount: number
   rpcCalls: string[]
+  rpcQueries: string[]
   inserted: Record<string, unknown>[] | null
   deletedFor: string | null
 }
@@ -22,25 +25,40 @@ function makeDb() {
   const state: FakeState = {
     semantic: [],
     fts: [],
-    chunkCount: 5, // account has a non-empty KB by default
+    expandedFts: [],
+    chunks: [],
+    chunkCount: 5,
     rpcCalls: [],
+    rpcQueries: [],
     inserted: null,
     deletedFor: null,
   }
   const db = {
-    rpc: (name: string) => {
+    rpc: (name: string, args?: Record<string, unknown>) => {
       state.rpcCalls.push(name)
       if (name === 'match_ai_knowledge_semantic')
         return Promise.resolve({ data: state.semantic, error: null })
-      if (name === 'match_ai_knowledge_fts')
-        return Promise.resolve({ data: state.fts, error: null })
+      if (name === 'match_ai_knowledge_fts') {
+        const query = typeof args?.p_query === 'string' ? args.p_query : ''
+        state.rpcQueries.push(query)
+        const data = state.rpcQueries.length > 1 ? state.expandedFts : state.fts
+        return Promise.resolve({ data, error: null })
+      }
       return Promise.resolve({ data: null, error: null })
     },
     from: () => ({
-      // retrieveKnowledge's empty-KB count guard.
-      select: () => ({
-        eq: () => Promise.resolve({ count: state.chunkCount, error: null }),
-      }),
+      select: (columns?: string) => {
+        if (columns === 'id, content') {
+          return {
+            eq: () => ({
+              limit: () => Promise.resolve({ data: state.chunks, error: null }),
+            }),
+          }
+        }
+        return {
+          eq: () => Promise.resolve({ count: state.chunkCount, error: null }),
+        }
+      },
       delete: () => ({
         eq: (_col: string, val: string) => {
           state.deletedFor = val
@@ -98,7 +116,6 @@ describe('retrieveKnowledge', () => {
     const out = await retrieveKnowledge(db, 'acct', { embeddingsApiKey: 'sk-x' }, 'q', 3)
     expect(out).toEqual(['S1', 'S2', 'S3'])
     expect(h.embedTexts).toHaveBeenCalledTimes(1)
-    // Enough semantic hits → no FTS top-up.
     expect(state.rpcCalls).toEqual(['match_ai_knowledge_semantic'])
   })
 
@@ -109,7 +126,7 @@ describe('retrieveKnowledge', () => {
       { id: 's2', content: 'S2' },
     ]
     state.fts = [
-      { id: 's2', content: 'S2-dup' }, // dedup by id
+      { id: 's2', content: 'S2-dup' },
       { id: 'f1', content: 'F1' },
     ]
     const out = await retrieveKnowledge(db, 'acct', { embeddingsApiKey: 'sk-x' }, 'q', 3)
@@ -118,6 +135,42 @@ describe('retrieveKnowledge', () => {
       'match_ai_knowledge_semantic',
       'match_ai_knowledge_fts',
     ])
+  })
+
+  it('tries the original query before lexical expansion for a short location query', async () => {
+    const { db, state } = makeDb()
+    state.expandedFts = [{ id: 'f1', content: 'Morada: Avenida 24 de Julho, Maputo' }]
+    const out = await retrieveKnowledge(db, 'acct', { embeddingsApiKey: null }, 'onde fica', 3)
+    expect(out).toEqual(['Morada: Avenida 24 de Julho, Maputo'])
+    expect(state.rpcQueries[0]).toBe('onde fica')
+    expect(state.rpcQueries[1]).toContain('morada')
+  })
+
+  it('falls back to account chunks only after normal and expanded location search miss', async () => {
+    const { db, state } = makeDb()
+    state.chunks = [
+      { id: 'c1', content: 'Informação promocional sem localização.' },
+      { id: 'c2', content: 'Morada da loja: Av. Eduardo Mondlane, Maputo.' },
+    ]
+    const out = await retrieveKnowledge(db, 'acct', { embeddingsApiKey: null }, 'onde fica', 3)
+    expect(out).toEqual([
+      'Informação promocional sem localização.',
+      'Morada da loja: Av. Eduardo Mondlane, Maputo.',
+    ])
+    expect(state.rpcQueries).toHaveLength(2)
+  })
+})
+
+describe('location fallback helpers', () => {
+  it('recognises common location wording only for fallback recovery', () => {
+    expect(isLocationKnowledgeQuery('onde fica')).toBe(true)
+    expect(isLocationKnowledgeQuery('qual é a morada?')).toBe(true)
+    expect(isLocationKnowledgeQuery('como chegar à loja?')).toBe(true)
+    expect(isLocationKnowledgeQuery('quanto custa?')).toBe(false)
+  })
+
+  it('leaves unrelated queries unchanged', () => {
+    expect(expandKnowledgeQuery('qual é a política de troca?')).toBe('qual é a política de troca?')
   })
 })
 
@@ -128,7 +181,7 @@ describe('ingestDocument', () => {
     expect(h.embedTexts).toHaveBeenCalledTimes(1)
     expect(state.deletedFor).toBe('doc-1')
     expect(state.inserted).toHaveLength(1)
-    expect(state.inserted![0].embedding).toBe('[0,0]') // literal from mocked embed
+    expect(state.inserted![0].embedding).toBe('[0,0]')
     expect(state.inserted![0].account_id).toBe('acct')
   })
 
@@ -153,7 +206,6 @@ describe('ingestDocument', () => {
     await expect(
       ingestDocument(db, 'acct', { embeddingsApiKey: 'sk-x' }, 'doc-1', 'hello world'),
     ).rejects.toThrow('rate limited')
-    // Chunks were inserted (lexical search works) despite the embed failure…
     expect(state.inserted).toHaveLength(1)
     expect(state.inserted![0].embedding).toBeNull()
   })
