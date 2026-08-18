@@ -156,18 +156,43 @@ describe('retrieveKnowledge', () => {
     expect(out).toContain('Morada da loja: Av. Eduardo Mondlane, Maputo.')
     expect(state.rpcQueries).toHaveLength(2)
   })
+
+  it('recovers terse business-hours questions from relevant account chunks', async () => {
+    const { db, state } = makeDb()
+    state.chunks = [
+      { id: 'c1', content: 'Aceitamos pagamentos por transferência.' },
+      { id: 'c2', content: 'Horário de funcionamento: segunda a sexta, 9h às 18h.' },
+    ]
+    const out = await retrieveKnowledge(db, 'acct', { embeddingsApiKey: null }, 'que horas abrem?', 3)
+    expect(out).toContain('Horário de funcionamento: segunda a sexta, 9h às 18h.')
+    expect(state.rpcQueries[1]).toContain('funcionamento')
+  })
+
+  it('recovers payment wording without confusing it with a price question', async () => {
+    const { db, state } = makeDb()
+    state.expandedFts = [{ id: 'p1', content: 'Pagamentos: M-Pesa, cartão e transferência.' }]
+    const out = await retrieveKnowledge(db, 'acct', { embeddingsApiKey: null }, 'posso pagar por M-Pesa?', 3)
+    expect(out).toEqual(['Pagamentos: M-Pesa, cartão e transferência.'])
+    expect(state.rpcQueries[1]).toContain('pagamento')
+  })
 })
 
-describe('location fallback helpers', () => {
-  it('recognises common location wording only for fallback recovery', () => {
+describe('business-fact fallback helpers', () => {
+  it('recognises common location wording only for the location helper', () => {
     expect(isLocationKnowledgeQuery('onde fica')).toBe(true)
     expect(isLocationKnowledgeQuery('qual é a morada?')).toBe(true)
     expect(isLocationKnowledgeQuery('como chegar à loja?')).toBe(true)
     expect(isLocationKnowledgeQuery('quanto custa?')).toBe(false)
   })
 
+  it('expands core business-fact queries with retrieval vocabulary', () => {
+    expect(expandKnowledgeQuery('qual é a política de troca?')).toContain('devolução')
+    expect(expandKnowledgeQuery('que horas abre?')).toContain('funcionamento')
+    expect(expandKnowledgeQuery('fazem entregas?')).toContain('delivery')
+  })
+
   it('leaves unrelated queries unchanged', () => {
-    expect(expandKnowledgeQuery('qual é a política de troca?')).toBe('qual é a política de troca?')
+    expect(expandKnowledgeQuery('quanto custa a legging?')).toBe('quanto custa a legging?')
   })
 })
 
