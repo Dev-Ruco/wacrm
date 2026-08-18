@@ -5,14 +5,21 @@ import type { AiConfig } from './types'
 const h = vi.hoisted(() => ({
   loadAiConfig: vi.fn(),
   dispatchInboundToAiReply: vi.fn(),
+  sendTypingIndicator: vi.fn(),
   rpc: vi.fn(),
   from: vi.fn(),
   outboundLookup: vi.fn(),
+  currentGeneration: 1,
+  burstStartedAt: '',
+  pendingSince: '',
 }))
 
 vi.mock('./config', () => ({ loadAiConfig: h.loadAiConfig }))
 vi.mock('./auto-reply', () => ({
   dispatchInboundToAiReply: h.dispatchInboundToAiReply,
+}))
+vi.mock('@/lib/flows/meta-send', () => ({
+  engineSendTypingIndicator: h.sendTypingIndicator,
 }))
 vi.mock('./admin-client', () => ({
   supabaseAdmin: () => ({ rpc: h.rpc, from: h.from }),
@@ -72,15 +79,38 @@ function messageQuery() {
   return query
 }
 
+function conversationQuery() {
+  const query = {
+    select: vi.fn(() => query),
+    eq: vi.fn(() => query),
+    maybeSingle: vi.fn(() =>
+      Promise.resolve({
+        data: {
+          ai_dispatch_generation: h.currentGeneration,
+          ai_dispatch_pending_since: h.pendingSince,
+          ai_dispatch_burst_started_at: h.burstStartedAt,
+        },
+        error: null,
+      }),
+    ),
+  }
+  return query
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.clearAllMocks()
+  h.currentGeneration = 1
+  h.pendingSince = new Date(Date.now()).toISOString()
+  h.burstStartedAt = h.pendingSince
   h.loadAiConfig.mockResolvedValue(aiConfig())
   h.dispatchInboundToAiReply.mockResolvedValue(undefined)
+  h.sendTypingIndicator.mockResolvedValue(undefined)
   h.outboundLookup.mockResolvedValue({ data: null, error: null })
   h.from.mockImplementation((table: string) => {
-    if (table !== 'messages') throw new Error(`Unexpected table: ${table}`)
-    return messageQuery()
+    if (table === 'messages') return messageQuery()
+    if (table === 'conversations') return conversationQuery()
+    throw new Error(`Unexpected table: ${table}`)
   })
   h.rpc.mockImplementation((name: string) => {
     if (name === 'schedule_ai_dispatch') {
@@ -109,13 +139,19 @@ describe('AI message buffer', () => {
     })
   })
 
-  it('preserves the single-message behaviour after the configured quiet window', async () => {
+  it('shows presence immediately and dispatches a lone message after the short adaptive quiet period', async () => {
     const pending = dispatchBufferedInboundToAiReply({
       ...DISPATCH_ARGS,
       generation: 1,
     })
 
-    await vi.advanceTimersByTimeAsync(11_999)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.sendTypingIndicator).toHaveBeenCalledWith({
+      accountId: 'acct-1',
+      inboundMessageId: 'wamid.inbound-1',
+    })
+
+    await vi.advanceTimersByTimeAsync(2_499)
     expect(h.dispatchInboundToAiReply).not.toHaveBeenCalled()
 
     await vi.advanceTimersByTimeAsync(1)
@@ -128,6 +164,19 @@ describe('AI message buffer', () => {
     })
     expect(h.dispatchInboundToAiReply).toHaveBeenCalledOnce()
     expect(h.dispatchInboundToAiReply).toHaveBeenCalledWith(DISPATCH_ARGS)
+  })
+
+  it('uses the configured buffer as a maximum burst ceiling', async () => {
+    h.burstStartedAt = new Date(Date.now() - 8_000).toISOString()
+    h.pendingSince = new Date(Date.now()).toISOString()
+    h.loadAiConfig.mockResolvedValue(aiConfig({ bufferWindowSeconds: 8 }))
+
+    await dispatchBufferedInboundToAiReply({
+      ...DISPATCH_ARGS,
+      generation: 1,
+    })
+
+    expect(h.dispatchInboundToAiReply).toHaveBeenCalledOnce()
   })
 
   it('suppresses the AI when a deterministic bot reply was already sent after the inbound', async () => {
@@ -171,6 +220,8 @@ describe('AI message buffer', () => {
       generation: 1,
     })
     fragments.push('pretas', 'tamanho 42')
+    h.currentGeneration = 2
+    h.pendingSince = new Date(Date.now()).toISOString()
     const latest = dispatchBufferedInboundToAiReply({
       ...DISPATCH_ARGS,
       generation: 2,
@@ -188,6 +239,7 @@ describe('AI message buffer', () => {
   })
 
   it('allows exactly one winner when two invocations race for one generation', async () => {
+    h.currentGeneration = 3
     let claimed = false
     h.rpc.mockImplementation((name: string) => {
       if (name !== 'claim_ai_dispatch') {
