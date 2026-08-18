@@ -39,10 +39,7 @@ type CatalogView =
 
 type RequestedCatalogView = CatalogView | 'products' | 'health';
 
-const VIEW_META: Record<
-  CatalogView,
-  { label: string; description: string; icon: typeof FolderOpen }
-> = {
+const VIEW_META: Record<CatalogView, { label: string; description: string; icon: typeof FolderOpen }> = {
   overview: {
     label: 'Catálogos',
     description: 'Organize linhas de produtos e ofertas em catálogos separados e fáceis de gerir.',
@@ -118,7 +115,6 @@ function CatalogPageInner() {
   const searchParams = useSearchParams();
   const requestedView = searchParams.get('view') as RequestedCatalogView | null;
   const activeView = normalizeView(requestedView);
-
   const [products, setProducts] = useState<Product[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
   const [loading, setLoading] = useState(false);
@@ -132,14 +128,12 @@ function CatalogPageInner() {
       ]);
       const productsBody = await productsResponse.json().catch(() => ({}));
       const sourcesBody = await sourcesResponse.json().catch(() => ({}));
-
       if (!productsResponse.ok) {
         throw new Error(productsBody.error ?? 'Não foi possível carregar as ofertas.');
       }
       if (!sourcesResponse.ok && sourcesResponse.status !== 403) {
         throw new Error(sourcesBody.error ?? 'Não foi possível carregar as fontes.');
       }
-
       setProducts(productsBody.products ?? []);
       setSources(sourcesBody.sources ?? []);
     } catch (error) {
@@ -157,60 +151,51 @@ function CatalogPageInner() {
 
   const meta = VIEW_META[activeView];
   const HeaderIcon = meta.icon;
-  const canRefresh = activeView === 'external' || activeView === 'offerings' || activeView === 'compositions';
+  const canRefresh =
+    activeView === 'external' || activeView === 'offerings' || activeView === 'compositions';
 
   return (
-    <div className="flex min-w-0 flex-col gap-5 lg:flex-row lg:gap-0">
+    <div className="wacrm-page min-w-0 space-y-5">
+      <header className="wacrm-page-header">
+        <div>
+          <p className="text-label text-primary">Vendas</p>
+          <div className="mt-1 flex items-center gap-2.5">
+            <HeaderIcon className="size-5 text-primary" />
+            <h1 className="text-[26px] font-semibold tracking-tight text-foreground sm:text-[28px]">
+              {meta.label}
+            </h1>
+          </div>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            {meta.description}
+          </p>
+        </div>
+        {canRefresh ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void loadSupportingData()}
+            disabled={loading}
+          >
+            {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+            Actualizar
+          </Button>
+        ) : null}
+      </header>
+
       <CatalogWorkspaceNav active={workspaceKey(activeView)} />
 
-      <main className="min-w-0 flex-1 lg:pl-6">
-        <header className="flex flex-col gap-4 border-b border-border/80 pb-5 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <div className="flex items-center gap-2.5">
-              <HeaderIcon className="size-5 text-primary" />
-              <h1 className="text-[22px] font-semibold tracking-tight text-foreground sm:text-2xl">
-                {meta.label}
-              </h1>
-            </div>
-            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              {meta.description}
-            </p>
-          </div>
-          {canRefresh ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void loadSupportingData()}
-              disabled={loading}
-            >
-              {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-              Actualizar
-            </Button>
-          ) : null}
-        </header>
-
-        <div className="pt-5">
-          {activeView === 'overview' ? <CatalogCollectionsPanel /> : null}
-
-          {activeView === 'steward' ? (
-            <CatalogAgentPanel onOpenOffers={() => router.push('/catalog')} />
-          ) : null}
-
-          {activeView === 'external' ? (
-            <ExternalIntegrationsTab sources={sources} setSources={setSources} />
-          ) : null}
-
-          {activeView === 'offerings' ? (
-            <OfferingSchemaManager products={products} />
-          ) : null}
-
-          {activeView === 'compositions' ? (
-            <CompositionManagerPanel products={products} />
-          ) : null}
-
-          {activeView === 'taxonomy' ? <TaxonomyManager /> : null}
-        </div>
-      </main>
+      <section className="min-w-0">
+        {activeView === 'overview' ? <CatalogCollectionsPanel /> : null}
+        {activeView === 'steward' ? (
+          <CatalogAgentPanel onOpenOffers={() => router.push('/catalog')} />
+        ) : null}
+        {activeView === 'external' ? (
+          <ExternalIntegrationsTab sources={sources} setSources={setSources} />
+        ) : null}
+        {activeView === 'offerings' ? <OfferingSchemaManager products={products} /> : null}
+        {activeView === 'compositions' ? <CompositionManagerPanel products={products} /> : null}
+        {activeView === 'taxonomy' ? <TaxonomyManager /> : null}
+      </section>
     </div>
   );
 }
