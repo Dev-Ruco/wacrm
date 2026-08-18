@@ -10,22 +10,84 @@ interface MatchRow {
   content: string
 }
 
-const LOCATION_QUERY_PATTERN = /\b(?:onde\s+fica|onde\s+ficam|localiza(?:c|ç)[aã]o|localizacao|morada|endere(?:c|ç)o|address|location|como\s+chegar|chegar\s+(?:a|à)\s+loja)\b/i
-const LOCATION_CONTENT_PATTERN = /\b(?:morada|endere(?:c|ç)o|address|localiza(?:c|ç)[aã]o|localizacao|loja|avenida|av\.?|rua|estrada|bairro|maputo|matola)\b/i
+type BusinessKnowledgeDomain =
+  | 'location'
+  | 'hours'
+  | 'contact'
+  | 'payment'
+  | 'delivery'
+  | 'returns'
+  | 'services'
+
+interface BusinessKnowledgeDomainRule {
+  query: RegExp
+  content: RegExp
+  expansion: string
+}
+
+const BUSINESS_FACT_RULES: Record<BusinessKnowledgeDomain, BusinessKnowledgeDomainRule> = {
+  location: {
+    query: /\b(?:onde\s+fica|onde\s+ficam|localiza(?:c|ç)[aã]o|localizacao|morada|endere(?:c|ç)o|address|location|como\s+chegar|chegar\s+(?:a|à)\s+loja)\b/i,
+    content: /\b(?:morada|endere(?:c|ç)o|address|localiza(?:c|ç)[aã]o|localizacao|loja|avenida|av\.?|rua|estrada|bairro|maputo|matola)\b/i,
+    expansion: 'morada endereço endereco localização localizacao loja como chegar',
+  },
+  hours: {
+    query: /\b(?:hor[aá]rio|horarios|abre|abrem|fecha|fecham|aberto|aberta|funciona|funcionamento|atendimento|que horas|opening hours)\b/i,
+    content: /\b(?:hor[aá]rio|funcionamento|aberto|aberta|abre|fecha|segunda|terça|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo|\d{1,2}\s*h)\b/i,
+    expansion: 'horário horario funcionamento abertura fecho atendimento dias horas',
+  },
+  contact: {
+    query: /\b(?:contacto|contato|telefone|telem[oó]vel|n[uú]mero|whatsapp|email|e-mail|ligar|contactar|contatar)\b/i,
+    content: /\b(?:contacto|contato|telefone|telem[oó]vel|whatsapp|email|e-mail|\+?258\s*\d)\b/i,
+    expansion: 'contacto contato telefone telemóvel numero número whatsapp email',
+  },
+  payment: {
+    query: /\b(?:pagamento|pagamentos|pagar|pago|forma de pagamento|m[eé]todo de pagamento|mpesa|m-pesa|emola|e-mola|cart[aã]o|transfer[eê]ncia|cash|dinheiro)\b/i,
+    content: /\b(?:pagamento|pagar|m[eé]todo|mpesa|m-pesa|emola|e-mola|cart[aã]o|transfer[eê]ncia|numer[aá]rio|dinheiro)\b/i,
+    expansion: 'pagamento pagamentos formas métodos pagar mpesa emola cartão transferência numerário',
+  },
+  delivery: {
+    query: /\b(?:entrega|entregam|delivery|levantar|levantamento|recolha|pickup|buscar|vir buscar|receber em casa|envio)\b/i,
+    content: /\b(?:entrega|delivery|levantamento|recolha|pickup|envio|taxa de entrega|domic[ií]lio)\b/i,
+    expansion: 'entrega delivery levantamento recolha pickup envio condições taxa zonas',
+  },
+  returns: {
+    query: /\b(?:troca|trocar|devolu[cç][aã]o|devolver|reembolso|garantia|pol[ií]tica de troca|return|refund|exchange)\b/i,
+    content: /\b(?:troca|devolu[cç][aã]o|reembolso|garantia|prazo|etiqueta|return|refund|exchange)\b/i,
+    expansion: 'troca devolução devolucao reembolso garantia política prazo condições',
+  },
+  services: {
+    query: /\b(?:servi[cç]o|servi[cç]os|o que fazem|o que oferece|o que oferecem|atendem|fazem o qu[eê]|service|services)\b/i,
+    content: /\b(?:servi[cç]o|servi[cç]os|oferecemos|oferece|atendimento|especialidade|actividade|atividade)\b/i,
+    expansion: 'serviço serviços oferece oferecemos atendimento actividade atividade',
+  },
+}
+
+function businessKnowledgeDomain(query: string): BusinessKnowledgeDomain | null {
+  const trimmed = query.trim()
+  for (const [domain, rule] of Object.entries(BUSINESS_FACT_RULES) as Array<
+    [BusinessKnowledgeDomain, BusinessKnowledgeDomainRule]
+  >) {
+    if (rule.query.test(trimmed)) return domain
+  }
+  return null
+}
 
 export function isLocationKnowledgeQuery(query: string): boolean {
-  return LOCATION_QUERY_PATTERN.test(query.trim())
+  return businessKnowledgeDomain(query) === 'location'
 }
 
 export function expandKnowledgeQuery(query: string): string {
   const trimmed = query.trim()
-  if (!isLocationKnowledgeQuery(trimmed)) return trimmed
-  return `${trimmed} morada endereço endereco localização localizacao loja como chegar`
+  const domain = businessKnowledgeDomain(trimmed)
+  if (!domain) return trimmed
+  return `${trimmed} ${BUSINESS_FACT_RULES[domain].expansion}`
 }
 
-async function retrieveLocationFallback(
+async function retrieveBusinessFactFallback(
   db: WacrmSupabaseClient,
   accountId: string,
+  domain: BusinessKnowledgeDomain,
   limit: number,
 ): Promise<MatchRow[]> {
   try {
@@ -35,11 +97,12 @@ async function retrieveLocationFallback(
       .eq('account_id', accountId)
       .limit(Math.max(20, Math.min(100, limit * 20)))
     if (error || !Array.isArray(data)) return []
+    const contentPattern = BUSINESS_FACT_RULES[domain].content
     return (data as MatchRow[])
-      .filter((row) => typeof row.content === 'string' && LOCATION_CONTENT_PATTERN.test(row.content))
+      .filter((row) => typeof row.content === 'string' && contentPattern.test(row.content))
       .slice(0, limit)
   } catch (err) {
-    console.error('[ai knowledge] location fallback failed:', err)
+    console.error(`[ai knowledge] ${domain} fallback failed:`, err)
     return []
   }
 }
@@ -84,6 +147,7 @@ export async function retrieveKnowledge(
 ): Promise<string[]> {
   const query = queryText.trim()
   if (!query || k <= 0) return []
+  const factDomain = businessKnowledgeDomain(query)
 
   let externalKnowledge: string[] = []
   if (config.agentId) {
@@ -142,10 +206,11 @@ export async function retrieveKnowledge(
     }
   }
 
-  // Normal retrieval remains semantic/model-driven. This is only a lexical
-  // safety net for a very short location query when normal retrieval found
-  // nothing; it is not used to decide the customer's intent.
-  if (isLocationKnowledgeQuery(query) && picked.size === 0) {
+  // Business-fact recovery is intentionally a fallback. Normal retrieval stays
+  // semantic/model-driven; this only protects terse questions such as “onde
+  // fica?”, “que horas abre?”, “aceitam M-Pesa?” or “fazem entregas?” when the
+  // lexical form differs from the wording stored in the account knowledge.
+  if (factDomain && picked.size === 0) {
     try {
       const { data, error } = await db.rpc('match_ai_knowledge_fts', {
         p_account_id: accountId,
@@ -156,12 +221,12 @@ export async function retrieveKnowledge(
         for (const row of data as MatchRow[]) picked.set(row.id, row.content)
       }
     } catch (err) {
-      console.error('[ai knowledge] expanded location FTS failed:', err)
+      console.error(`[ai knowledge] expanded ${factDomain} FTS failed:`, err)
     }
   }
 
-  if (isLocationKnowledgeQuery(query) && picked.size === 0) {
-    const fallback = await retrieveLocationFallback(db, accountId, k)
+  if (factDomain && picked.size === 0) {
+    const fallback = await retrieveBusinessFactFallback(db, accountId, factDomain, k)
     for (const row of fallback) picked.set(row.id, row.content)
   }
 
