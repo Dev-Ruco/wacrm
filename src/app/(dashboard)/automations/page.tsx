@@ -47,13 +47,12 @@ import {
 import { triggerMeta, formatRelative } from '@/lib/automations/trigger-meta';
 import { cn } from '@/lib/utils';
 
-// Only templates that are safe recommendations for the modern agent runtime.
-// The legacy keyword-based lead qualifier still exists for old deep links and
-// saved automations, but is intentionally not promoted until Automations have
-// a semantic intent trigger instead of language-specific keywords.
+// Promote only quick starts whose semantics are safe across tenants. The
+// after-hours template remains loadable for existing/deep-linked setups, but
+// is not recommended until the account model has an explicit timezone. The
+// legacy keyword qualifier is likewise kept for compatibility, not promoted.
 const TEMPLATE_ORDER: TemplateSlug[] = [
   'welcome_message',
-  'out_of_office',
   'follow_up_reminder',
 ];
 
