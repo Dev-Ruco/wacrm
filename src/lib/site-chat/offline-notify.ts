@@ -21,21 +21,24 @@ export async function notifyWebsiteCustomerIfOffline(args: {
 }): Promise<void> {
   const { data: sessions, error: sessionsError } = await args.db
     .from('website_chat_sessions')
-    .select('id, website_channel_id, last_seen_at, last_offline_whatsapp_notified_at')
+    .select('id, website_channel_id, last_seen_at, last_visible_at, last_offline_whatsapp_notified_at')
     .eq('conversation_id', args.conversationId)
   if (sessionsError) throw sessionsError
   if (!sessions?.length) return
 
   const now = Date.now()
   const online = sessions.some((session) => {
-    const seen = session.last_seen_at ? new Date(session.last_seen_at).getTime() : 0
+    const visibleAt = session.last_visible_at || session.last_seen_at
+    const seen = visibleAt ? new Date(visibleAt).getTime() : 0
     return Number.isFinite(seen) && now - seen <= ONLINE_WINDOW_MS
   })
   if (online) return
 
   const latestSession = [...sessions].sort((a, b) => {
-    const left = a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0
-    const right = b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0
+    const leftRaw = a.last_visible_at || a.last_seen_at
+    const rightRaw = b.last_visible_at || b.last_seen_at
+    const left = leftRaw ? new Date(leftRaw).getTime() : 0
+    const right = rightRaw ? new Date(rightRaw).getTime() : 0
     return right - left
   })[0]
 
