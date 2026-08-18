@@ -10,6 +10,7 @@ import {
   rankCatalogByVisualReference,
   type VisualProductMatch,
 } from './visual-reference-search'
+import { schedulingEvidenceIsComplete } from './scheduling-grounding'
 import { createAutoReplyTools as createBaseAutoReplyTools } from './operational-tools'
 import { setWebsiteActivityIfWebsite } from '@/lib/site-chat/activity'
 
@@ -32,6 +33,11 @@ interface SearchToolResult {
   found?: boolean
   instruction?: string
   [key: string]: unknown
+}
+
+interface AvailabilityCheck {
+  available: boolean
+  startsAt: string | null
 }
 
 const OPERATIONAL_RUNTIME_TOOLS = new Set([
@@ -63,6 +69,18 @@ function parseSearchResult(raw: string): SearchToolResult | null {
   }
 }
 
+function parseAvailabilityCheck(raw: string): AvailabilityCheck | null {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return {
+      available: parsed.available === true,
+      startsAt: typeof parsed.starts_at === 'string' ? parsed.starts_at : null,
+    }
+  } catch {
+    return null
+  }
+}
+
 function augmentSearchCatalogueTool(tool: AgentToolDefinition): AgentToolDefinition {
   if (tool.name !== 'search_catalog') return tool
   const parameters = tool.parameters as {
@@ -86,6 +104,26 @@ function augmentSearchCatalogueTool(tool: AgentToolDefinition): AgentToolDefinit
       },
     },
   }
+}
+
+function augmentGroundedTool(tool: AgentToolDefinition): AgentToolDefinition {
+  if (tool.name === 'search_knowledge') {
+    return {
+      ...tool,
+      description:
+        `${tool.description} ` +
+        'MANDATORY for company-specific factual questions when this tool is available, including address/location, opening hours, contacts, payment methods, delivery or pickup conditions, returns/exchanges, policies and services. Do not answer such facts from memory or expose an internal placeholder; search first.',
+    }
+  }
+  if (tool.name === 'schedule_visit') {
+    return {
+      ...tool,
+      description:
+        `${tool.description} ` +
+        'The server rejects scheduling unless the recent customer messages explicitly contain BOTH a date and a specific time. Never choose either on the customer’s behalf. When check_availability is enabled, verify that exact time first.',
+    }
+  }
+  return tool
 }
 
 function asVisualCandidates(products: readonly SearchProductRow[]): RankedAgentCatalogProduct[] {
@@ -131,7 +169,32 @@ function instructionForVisualConfidence(
   if (confidence === 'high') {
     return 'Visual comparison found one clearly stronger candidate and it meets the configured confidence threshold. You may say the reference appears to correspond to the top catalogue product, but do not claim absolute visual certainty and never identify any person in the photograph. Availability, sizes and prices may be stated only from the factual catalogue fields returned here. If useful, call send_product with the returned product_ref and recommended_image_index to show the matching catalogue/variant photograph.'
   }
-  return 'Visual comparison is plausible and meets this business minimum threshold, but it is not unique. Do not claim an exact match. Present the best one or two catalogue candidates and ask the customer to confirm which one they mean; use send_product with each candidate product_ref and recommended_image_index when visual confirmation helps. Availability, sizes and prices must come only from factual catalogue fields.'
+  return 'Visual comparison is plausible and meets this business minimum threshold, but it is not unique. Do not claim an exact match. Present the best one or two catalogue candidates and ask the customer to confirm which one they mean; use send_product with each candidate product_ref and recommended_image_index when visual confirmation helps. Availability, sizes and prices must come only from the factual catalogue fields.'
+}
+
+async function recentCustomerTexts(
+  args: Parameters<typeof createBaseAutoReplyTools>[0],
+): Promise<string[]> {
+  if (!args.conversationId) return []
+  const { data, error } = await args.db
+    .from('messages')
+    .select('content_text')
+    .eq('conversation_id', args.conversationId)
+    .eq('sender_type', 'customer')
+    .in('content_type', ['text', 'interactive'])
+    .order('created_at', { ascending: false })
+    .limit(3)
+  if (error) throw new Error(`Recent customer messages could not be verified: ${error.message}`)
+  return (data ?? [])
+    .map((row) => typeof row.content_text === 'string' ? row.content_text : '')
+    .filter(Boolean)
+    .reverse()
+}
+
+function sameScheduledStart(scheduledAt: string, checkedAt: string): boolean {
+  const scheduled = new Date(scheduledAt).getTime()
+  const checked = new Date(checkedAt).getTime()
+  return Number.isFinite(scheduled) && Number.isFinite(checked) && Math.abs(scheduled - checked) <= 5 * 60_000
 }
 
 /**
@@ -144,8 +207,9 @@ export function createAutoReplyTools(
   args: Parameters<typeof createBaseAutoReplyTools>[0],
 ): ReturnType<typeof createBaseAutoReplyTools> {
   const base = createBaseAutoReplyTools(args)
-  const tools = base.tools.map(augmentSearchCatalogueTool)
+  const tools = base.tools.map(augmentSearchCatalogueTool).map(augmentGroundedTool)
   let settingsPromise: Promise<SearchCatalogToolSettings> | null = null
+  let lastAvailabilityCheck: AvailabilityCheck | null = null
   const visualSettings = () => {
     settingsPromise ??= loadSearchCatalogToolSettings(
       args.db,
@@ -167,10 +231,40 @@ export function createAutoReplyTools(
       // The operational layer consumes the same parsed-object form used by
       // the mature base handlers internally. Keep the public provider-facing
       // AgentToolCall contract (JSON string) unchanged at this facade.
-      return base.executeTool({
+      const result = await base.executeTool({
         ...call,
         arguments: parsed as unknown as string,
       })
+      if (call.name === 'check_availability') {
+        lastAvailabilityCheck = parseAvailabilityCheck(result)
+      }
+      return result
+    }
+
+    if (call.name === 'schedule_visit') {
+      const parsed = parseToolArguments(call.arguments)
+      const scheduledAt = parsed && typeof parsed.scheduled_at === 'string'
+        ? parsed.scheduled_at
+        : ''
+      const customerTexts = await recentCustomerTexts(args)
+      if (!schedulingEvidenceIsComplete(customerTexts)) {
+        throw new Error(
+          'Visit not scheduled: the customer must explicitly provide or confirm both a date and a specific time. Ask for the missing detail instead of choosing one.',
+        )
+      }
+      if (args.permissions.check_availability) {
+        if (!lastAvailabilityCheck?.available || !lastAvailabilityCheck.startsAt) {
+          throw new Error(
+            'Visit not scheduled: check_availability must confirm the requested time in this turn before scheduling.',
+          )
+        }
+        if (!sameScheduledStart(scheduledAt, lastAvailabilityCheck.startsAt)) {
+          throw new Error(
+            'Visit not scheduled: the scheduled time differs from the interval confirmed by check_availability.',
+          )
+        }
+      }
+      return base.executeTool(call)
     }
 
     if (call.name !== 'search_catalog') return base.executeTool(call)

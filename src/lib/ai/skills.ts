@@ -104,8 +104,11 @@ export function skillToolKeys(skills: AgentSkill[]): Set<AgentToolKey> | null {
 /**
  * Apply the tool subset declared by the skills selected for THIS turn.
  * An empty selection deliberately leaves the account permissions untouched.
- * Skills can only remove capabilities; they can never grant a tool that the
- * account disabled. Human handoff remains globally available as a safety net.
+ * Skills can only remove specialised capabilities; they can never grant a tool
+ * that the account disabled. Human handoff remains globally available as a
+ * safety net, and factual company knowledge remains available whenever the
+ * administrator enabled it because every skill may still need grounded facts
+ * such as address, hours, policies, payment methods or delivery conditions.
  */
 export function applySkillNarrowing(
   permissions: Record<AgentToolKey, boolean>,
@@ -115,7 +118,7 @@ export function applySkillNarrowing(
   if (!narrowed) return permissions
   const effective = { ...permissions }
   for (const key of AGENT_TOOL_KEYS) {
-    if (key === 'handoff_human') continue
+    if (key === 'handoff_human' || key === 'search_knowledge') continue
     effective[key] = permissions[key] && narrowed.has(key)
   }
   return effective
