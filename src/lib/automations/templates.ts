@@ -30,11 +30,19 @@ export interface AutomationTemplateDefinition {
   steps: TemplateStepSeed[]
 }
 
-function agentMessage(instruction: string): AutomationStepConfig {
-  // `mode` is intentionally stored inside the existing JSON step_config so
-  // older send_message rows remain valid and no tenant-specific schema is
-  // introduced. Rows without mode keep their historical fixed-text meaning.
-  return { text: instruction, mode: 'agent' } as AutomationStepConfig
+function agentMessage(
+  instruction: string,
+  options?: { onlyIfNoCustomerReplySinceStart?: boolean },
+): AutomationStepConfig {
+  // These fields live inside existing JSON step_config. Older send_message
+  // rows remain valid and no tenant-specific schema is introduced.
+  return {
+    text: instruction,
+    mode: 'agent',
+    ...(options?.onlyIfNoCustomerReplySinceStart
+      ? { only_if_no_customer_reply_since_start: true }
+      : {}),
+  } as AutomationStepConfig
 }
 
 export const AUTOMATION_TEMPLATES: Record<TemplateSlug, AutomationTemplateDefinition> = {
@@ -133,9 +141,10 @@ export const AUTOMATION_TEMPLATES: Record<TemplateSlug, AutomationTemplateDefini
           [
             'This automation is a follow-up checkpoint after a period of inactivity.',
             'Read the full recent conversation and CRM state before deciding what to say.',
-            'If the customer has already continued the conversation, the request is resolved, a human has taken over, or another message would be unnecessary, do not manufacture a follow-up.',
+            'If the request is resolved, a human has taken over, or another message would be unnecessary, do not manufacture a follow-up.',
             'If a follow-up is still useful, continue from the exact open topic in a brief, low-pressure way. Refer naturally to the relevant product, service, question or next step rather than sending a generic “just checking in” message.',
           ].join(' '),
+          { onlyIfNoCustomerReplySinceStart: true },
         ),
       },
     ],
