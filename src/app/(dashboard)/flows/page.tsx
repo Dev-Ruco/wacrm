@@ -17,7 +17,6 @@ import {
   UserPlus,
   FileText,
 } from 'lucide-react';
-
 import { useTranslations } from 'next-intl';
 import { useCan } from '@/hooks/use-can';
 import { Button } from '@/components/ui/button';
@@ -33,14 +32,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-
-/**
- * Flows list page.
- *
- * Open to every authenticated user. Flows is in soft-GA — the "Beta"
- * chip in the header is the only remaining signal that the surface
- * is new. The previous per-account beta gate was removed in PR #134.
- */
 
 interface FlowRow {
   id: string;
@@ -65,7 +56,7 @@ const STATUS_LABELS = (
 
 const STATUS_COLORS: Record<FlowRow['status'], string> = {
   draft: 'border-border bg-muted text-muted-foreground',
-  active: 'border-emerald-600/40 bg-emerald-500/10 text-emerald-300',
+  active: 'border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
   archived: 'border-border bg-muted/50 text-muted-foreground',
 };
 
@@ -108,12 +99,8 @@ export default function FlowsPage() {
         }
         const flowsJson = (await flowsRes.json()) as { flows: FlowRow[] };
         if (!cancelled) setFlows(flowsJson.flows ?? []);
-        // Templates endpoint is forward-looking — if it 404s on an
-        // older deployment, gracefully fall through.
         if (tmplRes.ok) {
-          const tmplJson = (await tmplRes.json()) as {
-            templates: TemplateSummary[];
-          };
+          const tmplJson = (await tmplRes.json()) as { templates: TemplateSummary[] };
           if (!cancelled) setTemplates(tmplJson.templates ?? []);
         }
       } catch (err) {
@@ -128,7 +115,7 @@ export default function FlowsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   async function handleCreate() {
     if (!newName.trim()) return;
@@ -172,20 +159,20 @@ export default function FlowsPage() {
       setCreateOpen(false);
       router.push(`/flows/${json.flow.id}`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : t('cloneError');
-      toast.error(msg);
+      const message = err instanceof Error ? err.message : t('cloneError');
+      toast.error(message);
     } finally {
       setCreating(false);
     }
   }
 
   async function handleDelete(flow: FlowRow) {
-    const yes = window.confirm(t('deleteConfirm', { name: flow.name }));
-    if (!yes) return;
+    const confirmed = window.confirm(t('deleteConfirm', { name: flow.name }));
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/flows/${flow.id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
-      setFlows((prev) => prev.filter((f) => f.id !== flow.id));
+      setFlows((prev) => prev.filter((item) => item.id !== flow.id));
       toast.success(t('deleteSuccess'));
     } catch (err) {
       console.error(err);
@@ -195,23 +182,27 @@ export default function FlowsPage() {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" />
+      <div className="flex h-64 items-center justify-center">
+        <Loader2 className="size-6 animate-spin text-primary" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 p-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
+    <div className="space-y-5">
+      <header className="wacrm-page-header">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-page-title">{t('title')}</h1>
-            <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-amber-300 uppercase">
+          <p className="text-label text-primary">Automação</p>
+          <div className="mt-1 flex items-center gap-2.5">
+            <Workflow className="size-5 text-primary" />
+            <h1 className="text-[28px] font-semibold tracking-tight text-foreground">
+              {t('title')}
+            </h1>
+            <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
               {t('beta')}
             </span>
           </div>
-          <p className="text-muted-foreground mt-1 text-sm">
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
             {t('description')}
           </p>
         </div>
@@ -219,37 +210,45 @@ export default function FlowsPage() {
           canAct={canCreate}
           gateReason="create flows"
           onClick={() => setCreateOpen(true)}
+          size="sm"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="size-4" />
           {t('newFlow')}
         </GatedButton>
       </header>
 
-      {flows.length === 0 ? (
-        <EmptyState
-          onCreate={() => setCreateOpen(true)}
-          canCreate={canCreate}
-          t={t}
-        />
-      ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {flows.map((flow) => (
-            <FlowCard
-              key={flow.id}
-              flow={flow}
-              onEdit={() => router.push(`/flows/${flow.id}`)}
-              onDelete={() => handleDelete(flow)}
-              t={t}
-            />
-          ))}
+      <section className="grid gap-3 sm:grid-cols-3">
+        <FlowMetric label="Total" value={flows.length} />
+        <FlowMetric label="Activos" value={flows.filter((flow) => flow.status === 'active').length} active />
+        <FlowMetric label="Execuções" value={flows.reduce((sum, flow) => sum + flow.execution_count, 0)} />
+      </section>
+
+      <section>
+        <div className="mb-3">
+          <h2 className="text-section-title">Fluxos</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Crie jornadas visuais para mensagens, condições, agentes e acções automáticas.
+          </p>
         </div>
-      )}
+
+        {flows.length === 0 ? (
+          <EmptyState onCreate={() => setCreateOpen(true)} canCreate={canCreate} t={t} />
+        ) : (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {flows.map((flow) => (
+              <FlowCard
+                key={flow.id}
+                flow={flow}
+                onEdit={() => router.push(`/flows/${flow.id}`)}
+                onDelete={() => handleDelete(flow)}
+                t={t}
+              />
+            ))}
+          </div>
+        )}
+      </section>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        {/* `sm:max-w-4xl` not `max-w-4xl` — shadcn's DialogContent has
-            `sm:max-w-sm` baked into its default classes. Without the
-            sm: prefix our override applies at base only and the
-            sm-scoped 384px wins at every real desktop breakpoint. */}
         <DialogContent className="bg-popover text-popover-foreground sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>{t('createTitle')}</DialogTitle>
@@ -258,11 +257,9 @@ export default function FlowsPage() {
             </DialogDescription>
           </DialogHeader>
 
-          {templates.length > 0 && (
+          {templates.length > 0 ? (
             <div className="space-y-3">
-              <p className="text-muted-foreground text-xs tracking-wide uppercase">
-                {t('startTemplate')}
-              </p>
+              <p className="text-label text-muted-foreground">{t('startTemplate')}</p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {templates.map((template) => {
                   const Icon = TEMPLATE_ICONS[template.icon] ?? FileText;
@@ -272,16 +269,18 @@ export default function FlowsPage() {
                       type="button"
                       onClick={() => handleUseTemplate(template.slug)}
                       disabled={creating}
-                      className="border-border bg-background hover:border-primary/40 hover:bg-muted flex flex-col gap-2.5 rounded-lg border p-4 text-left transition-colors disabled:opacity-50"
+                      className="flex flex-col gap-2.5 rounded-xl border border-border bg-background p-4 text-left transition-colors hover:border-primary/30 hover:bg-primary/[0.025] disabled:opacity-50"
                     >
-                      <Icon className="text-primary h-5 w-5" />
-                      <span className="text-popover-foreground text-sm font-semibold">
+                      <span className="flex size-9 items-center justify-center rounded-xl bg-primary-soft text-primary">
+                        <Icon className="size-4" />
+                      </span>
+                      <span className="text-sm font-semibold text-popover-foreground">
                         {template.name}
                       </span>
-                      <span className="text-muted-foreground text-xs leading-relaxed">
+                      <span className="text-xs leading-relaxed text-muted-foreground">
                         {template.description}
                       </span>
-                      <span className="border-border text-muted-foreground mt-auto border-t pt-2 text-[11px]">
+                      <span className="mt-auto border-t border-border pt-2 text-[11px] text-muted-foreground">
                         {t('nodeCount', { count: template.node_count })}
                       </span>
                     </button>
@@ -289,41 +288,51 @@ export default function FlowsPage() {
                 })}
               </div>
             </div>
-          )}
+          ) : null}
 
-          <div className="border-border space-y-2 border-t pt-4">
-            <p className="text-muted-foreground text-xs tracking-wide uppercase">
-              {t('startBlank')}
-            </p>
+          <div className="space-y-2 border-t border-border pt-4">
+            <p className="text-label text-muted-foreground">{t('startBlank')}</p>
             <Input
               value={newName}
-              onChange={(e) => setNewName(e.target.value)}
+              onChange={(event) => setNewName(event.target.value)}
               placeholder={t('placeholderName')}
-              className="bg-muted"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleCreate();
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') handleCreate();
               }}
             />
           </div>
 
           <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setCreateOpen(false)}
-              disabled={creating}
-            >
+            <Button variant="ghost" onClick={() => setCreateOpen(false)} disabled={creating}>
               {t('cancel')}
             </Button>
-            <Button
-              onClick={handleCreate}
-              disabled={!newName.trim() || creating}
-            >
-              {creating && <Loader2 className="h-4 w-4 animate-spin" />}
+            <Button onClick={handleCreate} disabled={!newName.trim() || creating}>
+              {creating ? <Loader2 className="size-4 animate-spin" /> : null}
               {t('createBlank')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function FlowMetric({
+  label,
+  value,
+  active = false,
+}: {
+  label: string;
+  value: number;
+  active?: boolean;
+}) {
+  return (
+    <div className="wacrm-surface px-4 py-3.5">
+      <p className="text-meta">{label}</p>
+      <div className="mt-1.5 flex items-center gap-2">
+        {active ? <span className="size-2 rounded-full bg-[var(--wacrm-success)]" /> : null}
+        <p className="text-xl font-semibold tabular-nums text-foreground">{value.toLocaleString()}</p>
+      </div>
     </div>
   );
 }
@@ -338,23 +347,20 @@ function EmptyState({
   t: ReturnType<typeof useTranslations>;
 }) {
   return (
-    <div className="border-border bg-card/50 flex flex-col items-center justify-center rounded-lg border border-dashed px-6 py-16 text-center">
-      <div className="bg-muted flex h-14 w-14 items-center justify-center rounded-full">
-        <Workflow className="text-muted-foreground h-6 w-6" />
-      </div>
-      <h2 className="text-foreground mt-4 text-base font-medium">
-        {t('emptyTitle')}
-      </h2>
-      <p className="text-muted-foreground mt-1 max-w-md text-sm">
-        {t('emptyDesc')}
-      </p>
+    <div className="wacrm-surface flex min-h-64 flex-col items-center justify-center border-dashed px-6 text-center">
+      <span className="flex size-12 items-center justify-center rounded-2xl bg-primary-soft text-primary">
+        <Workflow className="size-5" />
+      </span>
+      <h2 className="mt-4 text-sm font-medium text-foreground">{t('emptyTitle')}</h2>
+      <p className="mt-1 max-w-md text-xs text-muted-foreground">{t('emptyDesc')}</p>
       <GatedButton
         canAct={canCreate}
         gateReason="create flows"
         onClick={onCreate}
+        size="sm"
         className="mt-5"
       >
-        <Plus className="h-4 w-4" />
+        <Plus className="size-4" />
         {t('createFirst')}
       </GatedButton>
     </div>
@@ -379,50 +385,45 @@ function FlowCard({
       : flow.status === 'archived'
         ? Archive
         : PauseCircle;
+
   return (
-    <div className="border-border bg-card hover:border-border flex flex-col rounded-lg border p-4 transition-colors">
+    <div className="wacrm-surface flex min-h-48 flex-col p-4 transition-shadow hover:shadow-[var(--wacrm-shadow-md)]">
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <Workflow className="text-primary h-4 w-4 shrink-0" />
-          <h3 className="text-foreground truncate text-sm font-semibold">
-            {flow.name}
-          </h3>
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
+            <Workflow className="size-3.5" />
+          </span>
+          <h3 className="truncate text-sm font-semibold text-foreground">{flow.name}</h3>
         </div>
-        <Badge
-          variant="outline"
-          className={cn(
-            'shrink-0 gap-1 text-[10px]',
-            STATUS_COLORS[flow.status]
-          )}
-        >
-          <StatusIcon className="h-3 w-3" />
+        <Badge variant="outline" className={cn('shrink-0 gap-1 text-[10px]', STATUS_COLORS[flow.status])}>
+          <StatusIcon className="size-3" />
           {STATUS_LABELS(t)[flow.status]}
         </Badge>
       </div>
 
-      <p className="text-muted-foreground mt-2 line-clamp-2 text-xs">
+      <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
         {flow.description || triggerSummary}
       </p>
 
-      <div className="text-muted-foreground mt-4 flex items-center gap-3 text-[11px]">
+      <div className="mt-4 flex items-center gap-3 text-[11px] text-muted-foreground">
         <span className="inline-flex items-center gap-1">
-          <MessageSquare className="h-3 w-3" />
+          <MessageSquare className="size-3" />
           {t('runCount', { count: flow.execution_count })}
         </span>
       </div>
 
-      <div className="border-border mt-4 flex items-center justify-end gap-2 border-t pt-3">
+      <div className="mt-auto flex items-center justify-end gap-1 border-t border-border pt-3">
         <Button variant="ghost" size="sm" onClick={onEdit}>
-          <Pencil className="h-3.5 w-3.5" />
+          <Pencil className="size-3.5" />
           {t('edit')}
         </Button>
         <Button
           variant="ghost"
           size="sm"
           onClick={onDelete}
-          className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
         >
-          <Trash2 className="h-3.5 w-3.5" />
+          <Trash2 className="size-3.5" />
           {t('delete')}
         </Button>
       </div>
