@@ -22,6 +22,35 @@ describe('AI output guardrails', () => {
     ).toContain('system_prompt_leak')
   })
 
+  it('blocks internal placeholders before they can reach the customer', () => {
+    expect(
+      evaluateAgentOutput({
+        text: 'A loja fica em [preciso da morada para responder correctamente].',
+      }),
+    ).toMatchObject({
+      safe: false,
+      violations: ['internal_placeholder'],
+    })
+    expect(
+      evaluateAgentOutput({
+        text: 'O horário é {{opening_hours}}.',
+      }).violations,
+    ).toContain('internal_placeholder')
+    expect(
+      evaluateAgentOutput({
+        text: 'Confirmo assim que tiver ${store_address}.',
+      }).violations,
+    ).toContain('internal_placeholder')
+  })
+
+  it('does not block normal customer-facing square brackets', () => {
+    expect(
+      evaluateAgentOutput({
+        text: 'Temos os tamanhos [S, M, L] confirmados no catálogo.',
+      }).violations,
+    ).not.toContain('internal_placeholder')
+  })
+
   it('marks an isolated history annotation leak as recoverable when useful text remains', () => {
     const result = evaluateAgentOutput({
       text: 'Veja estas opções:\n\n[Opção interactiva no WhatsApp]\nSeleccione este produto abaixo.',
