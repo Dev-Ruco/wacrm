@@ -6,11 +6,15 @@ import type { Conversation } from "@/types";
 
 /**
  * Count of conversations with at least one unread inbound message for
- * the current user. Used by the sidebar to surface a green dot on the
- * Inbox nav entry when the user is elsewhere in the app.
+ * the current user. Used by the sidebar / mobile nav to surface unread
+ * conversation state.
  *
- * Lives on its own realtime channel (distinct from the inbox page's
- * "inbox-realtime") so both can coexist without sharing state.
+ * The desktop sidebar and the mobile top navigation are both mounted in
+ * the dashboard shell and are hidden responsively with CSS. That means
+ * this hook can legitimately exist more than once at the same time.
+ * Supabase Realtime topics must therefore be unique per hook instance;
+ * reusing one fixed topic can make a second subscriber attach callbacks
+ * to a channel that has already subscribed and crash the whole shell.
  */
 export function useTotalUnread(): number {
   const [total, setTotal] = useState(0);
@@ -42,8 +46,9 @@ export function useTotalUnread(): number {
       setTotal(sum);
     })();
 
+    const channelId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const channel = supabase
-      .channel("total-unread-realtime")
+      .channel(`total-unread-realtime:${channelId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "wacrm", table: "conversations" },
