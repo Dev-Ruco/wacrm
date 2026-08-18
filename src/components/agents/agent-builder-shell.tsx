@@ -117,7 +117,7 @@ export function AgentBuilderShell({
       <div className="wacrm-surface overflow-hidden">
         <nav
           aria-label="Navegação do agente"
-          className="flex gap-1 overflow-x-auto border-b border-border bg-card px-2 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex min-w-0 gap-1 overflow-x-auto border-b border-border bg-card px-2 py-2 [scrollbar-width:none] md:flex-wrap md:overflow-x-visible [&::-webkit-scrollbar]:hidden"
         >
           {visibleItems.map((item) => {
             const selected = active === item.id;
@@ -128,7 +128,7 @@ export function AgentBuilderShell({
                 aria-current={selected ? 'page' : undefined}
                 onClick={() => onNavigate(item.id)}
                 className={cn(
-                  'shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                  'shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors',
                   selected
                     ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'

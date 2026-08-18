@@ -42,7 +42,7 @@ export function CatalogWorkspaceNav({ active }: { active: CatalogWorkspaceKey })
   return (
     <nav
       aria-label="Navegação do catálogo"
-      className="flex gap-1 overflow-x-auto rounded-xl border border-border bg-card p-2 shadow-[var(--wacrm-shadow-sm)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="flex w-full min-w-0 items-center gap-1 overflow-x-auto rounded-xl border border-border bg-card p-2 shadow-[var(--wacrm-shadow-sm)] [scrollbar-width:none] md:flex-wrap md:overflow-x-visible [&::-webkit-scrollbar]:hidden"
     >
       {ITEMS.map((item) => {
         const selected =
@@ -54,7 +54,7 @@ export function CatalogWorkspaceNav({ active }: { active: CatalogWorkspaceKey })
             href={item.href}
             aria-current={selected ? 'page' : undefined}
             className={cn(
-              'flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+              'flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors',
               selected
                 ? 'bg-primary text-primary-foreground shadow-sm'
                 : 'text-muted-foreground hover:bg-muted hover:text-foreground'
