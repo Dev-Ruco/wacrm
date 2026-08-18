@@ -1,13 +1,55 @@
 import { supabaseAdmin } from './admin-client'
 import { dispatchInboundToAiReply, type DispatchArgs } from './auto-reply'
 import { loadAiConfig } from './config'
+import { engineSendTypingIndicator } from '@/lib/flows/meta-send'
 
 interface BufferedDispatchArgs extends DispatchArgs {
   generation: number
 }
 
+const ADAPTIVE_QUIET_WINDOW_MS = 2_500
+
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
+function timestampMs(value: unknown): number | null {
+  if (typeof value !== 'string' || !value) return null
+  const parsed = new Date(value).getTime()
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+async function adaptiveBufferDelayMs(args: {
+  accountId: string
+  conversationId: string
+  generation: number
+  maxWindowSeconds: number
+}): Promise<number | null> {
+  const db = supabaseAdmin()
+  const { data, error } = await db
+    .from('conversations')
+    .select('ai_dispatch_generation, ai_dispatch_pending_since, ai_dispatch_burst_started_at')
+    .eq('id', args.conversationId)
+    .eq('account_id', args.accountId)
+    .maybeSingle()
+
+  if (error || !data) {
+    if (error) console.warn('[ai message buffer] adaptive state lookup failed:', error)
+    return Math.min(args.maxWindowSeconds * 1_000, ADAPTIVE_QUIET_WINDOW_MS)
+  }
+
+  if (Number(data.ai_dispatch_generation) !== args.generation) return null
+
+  const now = Date.now()
+  const pendingSince = timestampMs(data.ai_dispatch_pending_since) ?? now
+  const burstStartedAt =
+    timestampMs(data.ai_dispatch_burst_started_at) ?? pendingSince
+  const maxWindowMs = Math.max(1_000, args.maxWindowSeconds * 1_000)
+  const quietWindowMs = Math.min(maxWindowMs, ADAPTIVE_QUIET_WINDOW_MS)
+  const quietRemaining = Math.max(0, quietWindowMs - (now - pendingSince))
+  const burstRemaining = Math.max(0, maxWindowMs - (now - burstStartedAt))
+
+  return Math.min(quietRemaining, burstRemaining)
 }
 
 async function automatedReplyAlreadySent(args: {
@@ -76,13 +118,17 @@ export async function registerInboundForAiBuffer(args: {
 }
 
 /**
- * Waits for the account's quiet window, then atomically claims this generation.
- * A newer inbound increments the generation and makes this invocation stale;
- * simultaneous claim attempts are reduced to exactly one winner by the RPC.
+ * Adaptive rapid-message buffer.
  *
- * After the claim, a final outbound check prevents the AI from adding a second
- * reply when a Flow or deterministic automation already answered this same
- * inbound during the quiet window.
+ * The configured buffer is a maximum grouping window, not a fixed delay for
+ * every customer turn. A lone message normally waits only ~2.5 seconds. Each
+ * new fragment creates a new generation and resets the short quiet period,
+ * while the persisted burst start prevents a long stream from postponing the
+ * agent forever. Only the newest generation can claim the dispatch.
+ *
+ * Presence is shown before the quiet wait. On WhatsApp this also marks the
+ * inbound as read, so the customer gets immediate feedback instead of several
+ * seconds of apparent silence.
  */
 export async function dispatchBufferedInboundToAiReply(
   args: BufferedDispatchArgs
@@ -100,7 +146,26 @@ export async function dispatchBufferedInboundToAiReply(
     const config = await loadAiConfig(db, accountId)
     if (!config?.autoReplyEnabled) return
 
-    await wait(config.bufferWindowSeconds * 1_000)
+    await engineSendTypingIndicator({
+      accountId,
+      inboundMessageId: args.inboundMessageId,
+    }).catch((error) => {
+      console.warn('[ai message buffer] early presence failed:', error)
+    })
+
+    const delayMs = await adaptiveBufferDelayMs({
+      accountId,
+      conversationId,
+      generation,
+      maxWindowSeconds: config.bufferWindowSeconds,
+    })
+    if (delayMs === null) {
+      console.info(
+        `[ai message buffer] conversation ${conversationId} generation ${generation} superseded before wait`
+      )
+      return
+    }
+    if (delayMs > 0) await wait(delayMs)
 
     const { data: claimed, error } = await db.rpc('claim_ai_dispatch', {
       p_account_id: accountId,
