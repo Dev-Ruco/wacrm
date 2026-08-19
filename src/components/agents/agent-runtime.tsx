@@ -27,6 +27,30 @@ const KEY_PLACEHOLDER: Record<AiProvider, string> = {
   anthropic: 'sk-ant-...',
 };
 
+type HandoffQueueRow = {
+  enabled?: boolean;
+  member_user_ids?: string[];
+};
+
+function hasReadyHandoffQueue(value: unknown): boolean {
+  const queues = (value as { queues?: HandoffQueueRow[] } | null)?.queues ?? [];
+  return queues.some(
+    (queue) => queue.enabled !== false && (queue.member_user_ids?.length ?? 0) > 0,
+  );
+}
+
+async function loadHandoffQueueReady(): Promise<boolean> {
+  try {
+    const response = await fetch('/api/account/handoff-queues', { cache: 'no-store' });
+    if (!response.ok) return false;
+    const data = await response.json().catch(() => null);
+    return hasReadyHandoffQueue(data);
+  } catch (error) {
+    console.warn('[agent runtime] activation preflight handoff check failed:', error);
+    return false;
+  }
+}
+
 /**
  * Modelo & Runtime: provider/model/credentials and the technical dials
  * that shape HOW the agent executes (temperature, message buffer, reply
@@ -39,6 +63,7 @@ const KEY_PLACEHOLDER: Record<AiProvider, string> = {
 export function AgentRuntime({ state }: { state: AgentConfigState }) {
   const { t } = state;
   const [showKey, setShowKey] = useState(false);
+  const [handoffQueueReady, setHandoffQueueReady] = useState(false);
   const initialLiveRef = useRef<boolean | null>(null);
   const disabled = !state.canEdit || state.saving;
 
@@ -48,6 +73,17 @@ export function AgentRuntime({ state }: { state: AgentConfigState }) {
     }
   }, [state.loading, state.isActive, state.autoReplyEnabled]);
 
+  useEffect(() => {
+    if (!state.canEdit) return;
+    let cancelled = false;
+    void loadHandoffQueueReady().then((ready) => {
+      if (!cancelled) setHandoffQueueReady(ready);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [state.canEdit]);
+
   async function saveWithActivationGuard() {
     const goingLive =
       state.isActive &&
@@ -56,10 +92,16 @@ export function AgentRuntime({ state }: { state: AgentConfigState }) {
 
     if (goingLive) {
       let knowledgeCount: number | null = null;
+      let specialistHandoffReady = handoffQueueReady;
       try {
-        const response = await fetch('/api/ai/knowledge', { cache: 'no-store' });
-        if (response.ok) {
-          const data = await response.json().catch(() => ({}));
+        const [knowledgeResponse, queueReady] = await Promise.all([
+          fetch('/api/ai/knowledge', { cache: 'no-store' }),
+          loadHandoffQueueReady(),
+        ]);
+        specialistHandoffReady = queueReady;
+        setHandoffQueueReady(queueReady);
+        if (knowledgeResponse.ok) {
+          const data = await knowledgeResponse.json().catch(() => ({}));
           knowledgeCount = Array.isArray(data?.documents) ? data.documents.length : null;
         }
       } catch (error) {
@@ -70,8 +112,8 @@ export function AgentRuntime({ state }: { state: AgentConfigState }) {
       if (knowledgeCount === 0) {
         warnings.push('não existe nenhuma fonte de conhecimento carregada');
       }
-      if (!state.handoffAgentId) {
-        warnings.push('não existe destinatário configurado para transferência humana');
+      if (!state.handoffAgentId && !specialistHandoffReady) {
+        warnings.push('não existe destinatário ou equipa configurada para transferência humana');
       }
 
       if (warnings.length > 0) {
@@ -87,6 +129,8 @@ export function AgentRuntime({ state }: { state: AgentConfigState }) {
       initialLiveRef.current = state.isActive && state.autoReplyEnabled;
     }
   }
+
+  const handoffReady = Boolean(state.handoffAgentId) || handoffQueueReady;
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -231,11 +275,11 @@ export function AgentRuntime({ state }: { state: AgentConfigState }) {
             />
           </div>
 
-          {state.isActive && state.autoReplyEnabled && !state.handoffAgentId ? (
+          {state.isActive && state.autoReplyEnabled && !handoffReady ? (
             <div className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
               <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
               <p>
-                Antes de colocar o agente ao vivo, configure quem deve receber uma transferência humana em Segurança e faça uma conversa em “Testar agente”.
+                Antes de colocar o agente ao vivo, configure quem deve receber uma transferência humana em Segurança ou numa equipa especialista e faça uma conversa em “Testar agente”.
               </p>
             </div>
           ) : null}
