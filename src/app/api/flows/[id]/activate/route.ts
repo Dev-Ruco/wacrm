@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { validateFlowForActivation } from '@/lib/flows/validate'
+import { validateFlowCycles } from '@/lib/flows/cycle-validation'
 
 /**
  * POST /api/flows/[id]/activate
@@ -81,24 +82,31 @@ export async function POST(
     if (!flow) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
-    const issues = validateFlowForActivation(
-      flow as {
-        name: string
-        trigger_type: 'keyword' | 'first_inbound_message' | 'manual'
-        trigger_config: Record<string, unknown>
-        entry_node_id: string | null
-      },
-      (nodes ?? []) as Array<{
-        node_key: string
-        node_type: string
-        config: Record<string, unknown>
-      }>,
-    )
+    const activationNodes = (nodes ?? []) as Array<{
+      node_key: string
+      node_type: string
+      config: Record<string, unknown>
+    }>
+    const issues = [
+      ...validateFlowForActivation(
+        flow as {
+          name: string
+          trigger_type: 'keyword' | 'first_inbound_message' | 'manual'
+          trigger_config: Record<string, unknown>
+          entry_node_id: string | null
+        },
+        activationNodes,
+      ),
+      ...validateFlowCycles(activationNodes),
+    ]
     const blockers = issues.filter((i) => i.severity === 'error')
     if (blockers.length > 0) {
+      const cycleBlocker = blockers.find((issue) => issue.message.startsWith('Flow cycle detected:'))
       return NextResponse.json(
         {
-          error: 'Cannot activate flow — fix the issues below first.',
+          error: cycleBlocker
+            ? cycleBlocker.message
+            : 'Cannot activate flow — fix the issues below first.',
           issues,
         },
         { status: 422 },
