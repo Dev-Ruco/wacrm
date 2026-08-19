@@ -104,3 +104,33 @@ grant execute on function wacrm.assign_conversation_if_current(uuid, uuid, uuid,
 
 comment on function wacrm.assign_conversation_if_current(uuid, uuid, uuid, uuid) is
   'Tenant-scoped compare-and-swap assignment. Succeeds only while assigned_agent_id still matches the caller observed value.';
+
+-- AI handoff is a second assignment writer: after tool reasoning it may try to
+-- assign the configured fallback/specialist. If a human has claimed the row in
+-- the meantime, preserve the human assignment atomically instead of letting the
+-- later AI UPDATE overwrite it. This trigger is deliberately narrow: it only
+-- acts on the UPDATE that advances ai_handoff_at.
+create or replace function wacrm.protect_ai_handoff_assignment_race()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+begin
+  if new.ai_handoff_at is distinct from old.ai_handoff_at
+     and old.assigned_agent_id is not null
+     and new.assigned_agent_id is distinct from old.assigned_agent_id then
+    new.assigned_agent_id := old.assigned_agent_id;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_ai_handoff_assignment_race
+  on wacrm.conversations;
+create trigger protect_ai_handoff_assignment_race
+before update of ai_handoff_at, assigned_agent_id on wacrm.conversations
+for each row execute function wacrm.protect_ai_handoff_assignment_race();
+
+comment on function wacrm.protect_ai_handoff_assignment_race() is
+  'Prevents an AI handoff UPDATE from overwriting a human assignment that won the row first.';
