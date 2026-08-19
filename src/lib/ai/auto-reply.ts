@@ -34,9 +34,7 @@ import {
 import { loadSiteProductContext, siteProductContextPrompt } from './site-product-context'
 import { engineSendText, engineSendTypingIndicator } from '@/lib/flows/meta-send'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
-import { triggerMatches } from '@/lib/automations/engine'
 import { recordLiveCatalogLearning } from '@/lib/catalog/live-learning'
-import type { Automation } from '@/types'
 import { chatContentText } from './types'
 
 export interface DispatchArgs {
@@ -206,11 +204,13 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
       return
     }
 
-    // Defense in depth for partial deployments and first-contact automations:
-    // if ANY bot already answered after this inbound, normal auto-reply must
-    // stay quiet. The message buffer performs the same check in its normal
-    // path; keeping it here also protects the direct fallback path when the
-    // buffer RPC is temporarily unavailable.
+    // The webhook runs deterministic Flows/Automations before scheduling the
+    // normal AI turn. Suppress only when there is concrete outbound evidence
+    // that something already answered this exact inbound. This covers first
+    // contact/new-contact automations too, while allowing silent automations
+    // (tags, CRM updates, pipeline changes) to coexist with the agent.
+    // The message buffer performs the same check in its normal path; keeping
+    // it here also protects the direct fallback path during partial deploys.
     if (!args.initiatedByAutomation) {
       const { data: inboundRow } = await db
         .from('messages')
@@ -271,32 +271,6 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
       ? chatContentText(latestInbound.content)
       : ''
 
-    // A normal inbound turn yields to deterministic autoresponders. An
-    // automation-initiated turn bypasses this lookup because that automation
-    // deliberately chose the account agent as its speaker.
-    if (!args.initiatedByAutomation) {
-      const { data: autoResponders, error: automationErr } = await db
-        .from('automations')
-        .select('*')
-        .eq('account_id', accountId)
-        .eq('is_active', true)
-        .in('trigger_type', ['new_message_received', 'keyword_match'])
-
-      if (automationErr) {
-        console.error('[ai auto-reply] automation eligibility lookup failed:', automationErr)
-      } else if (
-        autoResponders?.some((automation) =>
-          triggerMatches(automation as Automation, {
-            message_text: latestInboundText,
-            conversation_id: conversationId,
-          }),
-        )
-      ) {
-        logSkip(conversationId, 'matching_deterministic_automation')
-        return
-      }
-    }
-
     const route = classifyIntent({ lastMessageText: latestInboundText })
     trace?.setIntent(route.intent, route.modelTier)
     if (route.forceHandoff) {
@@ -326,11 +300,6 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
       return
     }
 
-    // Account tool configuration remains the hard permission boundary.
-    // Skills are routed semantically for THIS turn and may only narrow that
-    // boundary; a skill can never grant a tool the account did not enable.
-    // This avoids both tenant-specific keyword routing and the old bug where
-    // merely enabling any skill globally removed unrelated tools.
     const [{ permissions, instructions: toolInstructions }, configuredSkills] = await Promise.all([
       loadAgentToolPermissions(db, accountId, config.agentId!),
       loadAgentSkills(db, accountId, config.agentId!),
@@ -342,8 +311,6 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
     })
     const selectedSkills = skillSelection.skills
 
-    // The routing pass is a real provider call, so include it in usage/cost
-    // accounting independently of the customer-facing generation below.
     void logAiUsage(db, {
       accountId,
       conversationId,
@@ -600,9 +567,6 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
       return
     }
 
-    // When the model explicitly queued catalogue media, its accompanying
-    // natural text belongs before the photographs so the WhatsApp thread
-    // reads in the intended order.
     if (hasPendingActions && text) {
       await sendReplyChunks(args, text, config.maxReplyChunks)
     }
@@ -652,9 +616,6 @@ export async function dispatchInboundToAiReply(args: DispatchArgs): Promise<void
         })
       }
     } catch (error) {
-      // CRM classification is mandatory to attempt on every successful AI
-      // turn, but it must never turn a delivered customer reply into a
-      // technical handoff merely because the internal classifier failed.
       console.error('[ai auto-reply] journey classification failed:', error)
     }
 
