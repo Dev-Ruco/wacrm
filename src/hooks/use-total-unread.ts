@@ -2,37 +2,33 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
 import type { Conversation } from "@/types";
 
 /**
  * Count of conversations with at least one unread inbound message for
- * the current user. Used by the sidebar / mobile nav to surface unread
- * conversation state.
- *
- * The desktop sidebar and the mobile top navigation are both mounted in
- * the dashboard shell and are hidden responsively with CSS. That means
- * this hook can legitimately exist more than once at the same time.
- * Supabase Realtime topics must therefore be unique per hook instance;
- * reusing one fixed topic can make a second subscriber attach callbacks
- * to a channel that has already subscribed and crash the whole shell.
+ * the current account. Used by the sidebar / mobile nav.
  */
 export function useTotalUnread(): number {
+  const { accountId } = useAuth();
   const [total, setTotal] = useState(0);
-
-  // Keep a live local mirror of {id: unread_count} so INSERT/UPDATE/DELETE
-  // events can adjust the total in O(1) without refetching.
   const countsRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
+    if (!accountId) {
+      countsRef.current = new Map();
+      setTotal(0);
+      return;
+    }
+
     const supabase = createClient();
     let cancelled = false;
 
-    // Initial load. RLS scopes this to the signed-in user automatically —
-    // no explicit user_id filter needed here.
     (async () => {
       const { data, error } = await supabase
         .from("conversations")
-        .select("id, unread_count");
+        .select("id, unread_count")
+        .eq("account_id", accountId);
       if (cancelled || error || !data) return;
 
       const map = new Map<string, number>();
@@ -48,10 +44,15 @@ export function useTotalUnread(): number {
 
     const channelId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const channel = supabase
-      .channel(`total-unread-realtime:${channelId}`)
+      .channel(`total-unread-realtime:${accountId}:${channelId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "wacrm", table: "conversations" },
+        {
+          event: "*",
+          schema: "wacrm",
+          table: "conversations",
+          filter: `account_id=eq.${accountId}`,
+        },
         (payload) => {
           const map = countsRef.current;
           if (payload.eventType === "DELETE") {
@@ -61,7 +62,7 @@ export function useTotalUnread(): number {
             const row = payload.new as Conversation;
             map.set(row.id, row.unread_count ?? 0);
           }
-          // Recompute — cheap, conversations per user stay small.
+
           let sum = 0;
           for (const n of map.values()) if (n > 0) sum += 1;
           setTotal(sum);
@@ -73,7 +74,7 @@ export function useTotalUnread(): number {
       cancelled = true;
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [accountId]);
 
   return total;
 }
