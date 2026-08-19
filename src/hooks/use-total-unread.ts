@@ -5,26 +5,31 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import type { Conversation } from "@/types";
 
+interface UnreadSnapshot {
+  accountId: string | null;
+  total: number;
+}
+
 /**
  * Count of conversations with at least one unread inbound message for
  * the current account. Used by the sidebar / mobile nav.
  */
 export function useTotalUnread(): number {
   const { accountId } = useAuth();
-  const [total, setTotal] = useState(0);
+  const [snapshot, setSnapshot] = useState<UnreadSnapshot>({
+    accountId: null,
+    total: 0,
+  });
   const countsRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
-    if (!accountId) {
-      countsRef.current = new Map();
-      setTotal(0);
-      return;
-    }
+    countsRef.current = new Map();
+    if (!accountId) return;
 
     const supabase = createClient();
     let cancelled = false;
 
-    (async () => {
+    void (async () => {
       const { data, error } = await supabase
         .from("conversations")
         .select("id, unread_count")
@@ -39,7 +44,7 @@ export function useTotalUnread(): number {
         if (n > 0) sum += 1;
       }
       countsRef.current = map;
-      setTotal(sum);
+      setSnapshot({ accountId, total: sum });
     })();
 
     const channelId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -54,6 +59,7 @@ export function useTotalUnread(): number {
           filter: `account_id=eq.${accountId}`,
         },
         (payload) => {
+          if (cancelled) return;
           const map = countsRef.current;
           if (payload.eventType === "DELETE") {
             const oldRow = payload.old as Partial<Conversation>;
@@ -65,16 +71,16 @@ export function useTotalUnread(): number {
 
           let sum = 0;
           for (const n of map.values()) if (n > 0) sum += 1;
-          setTotal(sum);
+          setSnapshot({ accountId, total: sum });
         },
       )
       .subscribe();
 
     return () => {
       cancelled = true;
-      supabase.removeChannel(channel);
+      void supabase.removeChannel(channel);
     };
   }, [accountId]);
 
-  return total;
+  return accountId && snapshot.accountId === accountId ? snapshot.total : 0;
 }
