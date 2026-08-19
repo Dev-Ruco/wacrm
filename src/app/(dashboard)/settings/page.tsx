@@ -18,6 +18,7 @@ import { QuickRepliesManager } from '@/components/settings/quick-replies-manager
 import { FieldsAndTagsPanel } from '@/components/settings/fields-and-tags-panel';
 import { DealsSettings } from '@/components/settings/deals-settings';
 import { MembersTab } from '@/components/settings/members-tab';
+import { HandoffTeamsPanel } from '@/components/settings/handoff-teams-panel';
 import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
 import { DatabaseIntegrations } from '@/components/settings/database-integrations';
 import {
@@ -70,7 +71,12 @@ function SettingsPageInner() {
     'quick-replies': <QuickRepliesManager />,
     fields: <FieldsAndTagsPanel />,
     deals: <DealsSettings />,
-    members: <MembersTab />,
+    members: (
+      <div className="space-y-8">
+        <MembersTab />
+        <HandoffTeamsPanel />
+      </div>
+    ),
     database: <DatabaseIntegrations />,
     api: <ApiKeysSettings />,
   };
