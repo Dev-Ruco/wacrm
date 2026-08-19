@@ -27,6 +27,11 @@ interface StepLike {
   branches?: { yes?: StepLike[]; no?: StepLike[] }
 }
 
+const UNSUPPORTED_ACTIVE_TRIGGERS = new Set<AutomationTriggerType>([
+  'conversation_assigned',
+  'time_based',
+])
+
 export function validateStepsForActivation(steps: StepLike[]): ValidationIssue[] {
   const issues: ValidationIssue[] = []
   if (!Array.isArray(steps) || steps.length === 0) {
@@ -61,8 +66,6 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
       break
     case 'send_buttons':
     case 'send_list': {
-      // The whole step_config IS the interactive payload; validate it
-      // against Meta's limits (same check the engine runs before send).
       const result = validateInteractivePayload(c)
       if (!result.ok) {
         issues.push({ path: `${path}.interactive`, message: result.error })
@@ -144,7 +147,6 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
       }
       break
     case 'close_conversation':
-      // No config required.
       break
     default:
       issues.push({ path, message: `unknown step type: ${step.step_type}` })
@@ -158,6 +160,17 @@ export function validateTriggerForActivation(
   const issues: ValidationIssue[] = []
   const cfg = (triggerConfig ?? {}) as Record<string, unknown>
 
+  if (UNSUPPORTED_ACTIVE_TRIGGERS.has(triggerType as AutomationTriggerType)) {
+    issues.push({
+      path: 'trigger.type',
+      message:
+        triggerType === 'conversation_assigned'
+          ? 'conversation assigned automations are not available yet'
+          : 'time-based automations are not available yet',
+    })
+    return issues
+  }
+
   if (triggerType === 'keyword_match') {
     const k = cfg.keywords
     if (!Array.isArray(k) || k.length === 0) {
@@ -165,12 +178,6 @@ export function validateTriggerForActivation(
     } else if (k.some((v) => typeof v !== 'string' || v.trim() === '')) {
       issues.push({ path: 'trigger.keywords', message: 'keywords cannot be empty strings' })
     }
-    // A missing match_type defaults to "contains" at runtime (see
-    // automations/engine.ts and flows/engine.ts, which both read
-    // `match_type ?? "contains"`), so only an explicit, unrecognised
-    // value is invalid here. This keeps activation validation in step
-    // with the engine and with the builder's "Contains" default — an
-    // automation that shows the default in the UI must not be rejected.
     if (
       cfg.match_type != null &&
       cfg.match_type !== 'exact' &&
@@ -181,10 +188,6 @@ export function validateTriggerForActivation(
         path: 'trigger.match_type',
         message: 'match type must be "exact", "contains" or "word"',
       })
-    }
-  } else if (triggerType === 'time_based') {
-    if (!nonEmpty(cfg.schedule)) {
-      issues.push({ path: 'trigger.schedule', message: 'schedule is required' })
     }
   } else if (triggerType === 'tag_added') {
     if (!nonEmpty(cfg.tag_id)) {
