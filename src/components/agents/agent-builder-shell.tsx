@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { Pause, Play, Sparkles } from 'lucide-react';
+import { useLocale } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
@@ -22,28 +23,82 @@ export type Section =
 
 interface NavItem {
   id: Section;
-  label: string;
   gated?: boolean;
 }
 
+type Locale = 'pt' | 'en';
+
 const NAV_ITEMS: NavItem[] = [
-  { id: 'overview', label: 'Visão geral' },
-  { id: 'identity', label: 'Comportamento' },
-  { id: 'knowledge', label: 'Conhecimento' },
-  { id: 'tools', label: 'Ferramentas' },
-  { id: 'skills', label: 'Skills' },
-  { id: 'memory', label: 'Memória' },
-  { id: 'security', label: 'Segurança' },
-  { id: 'runtime', label: 'Runtime' },
-  { id: 'playground', label: 'Testar' },
-  { id: 'flow', label: 'Fluxo ao vivo' },
-  { id: 'suggestions', label: 'Lições' },
-  { id: 'eval', label: 'Avaliação', gated: true },
-  { id: 'usage', label: 'Utilização', gated: true },
+  { id: 'overview' },
+  { id: 'identity' },
+  { id: 'knowledge' },
+  { id: 'tools' },
+  { id: 'skills' },
+  { id: 'memory' },
+  { id: 'security' },
+  { id: 'runtime' },
+  { id: 'playground' },
+  { id: 'flow' },
+  { id: 'suggestions' },
+  { id: 'eval', gated: true },
+  { id: 'usage', gated: true },
 ];
 
+const COPY = {
+  pt: {
+    eyebrow: 'Agente IA',
+    unnamed: 'Agente sem nome',
+    noRole: 'Sem papel definido',
+    active: 'Activo',
+    paused: 'Pausado',
+    test: 'Testar agente',
+    pause: 'Pausar',
+    activate: 'Activar',
+    navLabel: 'Navegação do agente',
+    overview: 'Visão geral',
+    identity: 'Comportamento',
+    knowledge: 'Conhecimento',
+    tools: 'Ferramentas',
+    skills: 'Skills',
+    memory: 'Memória',
+    security: 'Segurança',
+    runtime: 'Runtime',
+    playground: 'Testar',
+    flow: 'Fluxo ao vivo',
+    suggestions: 'Lições',
+    eval: 'Avaliação',
+    usage: 'Utilização',
+  },
+  en: {
+    eyebrow: 'AI Agent',
+    unnamed: 'Unnamed agent',
+    noRole: 'No role defined',
+    active: 'Active',
+    paused: 'Paused',
+    test: 'Test agent',
+    pause: 'Pause',
+    activate: 'Activate',
+    navLabel: 'Agent navigation',
+    overview: 'Overview',
+    identity: 'Behaviour',
+    knowledge: 'Knowledge',
+    tools: 'Tools',
+    skills: 'Skills',
+    memory: 'Memory',
+    security: 'Security',
+    runtime: 'Runtime',
+    playground: 'Test',
+    flow: 'Live flow',
+    suggestions: 'Learnings',
+    eval: 'Evaluation',
+    usage: 'Usage',
+  },
+} satisfies Record<Locale, Record<string, string>>;
+
+// Kept for callers that need a stable non-rendered label. UI rendering below
+// localizes labels using the active locale.
 export function sectionLabel(id: Section): string {
-  return NAV_ITEMS.find((item) => item.id === id)?.label ?? '';
+  return COPY.pt[id];
 }
 
 export function AgentBuilderShell({
@@ -67,13 +122,15 @@ export function AgentBuilderShell({
   canViewUsage: boolean;
   children: ReactNode;
 }) {
+  const locale = useLocale();
+  const copy = COPY[locale.startsWith('pt') ? 'pt' : 'en'];
   const visibleItems = NAV_ITEMS.filter((item) => !item.gated || canViewUsage);
 
   return (
     <div className="wacrm-page min-w-0 space-y-5">
       <header className="wacrm-page-header">
         <div className="min-w-0">
-          <p className="text-label text-primary">Agente IA</p>
+          <p className="text-label text-primary">{copy.eyebrow}</p>
           <div className="mt-1 flex items-center gap-2.5">
             <span
               className={cn(
@@ -85,13 +142,13 @@ export function AgentBuilderShell({
               aria-hidden="true"
             />
             <h1 className="truncate text-[26px] font-semibold tracking-tight text-foreground sm:text-[28px]">
-              {agentName || 'Agente sem nome'}
+              {agentName || copy.unnamed}
             </h1>
           </div>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            {agentRole || 'Sem papel definido'} · WhatsApp ·{' '}
+            {agentRole || copy.noRole} · WhatsApp ·{' '}
             <span className={cn('font-medium', isActive && 'text-[var(--wacrm-success)]')}>
-              {isActive ? 'Activo' : 'Pausado'}
+              {isActive ? copy.active : copy.paused}
             </span>
           </p>
         </div>
@@ -99,7 +156,7 @@ export function AgentBuilderShell({
         <div className="flex shrink-0 items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => onNavigate('playground')}>
             <Sparkles className="size-4" />
-            Testar agente
+            {copy.test}
           </Button>
           {canToggleActive && onToggleActive ? (
             <Button
@@ -108,7 +165,7 @@ export function AgentBuilderShell({
               onClick={onToggleActive}
             >
               {isActive ? <Pause className="size-4" /> : <Play className="size-4" />}
-              {isActive ? 'Pausar' : 'Activar'}
+              {isActive ? copy.pause : copy.activate}
             </Button>
           ) : null}
         </div>
@@ -116,7 +173,7 @@ export function AgentBuilderShell({
 
       <div className="wacrm-surface overflow-hidden">
         <nav
-          aria-label="Navegação do agente"
+          aria-label={copy.navLabel}
           className="flex min-w-0 gap-1 overflow-x-auto border-b border-border bg-card px-2 py-2 [scrollbar-width:none] md:flex-wrap md:overflow-x-visible [&::-webkit-scrollbar]:hidden"
         >
           {visibleItems.map((item) => {
@@ -134,7 +191,7 @@ export function AgentBuilderShell({
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 )}
               >
-                {item.label}
+                {copy[item.id]}
               </button>
             );
           })}
