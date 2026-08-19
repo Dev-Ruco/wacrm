@@ -49,6 +49,7 @@ import {
   validateFlowForActivation,
   type ValidationIssue,
 } from "@/lib/flows/validate";
+import { validateFlowCycles } from "@/lib/flows/cycle-validation";
 import { useTranslations } from "next-intl";
 import { unlinkNodeReferences } from "@/lib/flows/edges";
 import type { FlowNodeRow, FlowRow } from "@/lib/flows/types";
@@ -311,8 +312,8 @@ export function FlowEditorProvider({
 
   // ---- Validation ----
   const issues = useMemo<ValidationIssue[]>(
-    () =>
-      validateFlowForActivation(
+    () => [
+      ...validateFlowForActivation(
         {
           name: state.name,
           trigger_type: state.trigger_type,
@@ -321,6 +322,8 @@ export function FlowEditorProvider({
         },
         state.nodes,
       ),
+      ...validateFlowCycles(state.nodes),
+    ],
     [state],
   );
   const canActivate = useMemo(
@@ -329,7 +332,7 @@ export function FlowEditorProvider({
   );
 
   // ---- Save (PUT) ----
-  const save = useCallback(async () => {
+  const persist = useCallback(async (): Promise<boolean> => {
     setSaving(true);
     try {
       const res = await fetch(`/api/flows/${initialFlow.id}`, {
@@ -350,13 +353,19 @@ export function FlowEditorProvider({
       }
       setDirty(false);
       toast.success(t("saved"));
+      return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Save failed";
       toast.error(msg);
+      return false;
     } finally {
       setSaving(false);
     }
-  }, [initialFlow.id, state]);
+  }, [initialFlow.id, state, t]);
+
+  const save = useCallback(async () => {
+    await persist();
+  }, [persist]);
 
   // ---- Activate / Pause / Archive ----
   const setStatus = useCallback(
@@ -369,9 +378,10 @@ export function FlowEditorProvider({
       try {
         // Always save first so the activation validator sees the
         // latest state — the user shouldn't have to remember "save
-        // then activate".
+        // then activate". A failed save must never activate stale data.
         if (next === "active") {
-          await save();
+          const saved = await persist();
+          if (!saved) return;
         }
         const res = await fetch(`/api/flows/${initialFlow.id}/activate`, {
           method: "POST",
@@ -397,7 +407,7 @@ export function FlowEditorProvider({
         setActivating(false);
       }
     },
-    [canActivate, save, initialFlow.id],
+    [canActivate, persist, initialFlow.id, t],
   );
 
   // ---- Delete ----
