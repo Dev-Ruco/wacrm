@@ -4,7 +4,14 @@ import { supabaseAdmin } from '@/lib/automations/admin-client'
 
 function cleanKey(value: unknown): string | null {
   if (typeof value !== 'string') return null
-  const key = value.trim().toLowerCase().replace(/\s+/g, '_')
+  const key = value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 49)
   return /^[a-z0-9][a-z0-9_-]{1,48}$/.test(key) ? key : null
 }
 
