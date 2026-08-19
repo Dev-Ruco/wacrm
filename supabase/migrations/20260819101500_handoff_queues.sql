@@ -110,6 +110,73 @@ for select
 to authenticated
 using (wacrm.is_account_member(account_id));
 
+-- Safety net for every AI handoff path, including guardrail/rate-limit paths
+-- that do not originate from handoff_human. An unassigned AI handoff must
+-- never silently disappear: notify owner/admin members so someone can claim it.
+create or replace function wacrm.notify_unassigned_ai_handoff()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+begin
+  if new.assigned_agent_id is not null
+     or new.ai_handoff_at is null
+     or new.ai_handoff_at is not distinct from old.ai_handoff_at then
+    return new;
+  end if;
+
+  -- A queue-aware tool call may already have emitted the same safety alert
+  -- just before markHandoff persists ai_handoff_at. Avoid duplicate cards.
+  if exists (
+    select 1
+    from wacrm.notifications n
+    where n.account_id = new.account_id
+      and n.conversation_id = new.id
+      and n.title = 'Handoff sem especialista disponível'
+      and n.created_at > now() - interval '5 minutes'
+  ) then
+    return new;
+  end if;
+
+  insert into wacrm.notifications (
+    account_id,
+    user_id,
+    type,
+    conversation_id,
+    contact_id,
+    actor_user_id,
+    title,
+    body
+  )
+  select
+    new.account_id,
+    p.user_id,
+    'conversation_assigned',
+    new.id,
+    new.contact_id,
+    null,
+    'Handoff sem especialista disponível',
+    coalesce(
+      new.ai_handoff_summary,
+      'A IA pediu intervenção humana, mas a conversa ficou sem responsável. Assuma ou atribua esta conversa.'
+    )
+  from wacrm.profiles p
+  where p.account_id = new.account_id
+    and p.account_role::text in ('owner', 'admin');
+
+  return new;
+exception when others then
+  raise warning 'Failed to notify admins for unassigned AI handoff %: %', new.id, sqlerrm;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_unassigned_ai_handoff on wacrm.conversations;
+create trigger on_unassigned_ai_handoff
+after update of ai_handoff_at, assigned_agent_id on wacrm.conversations
+for each row execute function wacrm.notify_unassigned_ai_handoff();
+
 comment on table wacrm.handoff_queues is
   'Account-scoped operational queues used to route AI/human handoffs by subject without changing authorization roles.';
 comment on table wacrm.handoff_queue_members is
