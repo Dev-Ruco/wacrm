@@ -13,8 +13,8 @@ export function useUnreadNotifications(): number {
   const userId = user?.id ?? null;
   const [count, setCount] = useState(0);
 
-  const loadCount = useCallback(async () => {
-    if (!accountId || !userId) return;
+  const loadCount = useCallback(async (): Promise<number | null> => {
+    if (!accountId || !userId) return null;
 
     const supabase = createClient();
     const { count: unreadCount, error } = await supabase
@@ -26,9 +26,9 @@ export function useUnreadNotifications(): number {
 
     if (error) {
       console.error("Failed to count unread notifications:", error);
-      return;
+      return null;
     }
-    setCount(unreadCount ?? 0);
+    return unreadCount ?? 0;
   }, [accountId, userId]);
 
   useEffect(() => {
@@ -37,7 +37,13 @@ export function useUnreadNotifications(): number {
     const supabase = createClient();
     let cancelled = false;
 
-    void loadCount();
+    const refreshCount = () => {
+      void loadCount().then((nextCount) => {
+        if (!cancelled && nextCount !== null) setCount(nextCount);
+      });
+    };
+
+    refreshCount();
 
     const channelId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const channel = supabase
@@ -61,7 +67,7 @@ export function useUnreadNotifications(): number {
           // Recount instead of trying to infer DELETE transitions from
           // payload.old, which may contain only the primary key unless the
           // table uses REPLICA IDENTITY FULL.
-          void loadCount();
+          refreshCount();
         },
       )
       .subscribe();
