@@ -41,6 +41,12 @@ interface AvailabilityCheck {
   startsAt: string | null
 }
 
+type QueueAwareToolArgs = Parameters<typeof createBaseAutoReplyTools>[0] & {
+  config: Parameters<typeof createBaseAutoReplyTools>[0]['config'] & {
+    handoffAgentId?: string | null
+  }
+}
+
 const OPERATIONAL_RUNTIME_TOOLS = new Set([
   'check_availability',
   'create_order',
@@ -224,7 +230,7 @@ function sameScheduledStart(scheduledAt: string, checkedAt: string): boolean {
 }
 
 async function executeQueueAwareHandoff(
-  args: Parameters<typeof createBaseAutoReplyTools>[0],
+  args: QueueAwareToolArgs,
   base: ReturnType<typeof createBaseAutoReplyTools>,
   call: AgentToolCall,
 ): Promise<string> {
@@ -319,7 +325,7 @@ async function executeQueueAwareHandoff(
  * search_catalog. Existing tenant permissions and Skills continue to apply.
  */
 export function createAutoReplyTools(
-  args: Parameters<typeof createBaseAutoReplyTools>[0],
+  args: QueueAwareToolArgs,
 ): ReturnType<typeof createBaseAutoReplyTools> {
   const base = createBaseAutoReplyTools(args)
   const tools = base.tools
