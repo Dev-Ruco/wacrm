@@ -32,6 +32,7 @@ import { ConversationsChart } from '@/components/dashboard/conversations-chart';
 import { PipelineDonut } from '@/components/dashboard/pipeline-donut';
 import { ResponseTimeChart } from '@/components/dashboard/response-time-chart';
 import { ActivityFeed } from '@/components/dashboard/activity-feed';
+import { OnboardingGuide } from '@/components/dashboard/onboarding-guide';
 import { useTranslations } from 'next-intl';
 
 type RangeDays = 7 | 30 | 90;
@@ -122,6 +123,8 @@ export default function DashboardPage() {
           </p>
         </div>
       </header>
+
+      <OnboardingGuide />
 
       <PriorityChips counts={priorities} />
 
