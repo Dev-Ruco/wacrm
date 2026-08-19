@@ -2,10 +2,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Bot, CheckCircle2, Circle, Loader2, PlayCircle } from 'lucide-react';
+import { CheckCircle2, Circle, Loader2, PlayCircle } from 'lucide-react';
+import { useLocale } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/hooks/use-auth';
+
+type Locale = 'pt' | 'en';
 
 type SetupState = {
   agentConfigured: boolean;
@@ -16,9 +19,76 @@ type SetupState = {
   websiteActive: boolean;
 };
 
+const COPY = {
+  pt: {
+    checking: 'A verificar a configuração inicial…',
+    eyebrow: 'Primeiros passos',
+    title: 'Colocar o WACRM pronto para atender clientes',
+    intro: 'Segue esta ordem. Cada passo usa a configuração real da conta, por isso o progresso reflecte o que já está efectivamente preparado.',
+    essentials: 'passos essenciais',
+    company: '1. Empresa',
+    companyMissing: 'Confirma os dados básicos da conta.',
+    account: 'Conta',
+    channel: '2. Canal',
+    channelMissing: 'Liga o WhatsApp ou configura o chat do Website.',
+    available: 'disponível para clientes.',
+    agent: '3. Agente',
+    agentDone: 'Identidade e fornecedor de IA configurados.',
+    agentMissing: 'Define identidade, função e modelo do agente.',
+    knowledge: '4. Knowledge',
+    knowledgeMissing: 'Adiciona informação factual do negócio para o agente consultar.',
+    sources: 'fonte(s) disponível(is).',
+    handoff: '5. Handoff',
+    handoffDone: 'Existe um responsável ou equipa para escalamentos.',
+    handoffMissing: 'Define quem recebe pedidos que precisam de uma pessoa.',
+    activation: '6. Activação',
+    activationDone: 'O agente está activo.',
+    activationMissing: 'Testa primeiro e activa apenas quando a prontidão estiver confirmada.',
+    configure: 'Configurar',
+    connectChannel: 'Ligar canal',
+    add: 'Adicionar',
+    review: 'Rever',
+    testTitle: 'Antes da activação: testa uma conversa realista',
+    testDetail: 'Confirma respostas, Knowledge, ferramentas e handoff no Playground antes de atender clientes.',
+    testAgent: 'Testar agente',
+  },
+  en: {
+    checking: 'Checking initial setup…',
+    eyebrow: 'Getting started',
+    title: 'Get WACRM ready to serve customers',
+    intro: 'Follow this order. Each step uses the account’s real configuration, so progress reflects what is actually ready.',
+    essentials: 'essential steps',
+    company: '1. Business',
+    companyMissing: 'Confirm the basic account details.',
+    account: 'Account',
+    channel: '2. Channel',
+    channelMissing: 'Connect WhatsApp or configure Website chat.',
+    available: 'available to customers.',
+    agent: '3. Agent',
+    agentDone: 'Identity and AI provider configured.',
+    agentMissing: 'Define the agent identity, role, and model.',
+    knowledge: '4. Knowledge',
+    knowledgeMissing: 'Add factual business information the agent can consult.',
+    sources: 'source(s) available.',
+    handoff: '5. Handoff',
+    handoffDone: 'A person or specialist team is available for escalations.',
+    handoffMissing: 'Choose who receives requests that need a person.',
+    activation: '6. Activation',
+    activationDone: 'The agent is active.',
+    activationMissing: 'Test first and activate only after readiness is confirmed.',
+    configure: 'Configure',
+    connectChannel: 'Connect channel',
+    add: 'Add',
+    review: 'Review',
+    testTitle: 'Before activation: test a realistic conversation',
+    testDetail: 'Check replies, Knowledge, tools, and handoff in the Playground before serving customers.',
+    testAgent: 'Test agent',
+  },
+} satisfies Record<Locale, Record<string, string>>;
+
 async function safeJson(url: string) {
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { cache: 'no-store' });
     if (!response.ok) return null;
     return await response.json();
   } catch {
@@ -91,6 +161,8 @@ function Step({
 }
 
 export function OnboardingGuide() {
+  const locale = useLocale();
+  const copy = COPY[locale.startsWith('pt') ? 'pt' : 'en'];
   const { account, canEditSettings, profileLoading } = useAuth();
   const [state, setState] = useState<SetupState | null>(null);
 
@@ -129,7 +201,7 @@ export function OnboardingGuide() {
       <Card>
         <CardContent className="flex items-center gap-3 py-5 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          A verificar a configuração inicial…
+          {copy.checking}
         </CardContent>
       </Card>
     );
@@ -137,87 +209,65 @@ export function OnboardingGuide() {
 
   if (ready) return null;
 
+  const channelName = state.whatsappConnected ? 'WhatsApp' : 'Website';
+
   return (
     <Card>
       <CardContent className="space-y-4 pt-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-label text-primary">Primeiros passos</p>
-            <h2 className="mt-1 text-lg font-semibold text-foreground">
-              Colocar o WACRM pronto para atender clientes
-            </h2>
-            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              Segue esta ordem. Cada passo reutiliza a configuração real da conta; não existe um segundo estado de onboarding para manter.
-            </p>
+            <p className="text-label text-primary">{copy.eyebrow}</p>
+            <h2 className="mt-1 text-lg font-semibold text-foreground">{copy.title}</h2>
+            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{copy.intro}</p>
           </div>
           <div className="text-right">
             <p className="text-sm font-semibold text-foreground">{completed} / {required.length}</p>
-            <p className="text-xs text-muted-foreground">passos essenciais</p>
+            <p className="text-xs text-muted-foreground">{copy.essentials}</p>
           </div>
         </div>
 
         <div className="grid gap-2 md:grid-cols-2">
           <Step
             done={companyReady}
-            title="1. Empresa"
-            description={companyReady ? `Conta: ${account?.name}` : 'Define os dados básicos da conta.'}
-            href="/settings?tab=profile"
-            action="Configurar"
+            title={copy.company}
+            description={companyReady ? `${copy.account}: ${account?.name}` : copy.companyMissing}
+            href="/settings"
+            action={copy.configure}
           />
           <Step
             done={channelReady}
-            title="2. Canal"
-            description={
-              channelReady
-                ? `${state.whatsappConnected ? 'WhatsApp' : 'Website'} disponível para clientes.`
-                : 'Liga o WhatsApp ou configura o chat do Website.'
-            }
+            title={copy.channel}
+            description={channelReady ? `${channelName} ${copy.available}` : copy.channelMissing}
             href="/settings?tab=whatsapp"
-            action="Ligar canal"
+            action={copy.connectChannel}
           />
           <Step
             done={state.agentConfigured}
-            title="3. Agente"
-            description={
-              state.agentConfigured
-                ? 'Identidade e fornecedor de IA configurados.'
-                : 'Define identidade, função e modelo do agente.'
-            }
-            href="/agents"
-            action="Configurar"
+            title={copy.agent}
+            description={state.agentConfigured ? copy.agentDone : copy.agentMissing}
+            href="/agents?section=identity"
+            action={copy.configure}
           />
           <Step
             done={knowledgeReady}
-            title="4. Knowledge"
-            description={
-              knowledgeReady
-                ? `${state.knowledgeDocs} fonte(s) disponível(is).`
-                : 'Adiciona informação factual do negócio para o agente consultar.'
-            }
-            href="/agents"
-            action="Adicionar"
+            title={copy.knowledge}
+            description={knowledgeReady ? `${state.knowledgeDocs} ${copy.sources}` : copy.knowledgeMissing}
+            href="/agents?section=knowledge"
+            action={copy.add}
           />
           <Step
             done={state.handoffReady}
-            title="5. Handoff"
-            description={
-              state.handoffReady
-                ? 'Existe um responsável ou equipa para escalamentos.'
-                : 'Define quem recebe pedidos que precisam de uma pessoa.'
-            }
-            href="/settings?tab=members"
-            action="Configurar"
+            title={copy.handoff}
+            description={state.handoffReady ? copy.handoffDone : copy.handoffMissing}
+            href="/agents?section=security"
+            action={copy.configure}
           />
           <Step
             done={state.agentActive}
-            title="6. Activação"
-            description={
-              state.agentActive
-                ? 'O agente está activo.'
-                : 'Testa primeiro e activa apenas quando a prontidão estiver confirmada.'
-            }
-            href="/agents"
-            action="Rever"
+            title={copy.activation}
+            description={state.agentActive ? copy.activationDone : copy.activationMissing}
+            href="/agents?section=runtime"
+            action={copy.review}
           />
         </div>
 
@@ -225,13 +275,11 @@ export function OnboardingGuide() {
           <div className="flex flex-wrap items-center gap-3 rounded-lg bg-muted/50 px-3 py-3">
             <PlayCircle className="h-5 w-5 text-primary" />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-foreground">Antes da activação: testa uma conversa realista</p>
-              <p className="text-xs text-muted-foreground">
-                Confirma respostas, Knowledge, ferramentas e handoff no Playground antes de atender clientes.
-              </p>
+              <p className="text-sm font-medium text-foreground">{copy.testTitle}</p>
+              <p className="text-xs text-muted-foreground">{copy.testDetail}</p>
             </div>
             <Button asChild size="sm">
-              <Link href="/agents">Testar agente</Link>
+              <Link href="/agents?section=playground">{copy.testAgent}</Link>
             </Button>
           </div>
         )}
