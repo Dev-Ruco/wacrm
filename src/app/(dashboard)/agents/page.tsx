@@ -104,11 +104,7 @@ export default function AgentsPage() {
           agentName={agentConfig.agentName}
           agentRole={agentConfig.agentRole}
           isActive={agentConfig.isActive}
-          canToggleActive={agentConfig.canEdit}
-          onToggleActive={() => {
-            agentConfig.setIsActive(!agentConfig.isActive);
-            void agentConfig.handleSave();
-          }}
+          canToggleActive={false}
           canViewUsage={canViewUsage}
         >
           {renderSection()}
