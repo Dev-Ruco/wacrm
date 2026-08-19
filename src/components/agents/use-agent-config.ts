@@ -18,6 +18,10 @@ export const MASKED_KEY = '••••••••••••••••';
 export const HANDOFF_QUEUE = '__queue__';
 export const DEFAULT_AGENT_REPLY_CAP = 50;
 
+function logApiError(scope: string, data: unknown) {
+  console.error(`[agent config] ${scope}:`, data);
+}
+
 /**
  * All state + load/save logic for the account's single ai_configs row,
  * shared by every Agentes tab that reads or writes a slice of it
@@ -91,7 +95,8 @@ export function useAgentConfig() {
       const res = await fetch('/api/ai/config');
       const data = await res.json();
       if (!res.ok) {
-        toast.error(data.error ?? t('loadFailed'));
+        logApiError('load failed', data);
+        toast.error(t('loadFailed'));
         return;
       }
       if (data.configured) {
@@ -140,7 +145,8 @@ export function useAgentConfig() {
         setMaxPerConversation(DEFAULT_AGENT_REPLY_CAP);
         resetCommercialStrategy();
       }
-    } catch {
+    } catch (error) {
+      console.error('[agent config] load network error:', error);
       toast.error(t('loadFailed'));
     } finally {
       setLoading(false);
@@ -208,9 +214,14 @@ export function useAgentConfig() {
         }),
       });
       const data = await res.json();
-      if (res.ok) toast.success(t('testSuccess'));
-      else toast.error(data.error ?? t('testRejected'));
-    } catch {
+      if (res.ok) {
+        toast.success(t('testSuccess'));
+      } else {
+        logApiError('provider test rejected', data);
+        toast.error(t('testRejected'));
+      }
+    } catch (error) {
+      console.error('[agent config] provider test network error:', error);
       toast.error(t('testNetworkError'));
     } finally {
       setTesting(false);
@@ -239,9 +250,11 @@ export function useAgentConfig() {
         await fetchConfig();
         return true;
       }
-      toast.error(data.error ?? t('saveFailed'));
+      logApiError('save failed', data);
+      toast.error(t('saveFailed'));
       return false;
-    } catch {
+    } catch (error) {
+      console.error('[agent config] save network error:', error);
       toast.error(t('saveFailed'));
       return false;
     } finally {
@@ -274,10 +287,12 @@ export function useAgentConfig() {
         setAgentDescription('');
         resetCommercialStrategy();
       } else {
-        const data = await res.json();
-        toast.error(data.error ?? t('removeFailed'));
+        const data = await res.json().catch(() => ({}));
+        logApiError('remove failed', data);
+        toast.error(t('removeFailed'));
       }
-    } catch {
+    } catch (error) {
+      console.error('[agent config] remove network error:', error);
       toast.error(t('removeFailed'));
     } finally {
       setRemoving(false);
