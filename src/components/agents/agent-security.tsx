@@ -27,17 +27,14 @@ const REAL_HANDOFF_RULES = [
 
 /**
  * Segurança & Handoff: the two dials that actually live in ai_configs
- * (reply cap, handoff destination) plus a READ-ONLY mirror of the real
- * handoff/guardrail rules in src/lib/ai/route.ts and
- * src/lib/ai/guardrails.ts. Deliberately not editable — per the
- * evaluation this was built from, a business admin should never be able
- * to switch off a safety rule by accident through this screen. Keep
- * REAL_HANDOFF_RULES in sync with those two files by hand; this list has
- * no runtime effect, it only documents what already runs.
+ * (reply cap, fallback handoff destination) plus a READ-ONLY mirror of
+ * the real handoff/guardrail rules. Specialist routing is configured in
+ * Settings → Members and can override this fallback for a matching subject.
  */
 export function AgentSecurity({ state }: { state: AgentConfigState }) {
   const { t } = state;
   const disabled = !state.canEdit || state.saving;
+  const eligibleHandoffMembers = state.members.filter((member) => member.role !== 'viewer');
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -70,7 +67,7 @@ export function AgentSecurity({ state }: { state: AgentConfigState }) {
           <CardTitle as="h3" className="text-base">{t('handoffTo')}</CardTitle>
           <CardDescription>{t('handoffToDesc')}</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-2">
           <Select
             value={state.handoffAgentId || HANDOFF_QUEUE}
             onValueChange={(v) => state.setHandoffAgentId(!v || v === HANDOFF_QUEUE ? '' : v)}
@@ -81,13 +78,16 @@ export function AgentSecurity({ state }: { state: AgentConfigState }) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={HANDOFF_QUEUE}>{t('handoffQueue')}</SelectItem>
-              {state.members.map((m) => (
+              {eligibleHandoffMembers.map((m) => (
                 <SelectItem key={m.user_id} value={m.user_id}>
                   {memberLabel(m)}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Este é o destino de recurso. Equipas especialistas configuradas em Definições → Membros têm prioridade quando o assunto corresponde; se não houver especialista elegível, este destino é usado. Um utilizador apenas de leitura nunca pode receber handoffs.
+          </p>
         </CardContent>
       </Card>
 
