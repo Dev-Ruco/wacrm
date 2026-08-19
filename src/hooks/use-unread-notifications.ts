@@ -1,56 +1,72 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type { Notification } from "@/types";
+import { useAuth } from "@/hooks/use-auth";
 
 /**
- * Count of unread notifications for the current user. Used by the
- * sidebar and mobile navigation to surface a notifications badge.
- *
- * Both navigation variants stay mounted and are switched with CSS, so
- * more than one hook instance may be active. Give every subscription a
- * unique Realtime topic to avoid collisions with an already-subscribed
- * channel on the shared browser Supabase client.
+ * Count of unread notifications for the current user, explicitly scoped
+ * to the current account at both query and Realtime subscription level.
  */
 export function useUnreadNotifications(): number {
+  const { accountId, user } = useAuth();
   const [count, setCount] = useState(0);
 
+  const loadCount = useCallback(async () => {
+    if (!accountId || !user?.id) {
+      setCount(0);
+      return;
+    }
+
+    const supabase = createClient();
+    const { count: unreadCount, error } = await supabase
+      .from("notifications")
+      .select("*", { count: "exact", head: true })
+      .eq("account_id", accountId)
+      .eq("user_id", user.id)
+      .is("read_at", null);
+
+    if (error) {
+      console.error("Failed to count unread notifications:", error);
+      return;
+    }
+    setCount(unreadCount ?? 0);
+  }, [accountId, user?.id]);
+
   useEffect(() => {
+    if (!accountId || !user?.id) {
+      setCount(0);
+      return;
+    }
+
     const supabase = createClient();
     let cancelled = false;
 
-    (async () => {
-      // head:true skips fetching rows — we only need the `count`
-      // supabase-js returns alongside the (empty) response body.
-      const { count: unreadCount, error } = await supabase
-        .from("notifications")
-        .select("*", { count: "exact", head: true })
-        .is("read_at", null);
-      if (cancelled || error) return;
-      setCount(unreadCount ?? 0);
-    })();
+    void loadCount();
 
     const channelId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const channel = supabase
-      .channel(`notifications-unread-count:${channelId}`)
+      .channel(`notifications-unread-count:${accountId}:${channelId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "wacrm", table: "notifications" },
+        {
+          event: "*",
+          schema: "wacrm",
+          table: "notifications",
+          filter: `account_id=eq.${accountId}`,
+        },
         (payload) => {
-          if (payload.eventType === "INSERT") {
-            const row = payload.new as Notification;
-            if (!row.read_at) setCount((n) => n + 1);
-          } else if (payload.eventType === "UPDATE") {
-            // Updates here only ever set read_at (marking a notification
-            // read). Derive purely from the new row so we don't rely on
-            // payload.old columns, which require REPLICA IDENTITY FULL.
-            const newRow = payload.new as Notification;
-            if (newRow.read_at) setCount((n) => Math.max(0, n - 1));
-          } else if (payload.eventType === "DELETE") {
-            const oldRow = payload.old as Partial<Notification>;
-            if (!oldRow.read_at) setCount((n) => Math.max(0, n - 1));
+          if (cancelled) return;
+
+          if (payload.eventType === "INSERT" || payload.eventType === "UPDATE") {
+            const row = payload.new as { user_id?: string };
+            if (row.user_id && row.user_id !== user.id) return;
           }
+
+          // Recount instead of trying to infer DELETE transitions from
+          // payload.old, which may contain only the primary key unless the
+          // table uses REPLICA IDENTITY FULL.
+          void loadCount();
         },
       )
       .subscribe();
@@ -59,7 +75,7 @@ export function useUnreadNotifications(): number {
       cancelled = true;
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [accountId, loadCount, user?.id]);
 
   return count;
 }
