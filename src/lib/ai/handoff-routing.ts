@@ -16,11 +16,21 @@ export interface HandoffRoute {
   reason: 'specialist' | 'fallback' | 'unassigned'
 }
 
-interface Candidate {
+export interface HandoffCandidate {
   userId: string
   memberPriority: number
   presenceRank: number
   openCount: number
+}
+
+export function rankHandoffCandidates(candidates: HandoffCandidate[]): HandoffCandidate[] {
+  return [...candidates].sort(
+    (a, b) =>
+      a.presenceRank - b.presenceRank ||
+      a.openCount - b.openCount ||
+      a.memberPriority - b.memberPriority ||
+      a.userId.localeCompare(b.userId),
+  )
 }
 
 export async function loadHandoffQueues(
@@ -36,8 +46,6 @@ export async function loadHandoffQueues(
     .order('name', { ascending: true })
 
   if (error) {
-    // Partial deployments must not break the whole agent. Until the migration
-    // is present, ordinary configured fallback handoff continues to work.
     console.warn('[handoff routing] queue lookup unavailable:', error.message)
     return []
   }
@@ -171,7 +179,7 @@ export async function resolveHandoffRoute(args: {
             membershipRows.map((row) => [row.user_id, row.priority ?? 100] as const),
           )
           const now = Date.now()
-          const candidates: Candidate[] = ids.map((userId) => {
+          const candidates = rankHandoffCandidates(ids.map((userId) => {
             const presence = presenceByUser.get(userId)
             return {
               userId,
@@ -179,14 +187,7 @@ export async function resolveHandoffRoute(args: {
               presenceRank: presenceRank(presence?.status ?? null, presence?.last_seen_at ?? null, now),
               openCount: load.get(userId) ?? 0,
             }
-          })
-          candidates.sort(
-            (a, b) =>
-              a.presenceRank - b.presenceRank ||
-              a.openCount - b.openCount ||
-              a.memberPriority - b.memberPriority ||
-              a.userId.localeCompare(b.userId),
-          )
+          }))
           const selected = candidates[0]
           if (selected) {
             return {
@@ -211,8 +212,6 @@ export async function resolveHandoffRoute(args: {
     }
   }
 
-  // Never silently orphan a handoff. If no specialist or configured fallback
-  // can receive it, leave the conversation unassigned but alert account admins.
   const admins = await adminRecipients(db, accountId)
   return {
     queue,
