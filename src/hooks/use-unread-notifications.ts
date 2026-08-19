@@ -10,20 +10,18 @@ import { useAuth } from "@/hooks/use-auth";
  */
 export function useUnreadNotifications(): number {
   const { accountId, user } = useAuth();
+  const userId = user?.id ?? null;
   const [count, setCount] = useState(0);
 
   const loadCount = useCallback(async () => {
-    if (!accountId || !user?.id) {
-      setCount(0);
-      return;
-    }
+    if (!accountId || !userId) return;
 
     const supabase = createClient();
     const { count: unreadCount, error } = await supabase
       .from("notifications")
       .select("*", { count: "exact", head: true })
       .eq("account_id", accountId)
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .is("read_at", null);
 
     if (error) {
@@ -31,13 +29,10 @@ export function useUnreadNotifications(): number {
       return;
     }
     setCount(unreadCount ?? 0);
-  }, [accountId, user?.id]);
+  }, [accountId, userId]);
 
   useEffect(() => {
-    if (!accountId || !user?.id) {
-      setCount(0);
-      return;
-    }
+    if (!accountId || !userId) return;
 
     const supabase = createClient();
     let cancelled = false;
@@ -60,7 +55,7 @@ export function useUnreadNotifications(): number {
 
           if (payload.eventType === "INSERT" || payload.eventType === "UPDATE") {
             const row = payload.new as { user_id?: string };
-            if (row.user_id && row.user_id !== user.id) return;
+            if (row.user_id && row.user_id !== userId) return;
           }
 
           // Recount instead of trying to infer DELETE transitions from
@@ -75,7 +70,7 @@ export function useUnreadNotifications(): number {
       cancelled = true;
       supabase.removeChannel(channel);
     };
-  }, [accountId, loadCount, user?.id]);
+  }, [accountId, loadCount, userId]);
 
-  return count;
+  return accountId && userId ? count : 0;
 }
