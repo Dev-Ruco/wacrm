@@ -23,6 +23,28 @@ import {
 import { useAuth } from '@/hooks/use-auth';
 import { canEditSettings } from '@/lib/auth/roles';
 
+const SECTIONS = new Set<Section>([
+  'overview',
+  'identity',
+  'skills',
+  'tools',
+  'knowledge',
+  'memory',
+  'security',
+  'runtime',
+  'playground',
+  'flow',
+  'suggestions',
+  'eval',
+  'usage',
+]);
+
+function requestedSection(): Section | null {
+  if (typeof window === 'undefined') return null;
+  const value = new URLSearchParams(window.location.search).get('section');
+  return value && SECTIONS.has(value as Section) ? (value as Section) : null;
+}
+
 export default function AgentsPage() {
   const { accountId, accountRole } = useAuth();
   const canViewUsage = accountRole ? canEditSettings(accountRole) : false;
@@ -33,12 +55,15 @@ export default function AgentsPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const deepLink = requestedSection();
       try {
         const res = await fetch('/api/ai/config');
         const data = await res.json().catch(() => ({}));
-        if (!cancelled) setSection(data?.configured ? 'overview' : 'identity');
+        if (!cancelled) {
+          setSection(deepLink ?? (data?.configured ? 'overview' : 'identity'));
+        }
       } catch {
-        if (!cancelled) setSection('identity');
+        if (!cancelled) setSection(deepLink ?? 'identity');
       } finally {
         if (!cancelled) setDecided(true);
       }
