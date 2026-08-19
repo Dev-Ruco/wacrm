@@ -45,7 +45,8 @@ const COPY = {
     activationDone: 'O agente está activo.',
     activationMissing: 'Testa primeiro e activa apenas quando a prontidão estiver confirmada.',
     configure: 'Configurar',
-    connectChannel: 'Ligar canal',
+    whatsapp: 'WhatsApp',
+    website: 'Website',
     add: 'Adicionar',
     review: 'Rever',
     testTitle: 'Antes da activação: testa uma conversa realista',
@@ -77,7 +78,8 @@ const COPY = {
     activationDone: 'The agent is active.',
     activationMissing: 'Test first and activate only after readiness is confirmed.',
     configure: 'Configure',
-    connectChannel: 'Connect channel',
+    whatsapp: 'WhatsApp',
+    website: 'Website',
     add: 'Add',
     review: 'Review',
     testTitle: 'Before activation: test a realistic conversation',
@@ -130,12 +132,16 @@ function Step({
   description,
   href,
   action,
+  secondaryHref,
+  secondaryAction,
 }: {
   done: boolean;
   title: string;
   description: string;
   href: string;
   action: string;
+  secondaryHref?: string;
+  secondaryAction?: string;
 }) {
   const Icon = done ? CheckCircle2 : Circle;
   return (
@@ -152,9 +158,16 @@ function Step({
         <p className="text-xs text-muted-foreground">{description}</p>
       </div>
       {!done && (
-        <Button asChild type="button" variant="ghost" size="sm">
-          <Link href={href}>{action}</Link>
-        </Button>
+        <div className="flex shrink-0 gap-1">
+          <Button asChild type="button" variant="ghost" size="sm">
+            <Link href={href}>{action}</Link>
+          </Button>
+          {secondaryHref && secondaryAction ? (
+            <Button asChild type="button" variant="ghost" size="sm">
+              <Link href={secondaryHref}>{secondaryAction}</Link>
+            </Button>
+          ) : null}
+        </div>
       )}
     </div>
   );
@@ -239,7 +252,9 @@ export function OnboardingGuide() {
             title={copy.channel}
             description={channelReady ? `${channelName} ${copy.available}` : copy.channelMissing}
             href="/settings?tab=whatsapp"
-            action={copy.connectChannel}
+            action={copy.whatsapp}
+            secondaryHref="/settings?tab=website"
+            secondaryAction={copy.website}
           />
           <Step
             done={state.agentConfigured}
