@@ -250,9 +250,6 @@ describe("validateTriggerForActivation", () => {
   });
 
   it("accepts the word match_type (issue #409)", () => {
-    // Activation validation has to stay in step with the engine and the
-    // builder's dropdown — an automation the UI can save must not be
-    // rejected on activation.
     expect(
       validateTriggerForActivation("keyword_match", {
         keywords: ["hi"],
@@ -261,13 +258,16 @@ describe("validateTriggerForActivation", () => {
     ).toEqual([]);
   });
 
-  it("requires schedule on time_based triggers", () => {
-    expect(validateTriggerForActivation("time_based", {})).toEqual([
-      { path: "trigger.schedule", message: "schedule is required" },
+  it("blocks trigger types that have no dispatcher yet", () => {
+    expect(validateTriggerForActivation("time_based", { schedule: "0 9 * * *" })).toEqual([
+      { path: "trigger.type", message: "time-based automations are not available yet" },
     ]);
-    expect(
-      validateTriggerForActivation("time_based", { schedule: "0 9 * * *" }),
-    ).toEqual([]);
+    expect(validateTriggerForActivation("conversation_assigned", {})).toEqual([
+      {
+        path: "trigger.type",
+        message: "conversation assigned automations are not available yet",
+      },
+    ]);
   });
 
   it("requires tag_id on tag_added triggers", () => {
