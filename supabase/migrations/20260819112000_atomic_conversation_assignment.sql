@@ -23,13 +23,24 @@ as $$
 declare
   v_current_assignee uuid;
   v_role text;
+  v_caller_role text;
   v_rowcount integer;
 begin
   -- Authenticated callers must be operational account members. service_role
   -- is used by server-side AI/automation paths and is allowed explicitly.
   if auth.role() <> 'service_role' then
-    if auth.uid() is null
-       or not wacrm.is_account_member(p_account_id, 'agent'::wacrm.account_role_enum) then
+    if auth.uid() is null then
+      raise exception 'not authorized to assign conversations'
+        using errcode = '42501';
+    end if;
+
+    select p.account_role::text
+      into v_caller_role
+    from wacrm.profiles p
+    where p.user_id = auth.uid()
+      and p.account_id = p_account_id;
+
+    if v_caller_role is null or v_caller_role not in ('owner', 'admin', 'agent') then
       raise exception 'not authorized to assign conversations'
         using errcode = '42501';
     end if;
