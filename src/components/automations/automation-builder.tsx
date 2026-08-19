@@ -64,12 +64,7 @@ import { interactivePayloadPreviewText } from "@/lib/whatsapp/interactive"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 
-// ------------------------------------------------------------
-// Types (builder-local — mirror the flattened rows we POST)
-// ------------------------------------------------------------
-
 export interface BuilderStep {
-  /** Client id; the API assigns real UUIDs server-side. */
   cid: string
   step_type: AutomationStepType
   step_config: Record<string, unknown>
@@ -86,14 +81,9 @@ export interface BuilderInitial {
   steps: BuilderStep[]
 }
 
-// ------------------------------------------------------------
-// Step metadata — one source of truth for icon + label + border color
-// ------------------------------------------------------------
-
 interface StepMeta {
   label: string
   icon: typeof Zap
-  /** Left-border accent color per spec. */
   border: string
 }
 
@@ -135,10 +125,13 @@ const TRIGGER_OPTIONS: { value: AutomationTriggerType }[] = [
   { value: "keyword_match" },
   { value: "interactive_reply" },
   { value: "new_contact_created" },
-  { value: "conversation_assigned" },
   { value: "tag_added" },
-  { value: "time_based" },
 ]
+
+const RETIRED_TRIGGER_TYPES = new Set<AutomationTriggerType>([
+  "conversation_assigned",
+  "time_based",
+])
 
 const CONVERSATION_COPY = {
   pt: {
@@ -186,11 +179,6 @@ function cid(): string {
   )
 }
 
-// The send_buttons / send_list step_config IS an InteractiveMessagePayload,
-// but step_config is typed generically as Record<string, unknown>. These two
-// helpers hold the single unavoidable structural cast in one place so a
-// payload-shape change has one seam to update instead of four scattered
-// `as unknown as` sites.
 function toStepConfig(p: InteractiveMessagePayload): Record<string, unknown> {
   return p as unknown as Record<string, unknown>
 }
@@ -201,8 +189,6 @@ function asInteractive(cfg: Record<string, unknown>): InteractiveMessagePayload 
 function blankConfig(type: AutomationStepType): Record<string, unknown> {
   switch (type) {
     case "send_message":
-      // New conversational automations default to the account brain. Existing
-      // rows without `mode` remain fixed text in the runtime and editor.
       return { text: "", mode: "agent" }
     case "send_buttons":
       return toStepConfig(blankButtonsPayload())
@@ -231,16 +217,6 @@ function blankConfig(type: AutomationStepType): Record<string, unknown> {
       return {}
   }
 }
-
-// ------------------------------------------------------------
-// Account resources (tags, members, approved templates, pipelines)
-//
-// Loaded once at the builder root and shared via context so the
-// tag / agent / template pickers below can offer existing resources
-// by name instead of asking the user to paste raw UUIDs. Every picker
-// falls back to a raw input when its list is empty (fresh account or
-// an older deployment), so an automation is always authorable.
-// ------------------------------------------------------------
 
 interface AutomationResources {
   tags: TagRecord[]
@@ -287,26 +263,14 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
     const supabase = createClient()
-
-    // Tags, templates and custom fields come straight from the DB — RLS
-    // scopes them to the caller's account. Only APPROVED templates can
-    // actually be sent (anything else 400s at send time), matching the
-    // broadcast picker.
     void (async () => {
       const [tagsRes, templatesRes, customFieldsRes, pipelinesRes, stagesRes] =
         await Promise.all([
           supabase.from("tags").select("*").order("name"),
-          supabase
-            .from("message_templates")
-            .select("*")
-            .eq("status", "APPROVED")
-            .order("name"),
+          supabase.from("message_templates").select("*").eq("status", "APPROVED").order("name"),
           supabase.from("custom_fields").select("*").order("field_name"),
           supabase.from("pipelines").select("id, name").order("name"),
-          supabase
-            .from("pipeline_stages")
-            .select("id, name, pipeline_id, position")
-            .order("position"),
+          supabase.from("pipeline_stages").select("id, name, pipeline_id, position").order("position"),
         ])
       if (cancelled) return
       setTags((tagsRes.data as TagRecord[] | null) ?? [])
@@ -316,9 +280,6 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
       setStages((stagesRes.data as PipelineStageOption[] | null) ?? [])
     })()
 
-    // Members go through the API so we inherit its email-visibility
-    // rules (agents/viewers don't see emails). Unreachable on older
-    // deployments → pickers fall back to a raw agent-id input.
     void (async () => {
       try {
         const res = await fetch("/api/account/members", { cache: "no-store" })
@@ -326,7 +287,7 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
         const json = (await res.json()) as { members?: AccountMember[] }
         if (!cancelled) setMembers(json.members ?? [])
       } catch {
-        // Members endpoint absent — caller falls back to raw input.
+        // Older deployments may not expose the members endpoint yet.
       }
     })()
 
@@ -336,9 +297,7 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <ResourcesContext.Provider
-      value={{ tags, members, templates, customFields, pipelines, stages }}
-    >
+    <ResourcesContext.Provider value={{ tags, members, templates, customFields, pipelines, stages }}>
       {children}
     </ResourcesContext.Provider>
   )
@@ -347,320 +306,100 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
 const SELECT_CLASS =
   "w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none"
 
-/** Tag dropdown by name + color, storing the tag's id. Falls back to a
- *  raw id input when no tags exist yet. */
-function TagSelect({
-  value,
-  onChange,
-  t,
-}: {
-  value: string
-  onChange: (v: string) => void
-  t: ReturnType<typeof useTranslations>
-}) {
+function TagSelect({ value, onChange, t }: { value: string; onChange: (v: string) => void; t: ReturnType<typeof useTranslations> }) {
   const { tags } = useResources()
   if (tags.length === 0) {
-    return (
-      <Input
-        placeholder={t("tags.placeholder")}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="bg-muted text-foreground"
-      />
-    )
+    return <Input placeholder={t("tags.placeholder")} value={value} onChange={(e) => onChange(e.target.value)} className="bg-muted text-foreground" />
   }
-  const selected = tags.find((t) => t.id === value)
+  const selected = tags.find((tag) => tag.id === value)
   return (
     <div className="flex items-center gap-2">
-      <span
-        className="h-3 w-3 shrink-0 rounded-full border border-border"
-        style={{ backgroundColor: selected?.color ?? "transparent" }}
-        aria-hidden
-      />
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={SELECT_CLASS}
-      >
+      <span className="h-3 w-3 shrink-0 rounded-full border border-border" style={{ backgroundColor: selected?.color ?? "transparent" }} aria-hidden />
+      <select value={value} onChange={(e) => onChange(e.target.value)} className={SELECT_CLASS}>
         <option value="">{t("tags.select")}</option>
-        {tags.map((tg) => (
-          <option key={tg.id} value={tg.id}>
-            {tg.name}
-          </option>
-        ))}
-        {/* Preserve a saved tag that's since been deleted so editing an
-            existing automation doesn't silently drop it. */}
-        {value && !selected && (
-          <option value={value}>{t("tags.unknown", { id: value })}</option>
-        )}
+        {tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
+        {value && !selected && <option value={value}>{t("tags.unknown", { id: value })}</option>}
       </select>
     </div>
   )
 }
 
-/** Contact-field dropdown for "Update Contact Field": built-in columns plus
- *  any account custom fields (stored as `custom:<id>`). A saved custom field
- *  that's since been deleted is preserved as a labelled option so editing an
- *  existing automation doesn't silently drop it. */
-function ContactFieldSelect({
-  value,
-  onChange,
-  t,
-}: {
-  value: string
-  onChange: (v: string) => void
-  t: ReturnType<typeof useTranslations>
-}) {
+function ContactFieldSelect({ value, onChange, t }: { value: string; onChange: (v: string) => void; t: ReturnType<typeof useTranslations> }) {
   const { customFields } = useResources()
   const customValue = value.startsWith("custom:") ? value : ""
-  const knownCustom =
-    customValue && customFields.some((f) => `custom:${f.id}` === customValue)
+  const knownCustom = customValue && customFields.some((field) => `custom:${field.id}` === customValue)
   return (
-    <select
-      value={value || "name"}
-      onChange={(e) => onChange(e.target.value)}
-      className={SELECT_CLASS}
-    >
+    <select value={value || "name"} onChange={(e) => onChange(e.target.value)} className={SELECT_CLASS}>
       <option value="name">{t("fields.name")}</option>
       <option value="email">{t("fields.email")}</option>
       <option value="company">{t("fields.company")}</option>
-      {customFields.length > 0 && (
-        <optgroup label={t("fields.customFields")}>
-          {customFields.map((f) => (
-            <option key={f.id} value={`custom:${f.id}`}>
-              {f.field_name}
-            </option>
-          ))}
-        </optgroup>
-      )}
-      {customValue && !knownCustom && (
-        <option value={customValue}>{t("fields.unknown", { id: customValue })}</option>
-      )}
+      {customFields.length > 0 && <optgroup label={t("fields.customFields")}>{customFields.map((field) => <option key={field.id} value={`custom:${field.id}`}>{field.field_name}</option>)}</optgroup>}
+      {customValue && !knownCustom && <option value={customValue}>{t("fields.unknown", { id: customValue })}</option>}
     </select>
   )
 }
 
-/** Agent dropdown by name, storing the member's user_id. Falls back to
- *  a raw id input when the member list is unavailable. */
-function AgentSelect({
-  value,
-  onChange,
-  t,
-}: {
-  value: string
-  onChange: (v: string) => void
-  t: ReturnType<typeof useTranslations>
-}) {
+function AgentSelect({ value, onChange, t }: { value: string; onChange: (v: string) => void; t: ReturnType<typeof useTranslations> }) {
   const { members } = useResources()
   if (members.length === 0) {
-    return (
-      <Input
-        placeholder={t("agents.placeholder")}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="bg-muted text-foreground"
-      />
-    )
+    return <Input placeholder={t("agents.placeholder")} value={value} onChange={(e) => onChange(e.target.value)} className="bg-muted text-foreground" />
   }
-  const selected = members.find((m) => m.user_id === value)
+  const selected = members.find((member) => member.user_id === value)
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className={SELECT_CLASS}
-    >
+    <select value={value} onChange={(e) => onChange(e.target.value)} className={SELECT_CLASS}>
       <option value="">{t("agents.select")}</option>
-      {members.map((m) => (
-        <option key={m.user_id} value={m.user_id}>
-          {m.full_name || m.email || m.user_id}
-        </option>
-      ))}
-      {value && !selected && (
-        <option value={value}>{t("agents.unknown", { id: value })}</option>
-      )}
+      {members.map((member) => <option key={member.user_id} value={member.user_id}>{member.full_name || member.email || member.user_id}</option>)}
+      {value && !selected && <option value={value}>{t("agents.unknown", { id: value })}</option>}
     </select>
   )
 }
 
-/** Pipeline + stage picker for Create Deal. The automation stores ids because
- *  the engine writes directly to deals, but authors should choose by name. */
-function DealPipelineFields({
-  pipelineId,
-  stageId,
-  onChange,
-  t,
-}: {
-  pipelineId: string
-  stageId: string
-  onChange: (patch: { pipeline_id: string; stage_id: string }) => void
-  t: ReturnType<typeof useTranslations>
-}) {
+function DealPipelineFields({ pipelineId, stageId, onChange, t }: { pipelineId: string; stageId: string; onChange: (patch: { pipeline_id: string; stage_id: string }) => void; t: ReturnType<typeof useTranslations> }) {
   const { pipelines, stages } = useResources()
-
   if (pipelines.length === 0) {
-    return (
-      <>
-        <FieldBlock label={t("pipelines.pipelineIdLabel")}>
-          <Input
-            value={pipelineId}
-            onChange={(e) =>
-              onChange({ pipeline_id: e.target.value, stage_id: stageId })
-            }
-            className="bg-muted text-foreground"
-          />
-        </FieldBlock>
-        <FieldBlock label={t("pipelines.stageIdLabel")}>
-          <Input
-            value={stageId}
-            onChange={(e) =>
-              onChange({ pipeline_id: pipelineId, stage_id: e.target.value })
-            }
-            className="bg-muted text-foreground"
-          />
-        </FieldBlock>
-      </>
-    )
+    return <><FieldBlock label={t("pipelines.pipelineIdLabel")}><Input value={pipelineId} onChange={(e) => onChange({ pipeline_id: e.target.value, stage_id: stageId })} className="bg-muted text-foreground" /></FieldBlock><FieldBlock label={t("pipelines.stageIdLabel")}><Input value={stageId} onChange={(e) => onChange({ pipeline_id: pipelineId, stage_id: e.target.value })} className="bg-muted text-foreground" /></FieldBlock></>
   }
-
-  const selectedPipeline = pipelines.find((p) => p.id === pipelineId)
-  const stageOptions = stages.filter((s) => s.pipeline_id === pipelineId)
-  const selectedStage = stageOptions.find((s) => s.id === stageId)
-
+  const selectedPipeline = pipelines.find((pipeline) => pipeline.id === pipelineId)
+  const stageOptions = stages.filter((stage) => stage.pipeline_id === pipelineId)
+  const selectedStage = stageOptions.find((stage) => stage.id === stageId)
   return (
     <>
       <FieldBlock label={t("pipelines.pipelineLabel")}>
-        <select
-          value={pipelineId}
-          onChange={(e) => {
-            const nextPipelineId = e.target.value
-            const firstStage = stages.find(
-              (s) => s.pipeline_id === nextPipelineId
-            )
-            onChange({
-              pipeline_id: nextPipelineId,
-              stage_id: firstStage?.id ?? "",
-            })
-          }}
-          className={SELECT_CLASS}
-        >
+        <select value={pipelineId} onChange={(e) => { const nextPipelineId = e.target.value; const firstStage = stages.find((stage) => stage.pipeline_id === nextPipelineId); onChange({ pipeline_id: nextPipelineId, stage_id: firstStage?.id ?? "" }) }} className={SELECT_CLASS}>
           <option value="">{t("pipelines.selectPipeline")}</option>
-          {pipelines.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-          {pipelineId && !selectedPipeline && (
-            <option value={pipelineId}>{t("pipelines.unknownPipeline", { id: pipelineId })}</option>
-          )}
+          {pipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
+          {pipelineId && !selectedPipeline && <option value={pipelineId}>{t("pipelines.unknownPipeline", { id: pipelineId })}</option>}
         </select>
       </FieldBlock>
       <FieldBlock label={t("pipelines.stageLabel")}>
-        <select
-          value={stageId}
-          onChange={(e) =>
-            onChange({ pipeline_id: pipelineId, stage_id: e.target.value })
-          }
-          className={SELECT_CLASS}
-          disabled={!pipelineId || stageOptions.length === 0}
-        >
-          <option value="">
-            {pipelineId ? t("pipelines.selectStage") : t("pipelines.selectPipelineFirst")}
-          </option>
-          {stageOptions.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-          {stageId && pipelineId && !selectedStage && (
-            <option value={stageId}>{t("pipelines.unknownStage", { id: stageId })}</option>
-          )}
+        <select value={stageId} onChange={(e) => onChange({ pipeline_id: pipelineId, stage_id: e.target.value })} className={SELECT_CLASS} disabled={!pipelineId || stageOptions.length === 0}>
+          <option value="">{pipelineId ? t("pipelines.selectStage") : t("pipelines.selectPipelineFirst")}</option>
+          {stageOptions.map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}
+          {stageId && pipelineId && !selectedStage && <option value={stageId}>{t("pipelines.unknownStage", { id: stageId })}</option>}
         </select>
       </FieldBlock>
     </>
   )
 }
 
-/** Template dropdown showing approved templates by name + language,
- *  storing both template_name and language. Falls back to manual name +
- *  language inputs when no approved templates are synced yet. */
-function SendTemplateFields({
-  templateName,
-  language,
-  onChange,
-  t,
-}: {
-  templateName: string
-  language: string
-  onChange: (patch: { template_name: string; language: string }) => void
-  t: ReturnType<typeof useTranslations>
-}) {
+function SendTemplateFields({ templateName, language, onChange, t }: { templateName: string; language: string; onChange: (patch: { template_name: string; language: string }) => void; t: ReturnType<typeof useTranslations> }) {
   const { templates } = useResources()
-
   if (templates.length === 0) {
-    return (
-      <>
-        <FieldBlock label={t("templates.templateNameLabel")}>
-          <Input
-            value={templateName}
-            onChange={(e) =>
-              onChange({ template_name: e.target.value, language })
-            }
-            className="bg-muted text-foreground"
-          />
-        </FieldBlock>
-        <FieldBlock label={t("templates.languageLabel")}>
-          <Input
-            value={language}
-            onChange={(e) =>
-              onChange({ template_name: templateName, language: e.target.value })
-            }
-            className="bg-muted text-foreground"
-          />
-        </FieldBlock>
-      </>
-    )
+    return <><FieldBlock label={t("templates.templateNameLabel")}><Input value={templateName} onChange={(e) => onChange({ template_name: e.target.value, language })} className="bg-muted text-foreground" /></FieldBlock><FieldBlock label={t("templates.languageLabel")}><Input value={language} onChange={(e) => onChange({ template_name: templateName, language: e.target.value })} className="bg-muted text-foreground" /></FieldBlock></>
   }
-
-  // Encode name + language in the option value so two templates that
-  // share a name across languages stay distinct.
   const toValue = (name: string, lang: string) => `${name}::${lang}`
   const current = templateName ? toValue(templateName, language) : ""
-  const hasMatch = templates.some(
-    (t) => toValue(t.name, t.language ?? "en_US") === current,
-  )
-
+  const hasMatch = templates.some((template) => toValue(template.name, template.language ?? "en_US") === current)
   return (
     <FieldBlock label={t("templates.templateLabel")}>
-      <select
-        value={current}
-        onChange={(e) => {
-          const [name, lang] = e.target.value.split("::")
-          onChange({ template_name: name ?? "", language: lang ?? "" })
-        }}
-        className={SELECT_CLASS}
-      >
+      <select value={current} onChange={(e) => { const [name, lang] = e.target.value.split("::"); onChange({ template_name: name ?? "", language: lang ?? "" }) }} className={SELECT_CLASS}>
         <option value="">{t("templates.select")}</option>
-        {templates.map((tmpl) => {
-          const lang = tmpl.language ?? "en_US"
-          return (
-            <option key={tmpl.id} value={toValue(tmpl.name, lang)}>
-              {tmpl.name} ({lang})
-            </option>
-          )
-        })}
-        {current && !hasMatch && (
-          <option value={current}>
-            {t("templates.unknown", { name: templateName, lang: language || t("templates.unknownLang") })}
-          </option>
-        )}
+        {templates.map((template) => { const lang = template.language ?? "en_US"; return <option key={template.id} value={toValue(template.name, lang)}>{template.name} ({lang})</option> })}
+        {current && !hasMatch && <option value={current}>{t("templates.unknown", { name: templateName, lang: language || t("templates.unknownLang") })}</option>}
       </select>
     </FieldBlock>
   )
 }
-
-// ------------------------------------------------------------
-// Main builder component
-// ------------------------------------------------------------
 
 export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
   const router = useRouter()
@@ -671,35 +410,32 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   function patchTop<K extends keyof BuilderInitial>(key: K, value: BuilderInitial[K]) {
-    setState((s) => ({ ...s, [key]: value }))
+    setState((current) => ({ ...current, [key]: value }))
   }
 
-  // --- Step tree mutations (immutable) ---
-
-  function updateStep(path: StepPath, updater: (s: BuilderStep) => BuilderStep) {
-    setState((s) => ({ ...s, steps: mapAtPath(s.steps, path, updater) }))
+  function updateStep(path: StepPath, updater: (step: BuilderStep) => BuilderStep) {
+    setState((current) => ({ ...current, steps: mapAtPath(current.steps, path, updater) }))
   }
 
   function addStepAt(parent: ParentScope, index: number, type: AutomationStepType) {
-    const node: BuilderStep = {
-      cid: cid(),
-      step_type: type,
-      step_config: blankConfig(type),
-      branches: type === "condition" ? { yes: [], no: [] } : undefined,
-    }
-    setState((s) => ({ ...s, steps: insertAt(s.steps, parent, index, node) }))
+    const node: BuilderStep = { cid: cid(), step_type: type, step_config: blankConfig(type), branches: type === "condition" ? { yes: [], no: [] } : undefined }
+    setState((current) => ({ ...current, steps: insertAt(current.steps, parent, index, node) }))
     setExpandedId(node.cid)
   }
 
   function deleteStepAt(path: StepPath) {
-    setState((s) => ({ ...s, steps: removeAt(s.steps, path) }))
+    setState((current) => ({ ...current, steps: removeAt(current.steps, path) }))
   }
 
   function moveStepAt(path: StepPath, direction: -1 | 1) {
-    setState((s) => ({ ...s, steps: moveAt(s.steps, path, direction) }))
+    setState((current) => ({ ...current, steps: moveAt(current.steps, path, direction) }))
   }
 
   async function save() {
+    if (state.is_active && RETIRED_TRIGGER_TYPES.has(state.trigger_type)) {
+      toast.error("Este gatilho ainda não tem execução activa no WACRM. Escolha outro gatilho antes de activar esta automação.")
+      return
+    }
     setSaving(true)
     try {
       const payload = {
@@ -710,39 +446,21 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
         is_active: state.is_active,
         steps: toApiSteps(state.steps),
       }
-
       const res = isEditing
-        ? await fetch(`/api/automations/${initial.id}`, {
-            method: "PATCH",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(payload),
-          })
-        : await fetch(`/api/automations`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(payload),
-          })
-
+        ? await fetch(`/api/automations/${initial.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })
+        : await fetch(`/api/automations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })
       const body = await res.json().catch(() => ({}))
       if (!res.ok) {
-        // If the server blocked activation with validation issues,
-        // surface the first concrete problem so the user can fix it
-        // without opening DevTools for the full array.
-        const firstIssue: { path?: string; message?: string } | undefined =
-          body?.issues?.[0]
+        const firstIssue: { path?: string; message?: string } | undefined = body?.issues?.[0]
         if (firstIssue?.message) {
-          toast.error(firstIssue.message, {
-            description: firstIssue.path ? `at ${firstIssue.path}` : undefined,
-          })
+          toast.error(firstIssue.message, { description: firstIssue.path ? `at ${firstIssue.path}` : undefined })
         } else {
           toast.error(body?.error ?? t("toasts.saveFailed"))
         }
         return
       }
       toast.success(isEditing ? t("toasts.saved") : t("toasts.created"))
-      if (!isEditing && body?.automation?.id) {
-        router.replace(`/automations/${body.automation.id}/edit`)
-      }
+      if (!isEditing && body?.automation?.id) router.replace(`/automations/${body.automation.id}/edit`)
     } finally {
       setSaving(false)
     }
@@ -750,64 +468,19 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
 
   return (
     <div className="fixed inset-0 flex flex-col bg-background">
-      {/* Top bar. At sub-sm widths the "Active" label is hidden and the
-          switch moves to the right of the save button, so the name input
-          gets maximum width. */}
       <header className="flex flex-shrink-0 items-center gap-2 border-b border-border bg-card/80 px-3 py-3 sm:gap-3 sm:px-4">
-        <button
-          type="button"
-          onClick={() => router.push("/automations")}
-          className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          aria-label={t("backToAutomations")}
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </button>
-        <input
-          value={state.name}
-          onChange={(e) => patchTop("name", e.target.value)}
-          placeholder={t("untitled")}
-          className="min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-sm font-semibold text-foreground placeholder:text-muted-foreground focus:bg-muted focus:outline-none sm:text-base"
-        />
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="hidden sm:inline">{t("active")}</span>
-          <Switch
-            checked={state.is_active}
-            onCheckedChange={(v) => patchTop("is_active", !!v)}
-            aria-label={t("activeAria")}
-          />
-        </div>
-        <Button
-          onClick={save}
-          disabled={saving}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
-        >
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          {isEditing ? t("save") : t("saveDraft")}
-        </Button>
+        <button type="button" onClick={() => router.push("/automations")} className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label={t("backToAutomations")}><ArrowLeft className="h-4 w-4" /></button>
+        <input value={state.name} onChange={(e) => patchTop("name", e.target.value)} placeholder={t("untitled")} className="min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-sm font-semibold text-foreground placeholder:text-muted-foreground focus:bg-muted focus:outline-none sm:text-base" />
+        <div className="flex items-center gap-2 text-xs text-muted-foreground"><span className="hidden sm:inline">{t("active")}</span><Switch checked={state.is_active} onCheckedChange={(value) => patchTop("is_active", !!value)} aria-label={t("activeAria")} /></div>
+        <Button onClick={save} disabled={saving} className="bg-primary text-primary-foreground hover:bg-primary/90">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{isEditing ? t("save") : t("saveDraft")}</Button>
       </header>
 
-      {/* Canvas */}
       <div className="relative flex-1 overflow-y-auto">
         <div className="absolute inset-0 bg-[radial-gradient(circle,var(--border)_1px,transparent_1px)] [background-size:20px_20px] pointer-events-none" />
         <div className="relative mx-auto flex max-w-2xl flex-col items-center gap-0 px-4 py-10">
           <ResourcesProvider>
-            <TriggerCard
-              type={state.trigger_type}
-              config={state.trigger_config}
-              onTypeChange={(tVal) => patchTop("trigger_type", tVal)}
-              onConfigChange={(c) => patchTop("trigger_config", c)}
-              t={t}
-            />
-            <StepList
-              steps={state.steps}
-              parentPath={[]}
-              expandedId={expandedId}
-              setExpandedId={setExpandedId}
-              updateStep={updateStep}
-              addStepAt={addStepAt}
-              deleteStepAt={deleteStepAt}
-              moveStepAt={moveStepAt}
-            />
+            <TriggerCard type={state.trigger_type} config={state.trigger_config} onTypeChange={(value) => patchTop("trigger_type", value)} onConfigChange={(config) => patchTop("trigger_config", config)} t={t} />
+            <StepList steps={state.steps} parentPath={[]} expandedId={expandedId} setExpandedId={setExpandedId} updateStep={updateStep} addStepAt={addStepAt} deleteStepAt={deleteStepAt} moveStepAt={moveStepAt} />
           </ResourcesProvider>
         </div>
       </div>
@@ -815,108 +488,31 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
   )
 }
 
-// ------------------------------------------------------------
-// Trigger card
-// ------------------------------------------------------------
-
-function TriggerCard({
-  type,
-  config,
-  onTypeChange,
-  onConfigChange,
-  t,
-}: {
-  type: AutomationTriggerType
-  config: Record<string, unknown>
-  onTypeChange: (t: AutomationTriggerType) => void
-  onConfigChange: (c: Record<string, unknown>) => void
-  t: ReturnType<typeof useTranslations>
-}) {
+function TriggerCard({ type, config, onTypeChange, onConfigChange, t }: { type: AutomationTriggerType; config: Record<string, unknown>; onTypeChange: (type: AutomationTriggerType) => void; onConfigChange: (config: Record<string, unknown>) => void; t: ReturnType<typeof useTranslations> }) {
   const [open, setOpen] = useState(false)
+  const retired = RETIRED_TRIGGER_TYPES.has(type)
   return (
-    // Card width: full on mobile, fixed 320px on sm+. The canvas wrapper
-    // (max-w-2xl + px-4) keeps this tidy on tablet/desktop.
     <div className="z-10 w-full max-w-[320px] sm:w-80">
       <div className="rounded-lg border border-border border-l-4 border-l-blue-500 bg-card shadow-lg">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex w-full items-center gap-3 px-4 py-3 text-left"
-        >
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-500/10 text-blue-400">
-            <Zap className="h-4 w-4" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-[11px] uppercase tracking-wide text-blue-300">{t("trigger")}</div>
-            <div className="truncate text-sm font-medium text-foreground">
-              {t(`triggers.${type}.label`)}
-            </div>
-          </div>
-          <ChevronDown
-            className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")}
-          />
+        <button type="button" onClick={() => setOpen((value) => !value)} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-500/10 text-blue-400"><Zap className="h-4 w-4" /></div>
+          <div className="min-w-0 flex-1"><div className="text-[11px] uppercase tracking-wide text-blue-300">{t("trigger")}</div><div className="truncate text-sm font-medium text-foreground">{t(`triggers.${type}.label`)}</div></div>
+          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")} />
         </button>
         {open && (
           <div className="space-y-3 border-t border-border px-4 py-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                {t("triggerType")}
-              </label>
-              <select
-                value={type}
-                onChange={(e) => onTypeChange(e.target.value as AutomationTriggerType)}
-                className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none"
-              >
-                {TRIGGER_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {t(`triggers.${o.value}.label`)}
-                  </option>
-                ))}
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">{t("triggerType")}</label>
+              <select value={type} onChange={(e) => onTypeChange(e.target.value as AutomationTriggerType)} className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none">
+                {retired && <option value={type} disabled>{t(`triggers.${type}.label`)} — indisponível</option>}
+                {TRIGGER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{t(`triggers.${option.value}.label`)}</option>)}
               </select>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                {t(`triggers.${type}.hint`)}
-              </p>
+              <p className="mt-1 text-[11px] text-muted-foreground">{retired ? "Este gatilho foi retirado de novas automações porque ainda não tem um dispatcher de produção." : t(`triggers.${type}.hint`)}</p>
             </div>
-            {type === "keyword_match" && (
-              <KeywordMatchConfig
-                config={config as unknown as KeywordMatchTriggerConfig}
-                onChange={onConfigChange}
-                t={t}
-              />
-            )}
-            {type === "interactive_reply" && (
-              <InteractiveReplyConfig config={config} onChange={onConfigChange} t={t} />
-            )}
-            {type === "tag_added" && (
-              <div>
-                <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                  Tag
-                </label>
-                <TagSelect
-                  value={(config.tag_id as string) ?? ""}
-                  onChange={(v) => onConfigChange({ ...config, tag_id: v })}
-                  t={t}
-                />
-              </div>
-            )}
-            {type === "time_based" && (
-              <div>
-                <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                  {t("schedule")}
-                </label>
-                <Input
-                  placeholder="Cron expression or HH:mm"
-                  value={(config.schedule as string) ?? ""}
-                  onChange={(e) =>
-                    onConfigChange({ ...config, schedule: e.target.value })
-                  }
-                  className="bg-muted text-foreground"
-                />
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  {t("scheduleHint")}
-                </p>
-              </div>
-            )}
+            {type === "keyword_match" && <KeywordMatchConfig config={config as unknown as KeywordMatchTriggerConfig} onChange={onConfigChange} t={t} />}
+            {type === "interactive_reply" && <InteractiveReplyConfig config={config} onChange={onConfigChange} t={t} />}
+            {type === "tag_added" && <div><label className="mb-1 block text-xs font-medium text-muted-foreground">Tag</label><TagSelect value={(config.tag_id as string) ?? ""} onChange={(value) => onConfigChange({ ...config, tag_id: value })} t={t} /></div>}
+            {type === "time_based" && <div><label className="mb-1 block text-xs font-medium text-muted-foreground">{t("schedule")}</label><Input placeholder="Cron expression or HH:mm" value={(config.schedule as string) ?? ""} onChange={(e) => onConfigChange({ ...config, schedule: e.target.value })} className="bg-muted text-foreground" /><p className="mt-1 text-[11px] text-muted-foreground">{t("scheduleHint")}</p></div>}
           </div>
         )}
       </div>
@@ -924,161 +520,46 @@ function TriggerCard({
   )
 }
 
-function KeywordMatchConfig({
-  config,
-  onChange,
-  t,
-}: {
-  config: KeywordMatchTriggerConfig
-  onChange: (c: Record<string, unknown>) => void
-  t: ReturnType<typeof useTranslations>
-}) {
+function KeywordMatchConfig({ config, onChange, t }: { config: KeywordMatchTriggerConfig; onChange: (config: Record<string, unknown>) => void; t: ReturnType<typeof useTranslations> }) {
   const keywords = config?.keywords ?? []
-  // Keep a local draft string so the comma and trailing space aren't
-  // stripped on every keystroke (which made multi-word, comma-separated
-  // entry like "SEO, search engine optimization" impossible to type).
-  // We only parse into the keywords array on blur, then re-display the
-  // cleaned, rejoined form. Seeded once on mount; this component remounts
-  // when the trigger type changes, so the seed stays in sync.
   const [draft, setDraft] = useState(keywords.join(", "))
-
-  // Persist the default the <select> displays. The dropdown falls back to
-  // "contains" for display, but leaving it untouched would otherwise omit
-  // match_type from the saved config — and activation validation then
-  // rejected it (trigger.match_type). Seed once on mount; the component
-  // remounts when the trigger type changes, matching the keywords draft.
   useEffect(() => {
-    if (config?.match_type == null) {
-      onChange({ ...config, match_type: "contains" })
-    }
+    if (config?.match_type == null) onChange({ ...config, match_type: "contains" })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
   function commit() {
-    const parsed = draft
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
+    const parsed = draft.split(",").map((value) => value.trim()).filter(Boolean)
     setDraft(parsed.join(", "))
     onChange({ ...config, keywords: parsed })
   }
-
   return (
     <div className="space-y-2">
-      <div>
-        <label className="mb-1 block text-xs font-medium text-muted-foreground">
-          {t("keywords")}
-        </label>
-        <Input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault()
-              commit()
-            }
-          }}
-          placeholder={t("keywordsHint")}
-          className="bg-muted text-foreground"
-        />
-      </div>
-      <div>
-        <label className="mb-1 block text-xs font-medium text-muted-foreground">
-          {t("config.matchType")}
-        </label>
-        <select
-          value={config?.match_type ?? "contains"}
-          onChange={(e) =>
-            onChange({
-              ...config,
-              match_type: e.target.value as "exact" | "contains" | "word",
-            })
-          }
-          className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground focus:outline-none"
-        >
-          <option value="contains">{t("config.matchContains")}</option>
-          <option value="word">{t("config.matchWord")}</option>
-          <option value="exact">{t("config.matchExact")}</option>
-        </select>
-        {/* Only worth explaining for `word` — "contains" and "exact" read
-            for themselves, and this is the one that changes which messages
-            fire an automation in a way that isn't obvious. */}
-        {config?.match_type === "word" && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            {t("config.matchWordHint")}
-          </p>
-        )}
-      </div>
+      <div><label className="mb-1 block text-xs font-medium text-muted-foreground">{t("keywords")}</label><Input value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit() } }} placeholder={t("keywordsHint")} className="bg-muted text-foreground" /></div>
+      <div><label className="mb-1 block text-xs font-medium text-muted-foreground">{t("config.matchType")}</label><select value={config?.match_type ?? "contains"} onChange={(e) => onChange({ ...config, match_type: e.target.value as "exact" | "contains" | "word" })} className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground focus:outline-none"><option value="contains">{t("config.matchContains")}</option><option value="word">{t("config.matchWord")}</option><option value="exact">{t("config.matchExact")}</option></select>{config?.match_type === "word" && <p className="mt-1 text-xs text-muted-foreground">{t("config.matchWordHint")}</p>}</div>
     </div>
   )
 }
 
-function InteractiveReplyConfig({
-  config,
-  onChange,
-  t,
-}: {
-  config: Record<string, unknown>
-  onChange: (c: Record<string, unknown>) => void
-  t: ReturnType<typeof useTranslations>
-}) {
+function InteractiveReplyConfig({ config, onChange, t }: { config: Record<string, unknown>; onChange: (config: Record<string, unknown>) => void; t: ReturnType<typeof useTranslations> }) {
   const ids = (config?.reply_ids as string[] | undefined) ?? []
-  // Same local-draft-then-commit pattern as KeywordMatchConfig so
-  // commas + spaces survive keystrokes.
   const [draft, setDraft] = useState(ids.join(", "))
-
   function commit() {
-    const parsed = draft
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
+    const parsed = draft.split(",").map((value) => value.trim()).filter(Boolean)
     setDraft(parsed.join(", "))
     onChange({ ...config, reply_ids: parsed })
   }
-
-  return (
-    <div>
-      <label className="mb-1 block text-xs font-medium text-muted-foreground">
-        {t("replyIds")}
-      </label>
-      <Input
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault()
-            commit()
-          }
-        }}
-        placeholder={t("replyIdsHint")}
-        className="bg-muted font-mono text-foreground"
-      />
-      <p className="mt-1 text-[11px] text-muted-foreground">{t("replyIdsHelp")}</p>
-    </div>
-  )
+  return <div><label className="mb-1 block text-xs font-medium text-muted-foreground">{t("replyIds")}</label><Input value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit() } }} placeholder={t("replyIdsHint")} className="bg-muted font-mono text-foreground" /><p className="mt-1 text-[11px] text-muted-foreground">{t("replyIdsHelp")}</p></div>
 }
 
-// ------------------------------------------------------------
-// Step list + card + connectors
-// ------------------------------------------------------------
-
-type ParentScope =
-  | { kind: "root" }
-  | { kind: "branch"; parentCid: string; branch: "yes" | "no" }
-
-type StepPath = (
-  | { kind: "root"; index: number }
-  | { kind: "branch"; parentCid: string; branch: "yes" | "no"; index: number }
-)[]
+type ParentScope = { kind: "root" } | { kind: "branch"; parentCid: string; branch: "yes" | "no" }
+type StepPath = ({ kind: "root"; index: number } | { kind: "branch"; parentCid: string; branch: "yes" | "no"; index: number })[]
 
 interface StepListProps {
   steps: BuilderStep[]
   parentPath: StepPath
   expandedId: string | null
   setExpandedId: (id: string | null) => void
-  updateStep: (path: StepPath, updater: (s: BuilderStep) => BuilderStep) => void
+  updateStep: (path: StepPath, updater: (step: BuilderStep) => BuilderStep) => void
   addStepAt: (parent: ParentScope, index: number, type: AutomationStepType) => void
   deleteStepAt: (path: StepPath) => void
   moveStepAt: (path: StepPath, direction: -1 | 1) => void
@@ -1086,624 +567,128 @@ interface StepListProps {
 
 function StepList(props: StepListProps) {
   const { steps, parentPath, ...rest } = props
-  const parentScope: ParentScope =
-    parentPath.length === 0
-      ? { kind: "root" }
-      : (() => {
-          const last = parentPath[parentPath.length - 1]
-          if (last.kind !== "branch") return { kind: "root" } as const
-          return { kind: "branch", parentCid: last.parentCid, branch: last.branch } as const
-        })()
-
-  return (
-    <div className="flex flex-col items-center">
-      <AddButton onPick={(t) => props.addStepAt(parentScope, 0, t)} />
-      {steps.map((step, idx) => (
-        <StepRenderer
-          key={step.cid}
-          step={step}
-          index={idx}
-          total={steps.length}
-          parentScope={parentScope}
-          parentPath={parentPath}
-          {...rest}
-        />
-      ))}
-    </div>
-  )
+  const parentScope: ParentScope = parentPath.length === 0 ? { kind: "root" } : (() => { const last = parentPath[parentPath.length - 1]; if (last.kind !== "branch") return { kind: "root" } as const; return { kind: "branch", parentCid: last.parentCid, branch: last.branch } as const })()
+  return <div className="flex flex-col items-center"><AddButton onPick={(type) => props.addStepAt(parentScope, 0, type)} />{steps.map((step, index) => <StepRenderer key={step.cid} step={step} index={index} total={steps.length} parentScope={parentScope} parentPath={parentPath} {...rest} />)}</div>
 }
 
-function StepRenderer({
-  step,
-  index,
-  total,
-  parentScope,
-  parentPath,
-  ...props
-}: {
-  step: BuilderStep
-  index: number
-  total: number
-  parentScope: ParentScope
-  parentPath: StepPath
-} & Omit<StepListProps, "steps" | "parentPath">) {
+function StepRenderer({ step, index, total, parentScope, parentPath, ...props }: { step: BuilderStep; index: number; total: number; parentScope: ParentScope; parentPath: StepPath } & Omit<StepListProps, "steps" | "parentPath">) {
   const t = useTranslations("Automations.builder")
   const locale = useLocale()
   const copy = conversationCopy(locale)
-  const path: StepPath = [
-    ...parentPath,
-    parentScope.kind === "root"
-      ? { kind: "root", index }
-      : { kind: "branch", parentCid: parentScope.parentCid, branch: parentScope.branch, index },
-  ]
+  const path: StepPath = [...parentPath, parentScope.kind === "root" ? { kind: "root", index } : { kind: "branch", parentCid: parentScope.parentCid, branch: parentScope.branch, index }]
   const meta = STEP_META[step.step_type]
   const Icon = meta.icon
   const expanded = props.expandedId === step.cid
   const isCondition = step.step_type === "condition"
   const kindLabel = isCondition ? copy.condition : step.step_type === "wait" ? copy.wait : copy.action
-  // Card widths on mobile fill the full canvas column (max-w-2xl px-4
-  // still keeps them reasonable). On sm+ the original fixed widths
-  // come back so the flow visual stays recognisable.
-  const width = isCondition
-    ? "w-full max-w-[400px] sm:w-[400px]"
-    : "w-full max-w-[320px] sm:w-80"
-
+  const width = isCondition ? "w-full max-w-[400px] sm:w-[400px]" : "w-full max-w-[320px] sm:w-80"
   return (
     <>
       <div className={cn("z-10 flex flex-col", width)}>
-        <div
-          className={cn(
-            "rounded-lg border border-border border-l-4 bg-card shadow-lg",
-            meta.border,
-          )}
-        >
-          <button
-            type="button"
-            onClick={() => props.setExpandedId(expanded ? null : step.cid)}
-            className="flex w-full items-center gap-3 px-4 py-3 text-left"
-          >
-            <GripVertical className="h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden />
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted text-muted-foreground">
-              <Icon className="h-4 w-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                {kindLabel}
-              </div>
-              <div className="truncate text-sm font-medium text-foreground">{t(`steps.${meta.label}`)}</div>
-              <div className="truncate text-[11px] text-muted-foreground">{previewFor(step)}</div>
-            </div>
-            <ChevronDown
-              className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-180")}
-            />
-          </button>
-          {expanded && (
-            <div className="border-t border-border px-4 py-3">
-              <StepEditor
-                step={step}
-                onChange={(next) => props.updateStep(path, () => next)}
-              />
-              <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3">
-                <div className="flex gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    disabled={index === 0}
-                    aria-label="Move up"
-                    onClick={() => props.moveStepAt(path, -1)}
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    disabled={index === total - 1}
-                    aria-label="Move down"
-                    onClick={() => props.moveStepAt(path, 1)}
-                  >
-                    <ArrowDown className="h-4 w-4" />
-                  </Button>
-                </div>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => props.deleteStepAt(path)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  {t("delete", { defaultValue: "Delete" })}
-                </Button>
-              </div>
-            </div>
-          )}
+        <div className={cn("rounded-lg border border-border border-l-4 bg-card shadow-lg", meta.border)}>
+          <button type="button" onClick={() => props.setExpandedId(expanded ? null : step.cid)} className="flex w-full items-center gap-3 px-4 py-3 text-left"><GripVertical className="h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden /><div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted text-muted-foreground"><Icon className="h-4 w-4" /></div><div className="min-w-0 flex-1"><div className="text-[11px] uppercase tracking-wide text-muted-foreground">{kindLabel}</div><div className="truncate text-sm font-medium text-foreground">{t(`steps.${meta.label}`)}</div><div className="truncate text-[11px] text-muted-foreground">{previewFor(step)}</div></div><ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-180")} /></button>
+          {expanded && <div className="border-t border-border px-4 py-3"><StepEditor step={step} onChange={(next) => props.updateStep(path, () => next)} /><div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3"><div className="flex gap-1"><Button variant="ghost" size="icon" disabled={index === 0} aria-label="Move up" onClick={() => props.moveStepAt(path, -1)}><ArrowUp className="h-4 w-4" /></Button><Button variant="ghost" size="icon" disabled={index === total - 1} aria-label="Move down" onClick={() => props.moveStepAt(path, 1)}><ArrowDown className="h-4 w-4" /></Button></div><Button variant="destructive" size="sm" onClick={() => props.deleteStepAt(path)}><Trash2 className="h-3.5 w-3.5" />{t("delete", { defaultValue: "Delete" })}</Button></div></div>}
         </div>
-
-        {isCondition && (
-          <ConditionBranches step={step} parentPath={path} {...props} />
-        )}
+        {isCondition && <ConditionBranches step={step} parentPath={path} {...props} />}
       </div>
-
-      {/* A condition branches into Yes/No (rendered above by
-          ConditionBranches), so it has no linear "continue" path — adding
-          the trailing connector here would produce a spurious third output. */}
-      {!isCondition && (
-        <AddButton
-          onPick={(t) => props.addStepAt(parentScope, index + 1, t)}
-        />
-      )}
+      {!isCondition && <AddButton onPick={(type) => props.addStepAt(parentScope, index + 1, type)} />}
     </>
   )
 }
 
-function ConditionBranches({
-  step,
-  parentPath,
-  ...props
-}: {
-  step: BuilderStep
-  parentPath: StepPath
-} & Omit<StepListProps, "steps" | "parentPath">) {
+function ConditionBranches({ step, parentPath, ...props }: { step: BuilderStep; parentPath: StepPath } & Omit<StepListProps, "steps" | "parentPath">) {
   const t = useTranslations("Automations.builder")
   const yes = step.branches?.yes ?? []
   const no = step.branches?.no ?? []
-  // Build the child scope by appending a branch marker. The scope the
-  // StepList uses is driven by the LAST element of parentPath, so the
-  // tail's `index` doesn't matter — it's replaced per child during walks.
-  const yesPath: StepPath = [
-    ...parentPath,
-    { kind: "branch", parentCid: step.cid, branch: "yes", index: 0 },
-  ]
-  const noPath: StepPath = [
-    ...parentPath,
-    { kind: "branch", parentCid: step.cid, branch: "no", index: 0 },
-  ]
-  return (
-    // Stack Yes/No vertically on mobile — two columns at 375px would
-    // cram each branch to ~170px which is too narrow for the nested
-    // cards. Two-column grid returns on sm+.
-    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <BranchColumn label={t("branches.yes")} color="text-primary">
-        <StepList {...props} steps={yes} parentPath={yesPath} />
-      </BranchColumn>
-      <BranchColumn label={t("branches.no")} color="text-rose-400">
-        <StepList {...props} steps={no} parentPath={noPath} />
-      </BranchColumn>
-    </div>
-  )
+  const yesPath: StepPath = [...parentPath, { kind: "branch", parentCid: step.cid, branch: "yes", index: 0 }]
+  const noPath: StepPath = [...parentPath, { kind: "branch", parentCid: step.cid, branch: "no", index: 0 }]
+  return <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2"><BranchColumn label={t("branches.yes")} color="text-primary"><StepList {...props} steps={yes} parentPath={yesPath} /></BranchColumn><BranchColumn label={t("branches.no")} color="text-rose-400"><StepList {...props} steps={no} parentPath={noPath} /></BranchColumn></div>
 }
 
-function BranchColumn({
-  label,
-  color,
-  children,
-}: {
-  label: string
-  color: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="flex flex-col items-center">
-      <div className={cn("mb-2 text-[11px] font-semibold uppercase", color)}>{label}</div>
-      {children}
-    </div>
-  )
+function BranchColumn({ label, color, children }: { label: string; color: string; children: React.ReactNode }) {
+  return <div className="flex flex-col items-center"><div className={cn("mb-2 text-[11px] font-semibold uppercase", color)}>{label}</div>{children}</div>
 }
 
-function AddButton({ onPick }: { onPick: (t: AutomationStepType) => void }) {
+function AddButton({ onPick }: { onPick: (type: AutomationStepType) => void }) {
   const t = useTranslations("Automations.builder")
-  return (
-    <div className="relative flex flex-col items-center">
-      <div className="h-4 w-[2px] bg-border" aria-hidden />
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-dashed border-border bg-background text-muted-foreground transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary data-[popup-open]:border-primary data-[popup-open]:bg-primary/20 data-[popup-open]:text-primary"
-          aria-label={t("addStep")}
-        >
-          <Plus className="h-4 w-4" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="start"
-          className="max-h-80 min-w-56 overflow-y-auto border-border bg-popover"
-        >
-          {ADDABLE_STEPS.map((tp) => {
-            const Icon = STEP_META[tp].icon
-            return (
-              <DropdownMenuItem key={tp} onClick={() => onPick(tp)}>
-                <Icon className="h-4 w-4" />
-                {t(`steps.${STEP_META[tp].label}`)}
-              </DropdownMenuItem>
-            )
-          })}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <div className="h-4 w-[2px] bg-border" aria-hidden />
-    </div>
-  )
+  return <div className="relative flex flex-col items-center"><div className="h-4 w-[2px] bg-border" aria-hidden /><DropdownMenu><DropdownMenuTrigger className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-dashed border-border bg-background text-muted-foreground transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary data-[popup-open]:border-primary data-[popup-open]:bg-primary/20 data-[popup-open]:text-primary" aria-label={t("addStep")}><Plus className="h-4 w-4" /></DropdownMenuTrigger><DropdownMenuContent align="start" className="max-h-80 min-w-56 overflow-y-auto border-border bg-popover">{ADDABLE_STEPS.map((type) => { const Icon = STEP_META[type].icon; return <DropdownMenuItem key={type} onClick={() => onPick(type)}><Icon className="h-4 w-4" />{t(`steps.${STEP_META[type].label}`)}</DropdownMenuItem> })}</DropdownMenuContent></DropdownMenu><div className="h-4 w-[2px] bg-border" aria-hidden /></div>
 }
 
-// ------------------------------------------------------------
-// Per-step config editor
-// ------------------------------------------------------------
-
-function StepEditor({
-  step,
-  onChange,
-}: {
-  step: BuilderStep
-  onChange: (s: BuilderStep) => void
-}) {
+function StepEditor({ step, onChange }: { step: BuilderStep; onChange: (step: BuilderStep) => void }) {
   const t = useTranslations("Automations.builder")
   const locale = useLocale()
   const copy = conversationCopy(locale)
   const cfg = step.step_config
-  const set = (patch: Record<string, unknown>) =>
-    onChange({ ...step, step_config: { ...cfg, ...patch } })
-
+  const set = (patch: Record<string, unknown>) => onChange({ ...step, step_config: { ...cfg, ...patch } })
   switch (step.step_type) {
     case "send_message": {
-      // Backwards compatibility: historical send_message rows have no mode and
-      // must keep sending the exact saved text until an admin deliberately
-      // changes them. Newly-added steps default to agent mode in blankConfig.
       const mode = cfg.mode === "agent" ? "agent" : "fixed"
-      return (
-        <div className="space-y-3">
-          <FieldBlock label={copy.messageMode}>
-            <select
-              value={mode}
-              onChange={(e) => set({ mode: e.target.value })}
-              className={SELECT_CLASS}
-            >
-              <option value="agent">{copy.agentMode}</option>
-              <option value="fixed">{copy.fixedMode}</option>
-            </select>
-          </FieldBlock>
-
-          {mode === "agent" ? (
-            <>
-              <FieldBlock label={copy.agentInstruction}>
-                <Textarea
-                  value={(cfg.text as string) ?? ""}
-                  onChange={(e) => set({ text: e.target.value })}
-                  placeholder={copy.agentPlaceholder}
-                  className="min-h-28 bg-muted text-foreground"
-                />
-              </FieldBlock>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                {copy.agentHint}
-              </p>
-            </>
-          ) : (
-            <>
-              <FieldBlock label={copy.fixedText}>
-                <Textarea
-                  value={(cfg.text as string) ?? ""}
-                  onChange={(e) => set({ text: e.target.value })}
-                  placeholder={t("config.placeholderMessageText")}
-                  className="min-h-24 bg-muted text-foreground"
-                />
-              </FieldBlock>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                {copy.fixedHint}
-              </p>
-              <div className="flex items-start justify-between gap-4 rounded-md border border-border p-3">
-                <div>
-                  <p className="text-xs font-medium text-foreground">{copy.typing}</p>
-                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                    {copy.typingHint}
-                  </p>
-                </div>
-                <Switch
-                  checked={cfg.humanize !== false}
-                  onCheckedChange={(value) => set({ humanize: !!value })}
-                />
-              </div>
-            </>
-          )}
-        </div>
-      )
+      return <div className="space-y-3"><FieldBlock label={copy.messageMode}><select value={mode} onChange={(e) => set({ mode: e.target.value })} className={SELECT_CLASS}><option value="agent">{copy.agentMode}</option><option value="fixed">{copy.fixedMode}</option></select></FieldBlock>{mode === "agent" ? <><FieldBlock label={copy.agentInstruction}><Textarea value={(cfg.text as string) ?? ""} onChange={(e) => set({ text: e.target.value })} placeholder={copy.agentPlaceholder} className="min-h-28 bg-muted text-foreground" /></FieldBlock><p className="text-xs leading-relaxed text-muted-foreground">{copy.agentHint}</p></> : <><FieldBlock label={copy.fixedText}><Textarea value={(cfg.text as string) ?? ""} onChange={(e) => set({ text: e.target.value })} placeholder={t("config.placeholderMessageText")} className="min-h-24 bg-muted text-foreground" /></FieldBlock><p className="text-xs leading-relaxed text-muted-foreground">{copy.fixedHint}</p><div className="flex items-start justify-between gap-4 rounded-md border border-border p-3"><div><p className="text-xs font-medium text-foreground">{copy.typing}</p><p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{copy.typingHint}</p></div><Switch checked={cfg.humanize !== false} onCheckedChange={(value) => set({ humanize: !!value })} /></div></>}</div>
     }
     case "send_buttons":
     case "send_list":
-      // The whole step_config IS the interactive payload; the shared
-      // builder edits it in place (and enforces Meta's limits + preview).
-      return (
-        <InteractiveBuilder
-          value={asInteractive(cfg)}
-          onChange={(payload) =>
-            onChange({ ...step, step_config: toStepConfig(payload) })
-          }
-        />
-      )
+      return <InteractiveBuilder value={asInteractive(cfg)} onChange={(payload) => onChange({ ...step, step_config: toStepConfig(payload) })} />
     case "send_template":
-      return (
-        <SendTemplateFields
-          templateName={(cfg.template_name as string) ?? ""}
-          language={(cfg.language as string) ?? ""}
-          onChange={(patch) => set(patch)}
-          t={t}
-        />
-      )
+      return <SendTemplateFields templateName={(cfg.template_name as string) ?? ""} language={(cfg.language as string) ?? ""} onChange={(patch) => set(patch)} t={t} />
     case "add_tag":
     case "remove_tag":
-      return (
-        <FieldBlock label={t("config.tagLabel")}>
-          <TagSelect
-            value={(cfg.tag_id as string) ?? ""}
-            onChange={(v) => set({ tag_id: v })}
-            t={t}
-          />
-        </FieldBlock>
-      )
+      return <FieldBlock label={t("config.tagLabel")}><TagSelect value={(cfg.tag_id as string) ?? ""} onChange={(value) => set({ tag_id: value })} t={t} /></FieldBlock>
     case "assign_conversation":
-      return (
-        <>
-          <FieldBlock label={t("config.modeLabel")}>
-            <select
-              value={(cfg.mode as string) ?? "round_robin"}
-              onChange={(e) => set({ mode: e.target.value })}
-              className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground"
-            >
-              <option value="round_robin">{t("config.modes.round_robin")}</option>
-              <option value="specific">{t("config.modes.specific")}</option>
-            </select>
-          </FieldBlock>
-          {cfg.mode === "specific" && (
-            <FieldBlock label={t("config.agentLabel")}>
-              <AgentSelect
-                value={(cfg.agent_id as string) ?? ""}
-                onChange={(v) => set({ agent_id: v })}
-                t={t}
-              />
-            </FieldBlock>
-          )}
-        </>
-      )
+      return <><FieldBlock label={t("config.modeLabel")}><select value={(cfg.mode as string) ?? "round_robin"} onChange={(e) => set({ mode: e.target.value })} className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground"><option value="round_robin">{t("config.modes.round_robin")}</option><option value="specific">{t("config.modes.specific")}</option></select></FieldBlock>{cfg.mode === "specific" && <FieldBlock label={t("config.agentLabel")}><AgentSelect value={(cfg.agent_id as string) ?? ""} onChange={(value) => set({ agent_id: value })} t={t} /></FieldBlock>}</>
     case "update_contact_field":
-      return (
-        <>
-          <FieldBlock label={t("config.fieldLabel")}>
-            <ContactFieldSelect
-              value={(cfg.field as string) ?? "name"}
-              onChange={(v) => set({ field: v })}
-              t={t}
-            />
-          </FieldBlock>
-          <FieldBlock label={t("config.valueLabel")}>
-            <Input
-              value={(cfg.value as string) ?? ""}
-              onChange={(e) => set({ value: e.target.value })}
-              placeholder={t.raw("config.placeholderValue")}
-              className="bg-muted text-foreground"
-            />
-          </FieldBlock>
-        </>
-      )
+      return <><FieldBlock label={t("config.fieldLabel")}><ContactFieldSelect value={(cfg.field as string) ?? "name"} onChange={(value) => set({ field: value })} t={t} /></FieldBlock><FieldBlock label={t("config.valueLabel")}><Input value={(cfg.value as string) ?? ""} onChange={(e) => set({ value: e.target.value })} placeholder={t.raw("config.placeholderValue")} className="bg-muted text-foreground" /></FieldBlock></>
     case "create_deal":
-      return (
-        <>
-          <DealPipelineFields
-            pipelineId={(cfg.pipeline_id as string) ?? ""}
-            stageId={(cfg.stage_id as string) ?? ""}
-            onChange={(patch) => set(patch)}
-            t={t}
-          />
-          <FieldBlock label={t("config.titleLabel")}>
-            <Input
-              value={(cfg.title as string) ?? ""}
-              onChange={(e) => set({ title: e.target.value })}
-              className="bg-muted text-foreground"
-            />
-          </FieldBlock>
-          <FieldBlock label={t("config.valueLabel")}>
-            <Input
-              type="number"
-              value={(cfg.value as number) ?? 0}
-              onChange={(e) => set({ value: Number(e.target.value) })}
-              className="bg-muted text-foreground"
-            />
-          </FieldBlock>
-        </>
-      )
+      return <><DealPipelineFields pipelineId={(cfg.pipeline_id as string) ?? ""} stageId={(cfg.stage_id as string) ?? ""} onChange={(patch) => set(patch)} t={t} /><FieldBlock label={t("config.titleLabel")}><Input value={(cfg.title as string) ?? ""} onChange={(e) => set({ title: e.target.value })} className="bg-muted text-foreground" /></FieldBlock><FieldBlock label={t("config.valueLabel")}><Input type="number" value={(cfg.value as number) ?? 0} onChange={(e) => set({ value: Number(e.target.value) })} className="bg-muted text-foreground" /></FieldBlock></>
     case "wait":
-      return (
-        <div className="grid grid-cols-2 gap-2">
-          <FieldBlock label={t("config.amountLabel")}>
-            <Input
-              type="number"
-              min={1}
-              value={(cfg.amount as number) ?? 1}
-              onChange={(e) => set({ amount: Math.max(1, Number(e.target.value)) })}
-              className="bg-muted text-foreground"
-            />
-          </FieldBlock>
-          <FieldBlock label={t("config.unitLabel")}>
-            <select
-              value={(cfg.unit as string) ?? "hours"}
-              onChange={(e) => set({ unit: e.target.value })}
-              className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground"
-            >
-              <option value="minutes">{t("config.units.minutes")}</option>
-              <option value="hours">{t("config.units.hours")}</option>
-              <option value="days">{t("config.units.days")}</option>
-            </select>
-          </FieldBlock>
-        </div>
-      )
+      return <div className="grid grid-cols-2 gap-2"><FieldBlock label={t("config.amountLabel")}><Input type="number" min={1} value={(cfg.amount as number) ?? 1} onChange={(e) => set({ amount: Math.max(1, Number(e.target.value)) })} className="bg-muted text-foreground" /></FieldBlock><FieldBlock label={t("config.unitLabel")}><select value={(cfg.unit as string) ?? "hours"} onChange={(e) => set({ unit: e.target.value })} className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground"><option value="minutes">{t("config.units.minutes")}</option><option value="hours">{t("config.units.hours")}</option><option value="days">{t("config.units.days")}</option></select></FieldBlock></div>
     case "condition":
-      return (
-        <>
-          <FieldBlock label={t("config.subjectLabel")}>
-            <select
-              value={(cfg.subject as string) ?? "tag_presence"}
-              onChange={(e) => set({ subject: e.target.value })}
-              className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground"
-            >
-              <option value="tag_presence">{t("config.subjects.tag_presence")}</option>
-              <option value="contact_field">{t("config.subjects.contact_field")}</option>
-              <option value="message_content">{t("config.subjects.message_content")}</option>
-              <option value="time_of_day">{t("config.subjects.time_of_day")}</option>
-            </select>
-          </FieldBlock>
-          <FieldBlock label={t("config.operandLabel")}>
-            <Input
-              placeholder={
-                cfg.subject === "time_of_day"
-                  ? t("config.placeholderTime")
-                  : cfg.subject === "contact_field"
-                  ? t("config.placeholderContact")
-                  : cfg.subject === "tag_presence"
-                  ? t("config.placeholderTag")
-                  : ""
-              }
-              value={(cfg.operand as string) ?? ""}
-              onChange={(e) => set({ operand: e.target.value })}
-              className="bg-muted text-foreground"
-            />
-          </FieldBlock>
-          {(cfg.subject === "contact_field" || cfg.subject === "message_content") && (
-            <FieldBlock label={t("config.valueLabel")}>
-              <Input
-                value={(cfg.value as string) ?? ""}
-                onChange={(e) => set({ value: e.target.value })}
-                className="bg-muted text-foreground"
-              />
-            </FieldBlock>
-          )}
-        </>
-      )
+      return <><FieldBlock label={t("config.subjectLabel")}><select value={(cfg.subject as string) ?? "tag_presence"} onChange={(e) => set({ subject: e.target.value })} className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground"><option value="tag_presence">{t("config.subjects.tag_presence")}</option><option value="contact_field">{t("config.subjects.contact_field")}</option><option value="message_content">{t("config.subjects.message_content")}</option><option value="time_of_day">{t("config.subjects.time_of_day")}</option></select></FieldBlock><FieldBlock label={t("config.operandLabel")}><Input placeholder={cfg.subject === "time_of_day" ? t("config.placeholderTime") : cfg.subject === "contact_field" ? t("config.placeholderContact") : cfg.subject === "tag_presence" ? t("config.placeholderTag") : ""} value={(cfg.operand as string) ?? ""} onChange={(e) => set({ operand: e.target.value })} className="bg-muted text-foreground" /></FieldBlock>{(cfg.subject === "contact_field" || cfg.subject === "message_content") && <FieldBlock label={t("config.valueLabel")}><Input value={(cfg.value as string) ?? ""} onChange={(e) => set({ value: e.target.value })} className="bg-muted text-foreground" /></FieldBlock>}</>
     case "send_webhook":
-      return (
-        <>
-          <FieldBlock label={t("config.urlLabel")}>
-            <Input
-              value={(cfg.url as string) ?? ""}
-              onChange={(e) => set({ url: e.target.value })}
-              className="bg-muted text-foreground"
-            />
-          </FieldBlock>
-          <FieldBlock label={t("config.bodyTemplateLabel")}>
-            <Textarea
-              value={(cfg.body_template as string) ?? ""}
-              onChange={(e) => set({ body_template: e.target.value })}
-              className="min-h-20 bg-muted font-mono text-xs text-foreground"
-            />
-          </FieldBlock>
-        </>
-      )
+      return <><FieldBlock label={t("config.urlLabel")}><Input value={(cfg.url as string) ?? ""} onChange={(e) => set({ url: e.target.value })} className="bg-muted text-foreground" /></FieldBlock><FieldBlock label={t("config.bodyTemplateLabel")}><Textarea value={(cfg.body_template as string) ?? ""} onChange={(e) => set({ body_template: e.target.value })} className="min-h-20 bg-muted font-mono text-xs text-foreground" /></FieldBlock></>
     case "close_conversation":
-      return (
-        <p className="text-xs text-muted-foreground">
-          {t("config.closeConversationHint", { defaultValue: "Sets the conversation status to \"closed\". No configuration needed." })}
-        </p>
-      )
+      return <p className="text-xs text-muted-foreground">{t("config.closeConversationHint", { defaultValue: "Sets the conversation status to \"closed\". No configuration needed." })}</p>
     default:
       return null
   }
 }
 
-function FieldBlock({
-  label,
-  children,
-}: {
-  label: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="mb-2 last:mb-0">
-      <label className="mb-1 block text-xs font-medium text-muted-foreground">{label}</label>
-      {children}
-    </div>
-  )
+function FieldBlock({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="mb-2 last:mb-0"><label className="mb-1 block text-xs font-medium text-muted-foreground">{label}</label>{children}</div>
 }
 
 function previewFor(step: BuilderStep): string {
   switch (step.step_type) {
-    case "send_message":
-      return (step.step_config.text as string) || "no text yet"
+    case "send_message": return (step.step_config.text as string) || "no text yet"
     case "send_buttons":
-    case "send_list":
-      return interactivePayloadPreviewText(asInteractive(step.step_config)) || "no body yet"
-    case "send_template":
-      return (step.step_config.template_name as string) || "pick a template"
-    case "wait":
-      return `${step.step_config.amount ?? "?"} ${step.step_config.unit ?? ""}`
-    case "condition":
-      return `when ${step.step_config.subject ?? "?"}`
-    case "send_webhook":
-      return (step.step_config.url as string) || "no url"
-    default:
-      return ""
+    case "send_list": return interactivePayloadPreviewText(asInteractive(step.step_config)) || "no body yet"
+    case "send_template": return (step.step_config.template_name as string) || "pick a template"
+    case "wait": return `${step.step_config.amount ?? "?"} ${step.step_config.unit ?? ""}`
+    case "condition": return `when ${step.step_config.subject ?? "?"}`
+    case "send_webhook": return (step.step_config.url as string) || "no url"
+    default: return ""
   }
 }
 
-// ------------------------------------------------------------
-// Tree mutation helpers
-// ------------------------------------------------------------
-
-function insertAt(
-  steps: BuilderStep[],
-  parent: ParentScope,
-  index: number,
-  node: BuilderStep,
-): BuilderStep[] {
-  if (parent.kind === "root") {
-    const copy = [...steps]
-    copy.splice(index, 0, node)
-    return copy
-  }
-  return steps.map((s) => {
-    if (s.cid !== parent.parentCid || !s.branches) return s
-    const list = [...s.branches[parent.branch]]
-    list.splice(index, 0, node)
-    return { ...s, branches: { ...s.branches, [parent.branch]: list } }
-  })
+function insertAt(steps: BuilderStep[], parent: ParentScope, index: number, node: BuilderStep): BuilderStep[] {
+  if (parent.kind === "root") { const copy = [...steps]; copy.splice(index, 0, node); return copy }
+  return steps.map((step) => { if (step.cid !== parent.parentCid || !step.branches) return step; const list = [...step.branches[parent.branch]]; list.splice(index, 0, node); return { ...step, branches: { ...step.branches, [parent.branch]: list } } })
 }
 
-function mapAtPath(
-  steps: BuilderStep[],
-  path: StepPath,
-  updater: (s: BuilderStep) => BuilderStep,
-): BuilderStep[] {
+function mapAtPath(steps: BuilderStep[], path: StepPath, updater: (step: BuilderStep) => BuilderStep): BuilderStep[] {
   if (path.length === 0) return steps
   const head = path[0]
   const rest = path.slice(1)
-
-  if (head.kind === "root") {
-    return steps.map((s, i) => {
-      if (i !== head.index) return s
-      return rest.length === 0
-        ? updater(s)
-        : { ...s, branches: walkBranches(s.branches, rest, updater) }
-    })
-  }
-  return steps.map((s) => {
-    if (s.cid !== head.parentCid || !s.branches) return s
-    const bucket = s.branches[head.branch]
-    const updated = bucket.map((child, i) => {
-      if (i !== head.index) return child
-      return rest.length === 0
-        ? updater(child)
-        : { ...child, branches: walkBranches(child.branches, rest, updater) }
-    })
-    return { ...s, branches: { ...s.branches, [head.branch]: updated } }
-  })
+  if (head.kind === "root") return steps.map((step, index) => index !== head.index ? step : rest.length === 0 ? updater(step) : { ...step, branches: walkBranches(step.branches, rest, updater) })
+  return steps.map((step) => { if (step.cid !== head.parentCid || !step.branches) return step; const bucket = step.branches[head.branch]; const updated = bucket.map((child, index) => index !== head.index ? child : rest.length === 0 ? updater(child) : { ...child, branches: walkBranches(child.branches, rest, updater) }); return { ...step, branches: { ...step.branches, [head.branch]: updated } } })
 }
 
-function walkBranches(
-  branches: BuilderStep["branches"],
-  path: StepPath,
-  updater: (s: BuilderStep) => BuilderStep,
-): BuilderStep["branches"] {
+function walkBranches(branches: BuilderStep["branches"], path: StepPath, updater: (step: BuilderStep) => BuilderStep): BuilderStep["branches"] {
   if (!branches) return branches
   const head = path[0]
   if (head.kind !== "branch") return branches
   const bucket = branches[head.branch]
   const rest = path.slice(1)
-  const updated = bucket.map((child, i) => {
-    if (i !== head.index) return child
-    return rest.length === 0
-      ? updater(child)
-      : { ...child, branches: walkBranches(child.branches, rest, updater) }
-  })
+  const updated = bucket.map((child, index) => index !== head.index ? child : rest.length === 0 ? updater(child) : { ...child, branches: walkBranches(child.branches, rest, updater) })
   return { ...branches, [head.branch]: updated }
 }
 
@@ -1711,100 +696,39 @@ function removeAt(steps: BuilderStep[], path: StepPath): BuilderStep[] {
   if (path.length === 0) return steps
   const head = path[0]
   const rest = path.slice(1)
-  if (head.kind === "root") {
-    if (rest.length === 0) return steps.filter((_, i) => i !== head.index)
-    return steps.map((s, i) =>
-      i !== head.index ? s : { ...s, branches: removeFromBranches(s.branches, rest) },
-    )
-  }
-  return steps.map((s) => {
-    if (s.cid !== head.parentCid || !s.branches) return s
-    const bucket = s.branches[head.branch]
-    const next =
-      rest.length === 0
-        ? bucket.filter((_, i) => i !== head.index)
-        : bucket.map((child, i) =>
-            i !== head.index
-              ? child
-              : { ...child, branches: removeFromBranches(child.branches, rest) },
-          )
-    return { ...s, branches: { ...s.branches, [head.branch]: next } }
-  })
+  if (head.kind === "root") { if (rest.length === 0) return steps.filter((_, index) => index !== head.index); return steps.map((step, index) => index !== head.index ? step : { ...step, branches: removeFromBranches(step.branches, rest) }) }
+  return steps.map((step) => { if (step.cid !== head.parentCid || !step.branches) return step; const bucket = step.branches[head.branch]; const next = rest.length === 0 ? bucket.filter((_, index) => index !== head.index) : bucket.map((child, index) => index !== head.index ? child : { ...child, branches: removeFromBranches(child.branches, rest) }); return { ...step, branches: { ...step.branches, [head.branch]: next } } })
 }
 
-function removeFromBranches(
-  branches: BuilderStep["branches"],
-  path: StepPath,
-): BuilderStep["branches"] {
+function removeFromBranches(branches: BuilderStep["branches"], path: StepPath): BuilderStep["branches"] {
   if (!branches) return branches
   const head = path[0]
   if (head.kind !== "branch") return branches
   const rest = path.slice(1)
   const bucket = branches[head.branch]
-  const next =
-    rest.length === 0
-      ? bucket.filter((_, i) => i !== head.index)
-      : bucket.map((child, i) =>
-          i !== head.index
-            ? child
-            : { ...child, branches: removeFromBranches(child.branches, rest) },
-        )
+  const next = rest.length === 0 ? bucket.filter((_, index) => index !== head.index) : bucket.map((child, index) => index !== head.index ? child : { ...child, branches: removeFromBranches(child.branches, rest) })
   return { ...branches, [head.branch]: next }
 }
 
-function moveAt(
-  steps: BuilderStep[],
-  path: StepPath,
-  direction: -1 | 1,
-): BuilderStep[] {
+function moveAt(steps: BuilderStep[], path: StepPath, direction: -1 | 1): BuilderStep[] {
   if (path.length === 0) return steps
   const head = path[0]
   const rest = path.slice(1)
-  const swap = <T,>(arr: T[], i: number) => {
-    const j = i + direction
-    if (j < 0 || j >= arr.length) return arr
-    const copy = [...arr]
-    ;[copy[i], copy[j]] = [copy[j], copy[i]]
-    return copy
-  }
-  if (head.kind === "root") {
-    if (rest.length === 0) return swap(steps, head.index)
-    return steps.map((s, i) =>
-      i !== head.index ? s : { ...s, branches: moveInBranches(s.branches, rest, direction) },
-    )
-  }
-  return steps.map((s) => {
-    if (s.cid !== head.parentCid || !s.branches) return s
-    const bucket = s.branches[head.branch]
-    const next = rest.length === 0 ? swap(bucket, head.index) : bucket
-    return { ...s, branches: { ...s.branches, [head.branch]: next } }
-  })
+  const swap = <T,>(array: T[], index: number) => { const nextIndex = index + direction; if (nextIndex < 0 || nextIndex >= array.length) return array; const copy = [...array]; [copy[index], copy[nextIndex]] = [copy[nextIndex], copy[index]]; return copy }
+  if (head.kind === "root") { if (rest.length === 0) return swap(steps, head.index); return steps.map((step, index) => index !== head.index ? step : { ...step, branches: moveInBranches(step.branches, rest, direction) }) }
+  return steps.map((step) => { if (step.cid !== head.parentCid || !step.branches) return step; const bucket = step.branches[head.branch]; const next = rest.length === 0 ? swap(bucket, head.index) : bucket; return { ...step, branches: { ...step.branches, [head.branch]: next } } })
 }
 
-function moveInBranches(
-  branches: BuilderStep["branches"],
-  path: StepPath,
-  direction: -1 | 1,
-): BuilderStep["branches"] {
+function moveInBranches(branches: BuilderStep["branches"], path: StepPath, direction: -1 | 1): BuilderStep["branches"] {
   if (!branches) return branches
   const head = path[0]
   if (head.kind !== "branch") return branches
   const rest = path.slice(1)
   const bucket = branches[head.branch]
-  const swap = <T,>(arr: T[], i: number) => {
-    const j = i + direction
-    if (j < 0 || j >= arr.length) return arr
-    const copy = [...arr]
-    ;[copy[i], copy[j]] = [copy[j], copy[i]]
-    return copy
-  }
+  const swap = <T,>(array: T[], index: number) => { const nextIndex = index + direction; if (nextIndex < 0 || nextIndex >= array.length) return array; const copy = [...array]; [copy[index], copy[nextIndex]] = [copy[nextIndex], copy[index]]; return copy }
   const next = rest.length === 0 ? swap(bucket, head.index) : bucket
   return { ...branches, [head.branch]: next }
 }
-
-// ------------------------------------------------------------
-// Serialize builder tree → API payload (flattened shape)
-// ------------------------------------------------------------
 
 interface ApiStep {
   step_type: string
@@ -1813,19 +737,9 @@ interface ApiStep {
 }
 
 export function toApiSteps(steps: BuilderStep[]): ApiStep[] {
-  return steps.map((s) => ({
-    step_type: s.step_type,
-    step_config: s.step_config,
-    branches: s.branches
-      ? { yes: toApiSteps(s.branches.yes), no: toApiSteps(s.branches.no) }
-      : undefined,
-  }))
+  return steps.map((step) => ({ step_type: step.step_type, step_config: step.step_config, branches: step.branches ? { yes: toApiSteps(step.branches.yes), no: toApiSteps(step.branches.no) } : undefined }))
 }
 
-/**
- * Convert server-returned step tree (from loadStepsTree) into the
- * builder-local shape with client ids.
- */
 export interface ServerStepNode {
   id: string
   step_type: string
@@ -1834,16 +748,5 @@ export interface ServerStepNode {
 }
 
 export function fromServerSteps(nodes: ServerStepNode[]): BuilderStep[] {
-  return nodes.map((n) => ({
-    cid: cid(),
-    step_type: n.step_type as AutomationStepType,
-    step_config: n.step_config ?? {},
-    branches:
-      n.step_type === "condition"
-        ? {
-            yes: fromServerSteps(n.branches?.yes ?? []),
-            no: fromServerSteps(n.branches?.no ?? []),
-          }
-        : undefined,
-  }))
+  return nodes.map((node) => ({ cid: cid(), step_type: node.step_type as AutomationStepType, step_config: node.step_config ?? {}, branches: node.step_type === "condition" ? { yes: fromServerSteps(node.branches?.yes ?? []), no: fromServerSteps(node.branches?.no ?? []) } : undefined }))
 }
