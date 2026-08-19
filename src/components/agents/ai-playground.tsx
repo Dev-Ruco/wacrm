@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { useLocale } from 'next-intl';
 import {
   Bot,
   RotateCcw,
@@ -34,7 +35,52 @@ interface Turn {
   execution?: ExecutionTrace;
 }
 
+const COPY = {
+  pt: {
+    title: 'Testar agente',
+    subtitle: 'simule uma conversa como se fosse um cliente',
+    reset: 'Reiniciar',
+    emptyTitle: 'Envie uma mensagem para ver como o agente responderia.',
+    emptyDesc: 'O teste usa o conhecimento e o comportamento configurados, incluindo transferência para uma pessoa.',
+    setupLink: 'Ainda não configurado? Ir para configuração',
+    noAgent: 'Ainda não existe um agente configurado — termine a configuração primeiro.',
+    replyError: 'Não foi possível obter uma resposta do agente.',
+    connectionError: 'Não foi possível ligar ao agente.',
+    handoff: 'Aqui o atendimento seria transferido para uma pessoa',
+    thinking: 'A pensar…',
+    placeholder: 'Escreva uma mensagem como cliente…',
+    execution: 'Execução',
+    skills: 'Competências activas:',
+    tools: 'Ferramentas chamadas:',
+    knowledge: 'Conhecimento:',
+    sourcesUsed: (count: number) => `${count} fonte(s) usada(s)`,
+    failed: 'falhou',
+  },
+  en: {
+    title: 'Test agent',
+    subtitle: 'simulate a conversation as if you were a customer',
+    reset: 'Reset',
+    emptyTitle: 'Send a message to see how your agent would reply.',
+    emptyDesc: 'The test uses your configured knowledge and behaviour, including human handoff.',
+    setupLink: 'Not set up yet? Go to setup',
+    noAgent: 'No agent configured yet — finish setup first.',
+    replyError: "Couldn't get a reply from the agent.",
+    connectionError: "Couldn't reach the agent.",
+    handoff: 'Would hand off to a human here',
+    thinking: 'Thinking…',
+    placeholder: 'Type a customer message…',
+    execution: 'Execution',
+    skills: 'Active skills:',
+    tools: 'Tools called:',
+    knowledge: 'Knowledge:',
+    sourcesUsed: (count: number) => `${count} source(s) used`,
+    failed: 'failed',
+  },
+} as const;
+
 export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
+  const locale = useLocale();
+  const copy = locale.toLowerCase().startsWith('pt') ? COPY.pt : COPY.en;
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -65,9 +111,10 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (data.code === 'ai_not_configured') {
-          toast.error('No agent configured yet — finish Setup first.');
+          toast.error(copy.noAgent);
         } else {
-          toast.error(data.error ?? "Couldn't get a reply.");
+          console.error('[agent playground] request failed:', data.error ?? data);
+          toast.error(copy.replyError);
         }
         // Roll the unsent user turn back so the transcript stays clean.
         setTurns(turns);
@@ -86,8 +133,9 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
           execution: data.execution as ExecutionTrace | undefined,
         },
       ]);
-    } catch {
-      toast.error("Couldn't reach the agent.");
+    } catch (error) {
+      console.error('[agent playground] network error:', error);
+      toast.error(copy.connectionError);
       setTurns(turns);
       setInput(text);
     } finally {
@@ -104,14 +152,11 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
 
   return (
     <div className="flex h-[60vh] min-h-[420px] flex-col rounded-xl border border-border bg-card">
-      {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
           <Bot className="h-4 w-4 text-primary" />
-          <span className="text-sm font-medium text-foreground">Playground</span>
-          <span className="text-xs text-muted-foreground">
-            — test replies as if you were a customer
-          </span>
+          <span className="text-sm font-medium text-foreground">{copy.title}</span>
+          <span className="text-xs text-muted-foreground">— {copy.subtitle}</span>
         </div>
         <Button
           variant="ghost"
@@ -120,20 +165,16 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
           disabled={turns.length === 0 || sending}
           className="text-muted-foreground"
         >
-          <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Reset
+          <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> {copy.reset}
         </Button>
       </div>
 
-      {/* Transcript */}
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4">
         {turns.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center text-center text-sm text-muted-foreground">
             <Bot className="mb-2 h-8 w-8 text-muted-foreground/60" />
-            <p>Send a message to see how your agent would reply.</p>
-            <p className="mt-1 text-xs">
-              It uses your knowledge base and behaves exactly like the
-              auto-reply bot — including handoff.
-            </p>
+            <p>{copy.emptyTitle}</p>
+            <p className="mt-1 text-xs">{copy.emptyDesc}</p>
             {onGoToSetup && (
               <Button
                 variant="link"
@@ -141,7 +182,7 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
                 onClick={onGoToSetup}
                 className="mt-1 h-auto p-0 text-xs"
               >
-                Not set up yet? Go to Setup <ArrowRight className="ml-1 h-3 w-3" />
+                {copy.setupLink} <ArrowRight className="ml-1 h-3 w-3" />
               </Button>
             )}
           </div>
@@ -175,7 +216,7 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
                   )}
                 >
                   <UserCircle2 className="h-3.5 w-3.5" />
-                  Would hand off to a human here
+                  {copy.handoff}
                 </p>
               )}
               {t.role === 'assistant' && t.execution && (
@@ -192,12 +233,12 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
                     ) : (
                       <ChevronDown className="h-3 w-3" />
                     )}
-                    Execução
+                    {copy.execution}
                   </button>
                   {expandedExecution === i && (
                     <dl id={`execution-${i}`} className="mt-1.5 space-y-1 text-xs text-muted-foreground">
                       <div className="flex gap-1">
-                        <dt className="shrink-0 font-medium text-foreground">Skills activas:</dt>
+                        <dt className="shrink-0 font-medium text-foreground">{copy.skills}</dt>
                         <dd>
                           {t.execution.skills_active.length > 0
                             ? t.execution.skills_active.join(', ')
@@ -205,18 +246,18 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
                         </dd>
                       </div>
                       <div className="flex gap-1">
-                        <dt className="shrink-0 font-medium text-foreground">Tools chamadas:</dt>
+                        <dt className="shrink-0 font-medium text-foreground">{copy.tools}</dt>
                         <dd>
                           {t.execution.tools_called.length > 0
                             ? t.execution.tools_called
-                                .map((call) => `${call.name}${call.succeeded ? '' : ' (falhou)'}`)
+                                .map((call) => `${call.name}${call.succeeded ? '' : ` (${copy.failed})`}`)
                                 .join(', ')
                             : '—'}
                         </dd>
                       </div>
                       <div className="flex gap-1">
-                        <dt className="shrink-0 font-medium text-foreground">Conhecimento:</dt>
-                        <dd>{t.execution.knowledge_sources_used} fonte(s) usada(s)</dd>
+                        <dt className="shrink-0 font-medium text-foreground">{copy.knowledge}</dt>
+                        <dd>{copy.sourcesUsed(t.execution.knowledge_sources_used)}</dd>
                       </div>
                       <div className="flex items-center gap-1">
                         <dt className="shrink-0 font-medium text-foreground">Guardrails:</dt>
@@ -247,18 +288,17 @@ export function AiPlayground({ onGoToSetup }: { onGoToSetup?: () => void }) {
         {sending && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Bot className="h-5 w-5 text-primary" />
-            <Loader2 className="h-4 w-4 animate-spin" /> Thinking…
+            <Loader2 className="h-4 w-4 animate-spin" /> {copy.thinking}
           </div>
         )}
       </div>
 
-      {/* Composer */}
       <div className="flex items-end gap-2 border-t border-border p-3">
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type a customer message…"
+          placeholder={copy.placeholder}
           rows={1}
           className="flex-1 resize-none rounded-xl border border-border bg-muted px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-primary/50"
         />
