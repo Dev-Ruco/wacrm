@@ -16,6 +16,7 @@ import type {
   AssignConversationStepConfig,
 } from '@/types'
 import { supabaseAdmin } from './admin-client'
+import { rankAutomationAssignees } from './assignment'
 import { addContactTagIfAbsent } from '@/lib/contacts/tag-write'
 import { MAX_TAG_CHAIN_DEPTH, getTagChainDepth } from '@/lib/contacts/tag-chain'
 import { engineSendText, engineSendTemplate, engineSendInteractive } from './meta-send'
@@ -480,21 +481,73 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
     case 'assign_conversation': {
       const cfg = step.step_config as AssignConversationStepConfig
       if (!args.contactId) throw new Error('assign_conversation needs a contact')
-      let agentId = cfg.agent_id
-      if (cfg.mode === 'round_robin') {
-        const { data: profiles } = await db
-          .from('profiles')
-          .select('user_id')
-          .eq('account_id', args.automation.account_id)
-          .limit(1)
-        agentId = profiles?.[0]?.user_id
-      }
-      if (!agentId) return 'no agent resolved'
-      await db
-        .from('conversations')
-        .update({ assigned_agent_id: agentId })
+
+      const { data: eligibleProfiles, error: profileError } = await db
+        .from('profiles')
+        .select('user_id')
         .eq('account_id', args.automation.account_id)
-        .eq('contact_id', args.contactId)
+        .in('account_role', ['owner', 'admin', 'agent'])
+      if (profileError) throw new Error(`assignment member lookup failed: ${profileError.message}`)
+
+      const eligibleIds = (eligibleProfiles ?? []).map((profile) => profile.user_id)
+      let agentId: string | null = null
+
+      if (cfg.mode === 'specific') {
+        const requestedId = cfg.agent_id?.trim() ?? ''
+        if (!requestedId || !eligibleIds.includes(requestedId)) {
+          throw new Error('assignment target is not an eligible member of this account')
+        }
+        agentId = requestedId
+      } else {
+        if (eligibleIds.length === 0) return 'no eligible agent resolved'
+        const { data: openRows, error: openError } = await db
+          .from('conversations')
+          .select('assigned_agent_id')
+          .eq('account_id', args.automation.account_id)
+          .in('assigned_agent_id', eligibleIds)
+          .neq('status', 'closed')
+        if (openError) throw new Error(`assignment load lookup failed: ${openError.message}`)
+
+        const load = new Map<string, number>()
+        for (const row of openRows ?? []) {
+          if (!row.assigned_agent_id) continue
+          load.set(row.assigned_agent_id, (load.get(row.assigned_agent_id) ?? 0) + 1)
+        }
+        agentId = rankAutomationAssignees(
+          eligibleIds.map((userId) => ({
+            userId,
+            openCount: load.get(userId) ?? 0,
+          })),
+        )[0]?.userId ?? null
+      }
+
+      if (!agentId) return 'no eligible agent resolved'
+
+      const conversationId = await resolveConversationId(args)
+      const { data: currentConversation, error: currentError } = await db
+        .from('conversations')
+        .select('assigned_agent_id')
+        .eq('id', conversationId)
+        .eq('account_id', args.automation.account_id)
+        .maybeSingle()
+      if (currentError) throw new Error(`assignment conversation lookup failed: ${currentError.message}`)
+      if (!currentConversation) throw new Error('assignment conversation not found in account')
+
+      const { data: assignmentRows, error: assignmentError } = await db.rpc(
+        'assign_conversation_if_current',
+        {
+          p_account_id: args.automation.account_id,
+          p_conversation_id: conversationId,
+          p_expected_assignee_id: currentConversation.assigned_agent_id ?? null,
+          p_new_assignee_id: agentId,
+        },
+      )
+      if (assignmentError) throw new Error(`conversation assignment failed: ${assignmentError.message}`)
+
+      const assignment = Array.isArray(assignmentRows) ? assignmentRows[0] : assignmentRows
+      if (!assignment?.applied) {
+        return 'assignment skipped because another actor changed the assignee first'
+      }
       return `assigned to ${agentId}`
     }
 
