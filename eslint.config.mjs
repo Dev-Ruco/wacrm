@@ -14,6 +14,16 @@ const eslintConfig = defineConfig([
       "react-hooks/static-components": "off",
     },
   },
+  // MessageThread deliberately synchronises UI-only state after conversation/
+  // message changes (reply draft, scroll-follow pill). These effects pre-date
+  // the atomic-assignment work and are guarded against render loops; keep the
+  // same narrow exception that was previously expressed with inline disables.
+  {
+    files: ["src/components/inbox/message-thread.tsx"],
+    rules: {
+      "react-hooks/set-state-in-effect": "off",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
