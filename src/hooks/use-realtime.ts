@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
 import type { Message, Conversation } from "@/types";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
@@ -24,14 +25,10 @@ export function useRealtime({
   onConversationEvent,
   enabled = true,
 }: UseRealtimeOptions) {
+  const { accountId } = useAuth();
   const channelRef = useRef<RealtimeChannel | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
-  // Store latest callbacks in refs to avoid re-subscribing when the
-  // parent re-renders with fresh closures. Assigned inside an effect
-  // so the mutation doesn't happen during render (React 19's refs
-  // rule) — subscribers only read `.current` inside async Realtime
-  // callbacks, which always run after the render that updates it.
   const onMessageRef = useRef(onMessageEvent);
   const onConversationRef = useRef(onConversationEvent);
   useEffect(() => {
@@ -40,33 +37,47 @@ export function useRealtime({
   });
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !accountId) {
+      setIsConnected(false);
+      return;
+    }
 
     const supabase = createClient();
+    const accountFilter = `account_id=eq.${accountId}`;
 
     const channel = supabase
-      .channel(channelName)
+      .channel(`${channelName}:${accountId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "wacrm", table: "messages" },
+        {
+          event: "*",
+          schema: "wacrm",
+          table: "messages",
+          filter: accountFilter,
+        },
         (payload) => {
           onMessageRef.current?.({
             eventType: payload.eventType as RealtimeEvent<Message>["eventType"],
             new: payload.new as Message,
             old: payload.old as Partial<Message>,
           });
-        }
+        },
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "wacrm", table: "conversations" },
+        {
+          event: "*",
+          schema: "wacrm",
+          table: "conversations",
+          filter: accountFilter,
+        },
         (payload) => {
           onConversationRef.current?.({
             eventType: payload.eventType as RealtimeEvent<Conversation>["eventType"],
             new: payload.new as Conversation,
             old: payload.old as Partial<Conversation>,
           });
-        }
+        },
       )
       .subscribe((status) => {
         setIsConnected(status === "SUBSCRIBED");
@@ -76,10 +87,10 @@ export function useRealtime({
 
     return () => {
       supabase.removeChannel(channel);
-      channelRef.current = null;
+      if (channelRef.current === channel) channelRef.current = null;
       setIsConnected(false);
     };
-  }, [channelName, enabled]);
+  }, [accountId, channelName, enabled]);
 
   const unsubscribe = useCallback(() => {
     if (channelRef.current) {
