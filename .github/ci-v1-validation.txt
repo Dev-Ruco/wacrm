@@ -1,2 +1,2 @@
 Temporary CI-only marker for validating the current main V1 stabilization batch.
-Validation refresh: 2026-08-19 realtime lint fixes round 2.
+Validation refresh: 2026-08-19 automation coexistence test alignment.
