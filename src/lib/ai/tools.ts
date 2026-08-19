@@ -12,6 +12,7 @@ import {
 } from './visual-reference-search'
 import { schedulingEvidenceIsComplete } from './scheduling-grounding'
 import { createAutoReplyTools as createBaseAutoReplyTools } from './operational-tools'
+import { loadHandoffQueues, resolveHandoffRoute } from './handoff-routing'
 import { setWebsiteActivityIfWebsite } from '@/lib/site-chat/activity'
 
 export type {
@@ -100,6 +101,31 @@ function augmentSearchCatalogueTool(tool: AgentToolDefinition): AgentToolDefinit
           type: 'boolean',
           description:
             'True only when a recent customer image is being used as a visual product/object reference. The server applies the configured visual-search policy and never infers stock or identity from pixels.',
+        },
+      },
+    },
+  }
+}
+
+function augmentHandoffTool(tool: AgentToolDefinition): AgentToolDefinition {
+  if (tool.name !== 'handoff_human') return tool
+  const parameters = tool.parameters as {
+    properties?: Record<string, unknown>
+    [key: string]: unknown
+  }
+  return {
+    ...tool,
+    description:
+      `${tool.description} ` +
+      'This account may have specialist human queues. On the first handoff call, omit routing_key unless the server already returned an exact configured key in this turn. If routing is needed, the tool returns the available queues; call it again with exactly one returned routing_key. Never invent a department or routing key.',
+    parameters: {
+      ...parameters,
+      properties: {
+        ...(parameters.properties ?? {}),
+        routing_key: {
+          type: 'string',
+          description:
+            'Optional exact specialist routing key returned by a previous handoff_human result in this turn. Omit on the first call or when no specialist clearly applies.',
         },
       },
     },
@@ -197,6 +223,95 @@ function sameScheduledStart(scheduledAt: string, checkedAt: string): boolean {
   return Number.isFinite(scheduled) && Number.isFinite(checked) && Math.abs(scheduled - checked) <= 5 * 60_000
 }
 
+async function executeQueueAwareHandoff(
+  args: Parameters<typeof createBaseAutoReplyTools>[0],
+  base: ReturnType<typeof createBaseAutoReplyTools>,
+  call: AgentToolCall,
+): Promise<string> {
+  const parsed = parseToolArguments(call.arguments)
+  if (!parsed) throw new Error('Invalid JSON arguments for handoff_human.')
+
+  const requestedKey = typeof parsed.routing_key === 'string'
+    ? parsed.routing_key.trim().toLowerCase()
+    : ''
+  const queues = await loadHandoffQueues(args.db, args.accountId)
+
+  if (!requestedKey && queues.length > 1) {
+    return JSON.stringify({
+      ok: false,
+      handoff_requested: false,
+      needs_routing: true,
+      queues: queues.map((queue) => ({
+        routing_key: queue.routingKey,
+        name: queue.name,
+        description: queue.description,
+      })),
+      instruction:
+        'Choose the single specialist queue that clearly matches the subject and call handoff_human again with its exact routing_key. If none clearly fits, call again with routing_key="general_fallback" so the server uses the configured fallback instead of inventing a queue.',
+    })
+  }
+
+  const useGeneralFallback = requestedKey === 'general_fallback'
+  const effectiveKey = useGeneralFallback
+    ? null
+    : requestedKey || (queues.length === 1 ? queues[0].routingKey : null)
+
+  if (effectiveKey && !queues.some((queue) => queue.routingKey === effectiveKey)) {
+    return JSON.stringify({
+      ok: false,
+      handoff_requested: false,
+      needs_routing: true,
+      invalid_routing_key: effectiveKey,
+      queues: queues.map((queue) => ({
+        routing_key: queue.routingKey,
+        name: queue.name,
+        description: queue.description,
+      })),
+      instruction:
+        'The routing key is not configured. Retry with one exact routing_key from queues, or routing_key="general_fallback".',
+    })
+  }
+
+  const route = await resolveHandoffRoute({
+    db: args.db,
+    accountId: args.accountId,
+    requestedRoutingKey: effectiveKey,
+    fallbackUserId: args.config.handoffAgentId,
+  })
+
+  // The normal auto-reply handoff lifecycle already persists assignment and
+  // sends the assignee notification. Point its existing config object at the
+  // selected eligible specialist rather than creating a competing path.
+  args.config.handoffAgentId = route.assigneeUserId
+
+  if (!route.assigneeUserId && route.notifyUserIds.length > 0 && args.conversationId) {
+    const queueLabel = route.queue?.name ? ` (${route.queue.name})` : ''
+    const rows = route.notifyUserIds.map((userId) => ({
+      account_id: args.accountId,
+      user_id: userId,
+      type: 'conversation_assigned',
+      conversation_id: args.conversationId,
+      contact_id: args.contactId,
+      title: 'Handoff sem especialista disponível',
+      body: `A IA pediu intervenção humana${queueLabel}, mas não encontrou um membro elegível. A conversa ficará sem responsável até alguém assumir.`,
+    }))
+    const { error } = await args.db.from('notifications').insert(rows)
+    if (error) console.error('[handoff routing] admin fallback notification failed:', error)
+  }
+
+  const queueSummary = route.queue
+    ? `Equipa: ${route.queue.name} (${route.queue.routingKey})`
+    : null
+  const originalSummary = typeof parsed.summary === 'string' ? parsed.summary.trim() : ''
+  const forwarded = {
+    ...parsed,
+    summary: [queueSummary, originalSummary].filter(Boolean).join('\n') || undefined,
+  }
+  delete forwarded.routing_key
+
+  return base.executeTool({ ...call, arguments: JSON.stringify(forwarded) })
+}
+
 /**
  * Public AI tool facade. The underlying catalogue tool remains the code-owned
  * permission/audit boundary; the operational layer adds generic business
@@ -207,7 +322,10 @@ export function createAutoReplyTools(
   args: Parameters<typeof createBaseAutoReplyTools>[0],
 ): ReturnType<typeof createBaseAutoReplyTools> {
   const base = createBaseAutoReplyTools(args)
-  const tools = base.tools.map(augmentSearchCatalogueTool).map(augmentGroundedTool)
+  const tools = base.tools
+    .map(augmentSearchCatalogueTool)
+    .map(augmentHandoffTool)
+    .map(augmentGroundedTool)
   let settingsPromise: Promise<SearchCatalogToolSettings> | null = null
   let lastAvailabilityCheck: AvailabilityCheck | null = null
   const visualSettings = () => {
@@ -225,12 +343,12 @@ export function createAutoReplyTools(
         console.error('[website activity] catalogue state failed:', error),
       )
     }
+    if (call.name === 'handoff_human') {
+      return executeQueueAwareHandoff(args, base, call)
+    }
     if (OPERATIONAL_RUNTIME_TOOLS.has(call.name)) {
       const parsed = parseToolArguments(call.arguments)
       if (!parsed) throw new Error(`Invalid JSON arguments for operational tool: ${call.name}`)
-      // The operational layer consumes the same parsed-object form used by
-      // the mature base handlers internally. Keep the public provider-facing
-      // AgentToolCall contract (JSON string) unchanged at this facade.
       const result = await base.executeTool({
         ...call,
         arguments: parsed as unknown as string,
@@ -287,8 +405,6 @@ export function createAutoReplyTools(
       Math.max(1, requestedLimit),
     )
 
-    // Even a visually disabled request still runs ordinary trusted catalogue
-    // retrieval, but never sends the customer image into a visual comparison.
     baseArguments.limit = visualPolicy.enabled
       ? visualPolicy.max_candidates
       : responseLimit
