@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, Circle, Loader2, PlayCircle } from 'lucide-react';
 import { useLocale } from 'next-intl';
-import { Button } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/hooks/use-auth';
+import { cn } from '@/lib/utils';
 
 type Locale = 'pt' | 'en';
 
@@ -126,6 +127,10 @@ async function loadSetupState(): Promise<SetupState> {
   };
 }
 
+function actionLinkClass(variant: 'default' | 'ghost' = 'ghost') {
+  return cn(buttonVariants({ variant, size: 'sm' }));
+}
+
 function Step({
   done,
   title,
@@ -159,13 +164,13 @@ function Step({
       </div>
       {!done && (
         <div className="flex shrink-0 gap-1">
-          <Button asChild type="button" variant="ghost" size="sm">
-            <Link href={href}>{action}</Link>
-          </Button>
+          <Link href={href} className={actionLinkClass()}>
+            {action}
+          </Link>
           {secondaryHref && secondaryAction ? (
-            <Button asChild type="button" variant="ghost" size="sm">
-              <Link href={secondaryHref}>{secondaryAction}</Link>
-            </Button>
+            <Link href={secondaryHref} className={actionLinkClass()}>
+              {secondaryAction}
+            </Link>
           ) : null}
         </div>
       )}
@@ -293,9 +298,9 @@ export function OnboardingGuide() {
               <p className="text-sm font-medium text-foreground">{copy.testTitle}</p>
               <p className="text-xs text-muted-foreground">{copy.testDetail}</p>
             </div>
-            <Button asChild size="sm">
-              <Link href="/agents?section=playground">{copy.testAgent}</Link>
-            </Button>
+            <Link href="/agents?section=playground" className={actionLinkClass('default')}>
+              {copy.testAgent}
+            </Link>
           </div>
         )}
       </CardContent>
