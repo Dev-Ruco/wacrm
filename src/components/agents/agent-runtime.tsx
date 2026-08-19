@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Loader2, Sparkles, CheckCircle2, Trash2, Eye, EyeOff, Cpu } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Loader2, Sparkles, CheckCircle2, Trash2, Eye, EyeOff, Cpu, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -39,7 +39,54 @@ const KEY_PLACEHOLDER: Record<AiProvider, string> = {
 export function AgentRuntime({ state }: { state: AgentConfigState }) {
   const { t } = state;
   const [showKey, setShowKey] = useState(false);
+  const initialLiveRef = useRef<boolean | null>(null);
   const disabled = !state.canEdit || state.saving;
+
+  useEffect(() => {
+    if (!state.loading && initialLiveRef.current === null) {
+      initialLiveRef.current = state.isActive && state.autoReplyEnabled;
+    }
+  }, [state.loading, state.isActive, state.autoReplyEnabled]);
+
+  async function saveWithActivationGuard() {
+    const goingLive =
+      state.isActive &&
+      state.autoReplyEnabled &&
+      initialLiveRef.current !== true;
+
+    if (goingLive) {
+      let knowledgeCount: number | null = null;
+      try {
+        const response = await fetch('/api/ai/knowledge', { cache: 'no-store' });
+        if (response.ok) {
+          const data = await response.json().catch(() => ({}));
+          knowledgeCount = Array.isArray(data?.documents) ? data.documents.length : null;
+        }
+      } catch (error) {
+        console.warn('[agent runtime] activation preflight knowledge check failed:', error);
+      }
+
+      const warnings: string[] = [];
+      if (knowledgeCount === 0) {
+        warnings.push('não existe nenhuma fonte de conhecimento carregada');
+      }
+      if (!state.handoffAgentId) {
+        warnings.push('não existe destinatário configurado para transferência humana');
+      }
+
+      if (warnings.length > 0) {
+        const confirmed = window.confirm(
+          `Antes de colocar o agente a responder a clientes reais:\n\n• ${warnings.join('\n• ')}\n\nO agente pode ser activado assim, mas recomenda-se corrigir estes pontos e testá-lo primeiro em “Testar agente”.\n\nContinuar e guardar?`,
+        );
+        if (!confirmed) return;
+      }
+    }
+
+    const saved = await state.handleSave();
+    if (saved) {
+      initialLiveRef.current = state.isActive && state.autoReplyEnabled;
+    }
+  }
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -184,6 +231,15 @@ export function AgentRuntime({ state }: { state: AgentConfigState }) {
             />
           </div>
 
+          {state.isActive && state.autoReplyEnabled && !state.handoffAgentId ? (
+            <div className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>
+                Antes de colocar o agente ao vivo, configure quem deve receber uma transferência humana em Segurança e faça uma conversa em “Testar agente”.
+              </p>
+            </div>
+          ) : null}
+
           <div className="flex items-center justify-between gap-4">
             <div>
               <Label htmlFor="ai-buffer-window">{t('messageBuffer')}</Label>
@@ -290,7 +346,7 @@ export function AgentRuntime({ state }: { state: AgentConfigState }) {
         ) : (
           <span />
         )}
-        <Button onClick={() => void state.handleSave()} disabled={disabled}>
+        <Button onClick={() => void saveWithActivationGuard()} disabled={disabled}>
           {state.saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {t('save')}
         </Button>
