@@ -309,7 +309,7 @@ async function executeQueueAwareHandoff(
     ? `Equipa: ${route.queue.name} (${route.queue.routingKey})`
     : null
   const originalSummary = typeof parsed.summary === 'string' ? parsed.summary.trim() : ''
-  const forwarded = {
+  const forwarded: Record<string, unknown> = {
     ...parsed,
     summary: [queueSummary, originalSummary].filter(Boolean).join('\n') || undefined,
   }
@@ -357,7 +357,7 @@ export function createAutoReplyTools(
       if (!parsed) throw new Error(`Invalid JSON arguments for operational tool: ${call.name}`)
       const result = await base.executeTool({
         ...call,
-        arguments: parsed as unknown as string,
+        arguments: JSON.stringify(parsed),
       })
       if (call.name === 'check_availability') {
         lastAvailabilityCheck = parseAvailabilityCheck(result)
