@@ -12,6 +12,7 @@ import { ProfileForm } from '@/components/settings/profile-form';
 import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
+import { WebsiteChannelSettings } from '@/components/settings/website-channel-settings';
 import { AudioTranscriptionSettings } from '@/components/settings/audio-transcription-settings';
 import { TemplateManager } from '@/components/settings/template-manager';
 import { QuickRepliesManager } from '@/components/settings/quick-replies-manager';
@@ -66,6 +67,7 @@ function SettingsPageInner() {
     security: <SecurityPanel />,
     appearance: <AppearancePanel />,
     whatsapp: <WhatsAppConfig />,
+    website: <WebsiteChannelSettings />,
     audio: <AudioTranscriptionSettings />,
     templates: <TemplateManager />,
     'quick-replies': <QuickRepliesManager />,
@@ -82,7 +84,7 @@ function SettingsPageInner() {
   };
 
   const sectionLabel = (value: SettingsSection) =>
-    value === 'audio' || value === 'database'
+    value === 'audio' || value === 'database' || value === 'website'
       ? SECTION_META[value].label
       : t(`sections.${value}`);
 
