@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useLocale } from 'next-intl';
 import { Loader2, Sparkles, CheckCircle2, Trash2, Eye, EyeOff, Cpu, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,10 +28,41 @@ const KEY_PLACEHOLDER: Record<AiProvider, string> = {
   anthropic: 'sk-ant-...',
 };
 
+type Locale = 'pt' | 'en';
+
 type HandoffQueueRow = {
   enabled?: boolean;
   member_user_ids?: string[];
 };
+
+const COPY = {
+  pt: {
+    hideKey: 'Ocultar chave',
+    showKey: 'Mostrar chave',
+    execution: 'Execução',
+    executionDesc: 'Estado, temporização e o limite de tokens de saída (fixo, ver docs) por resposta.',
+    missingKnowledge: 'não existe nenhuma fonte de conhecimento carregada',
+    missingHandoff: 'não existe destinatário ou equipa configurada para transferência humana',
+    confirmationIntro: 'Antes de colocar o agente a responder a clientes reais:',
+    confirmationOutro: 'O agente pode ser activado assim, mas recomenda-se corrigir estes pontos e testá-lo primeiro em “Testar agente”.',
+    confirmationAction: 'Continuar e guardar?',
+    handoffWarning: 'Antes de colocar o agente ao vivo, configura quem deve receber uma transferência humana em Segurança ou numa equipa especialista e faz uma conversa em “Testar agente”.',
+    dateLocale: 'pt-PT',
+  },
+  en: {
+    hideKey: 'Hide key',
+    showKey: 'Show key',
+    execution: 'Execution',
+    executionDesc: 'Status, timing, and the fixed output-token limit per reply (see docs).',
+    missingKnowledge: 'no knowledge source has been loaded',
+    missingHandoff: 'no person or specialist team is configured for human handoff',
+    confirmationIntro: 'Before letting the agent reply to real customers:',
+    confirmationOutro: 'The agent can still be activated, but these points should be fixed and tested first in “Test agent”.',
+    confirmationAction: 'Continue and save?',
+    handoffWarning: 'Before going live, configure who should receive human handoffs in Security or a specialist team, then run a conversation in “Test agent”.',
+    dateLocale: 'en-US',
+  },
+} satisfies Record<Locale, Record<string, string>>;
 
 function hasReadyHandoffQueue(value: unknown): boolean {
   const queues = (value as { queues?: HandoffQueueRow[] } | null)?.queues ?? [];
@@ -62,6 +94,8 @@ async function loadHandoffQueueReady(): Promise<boolean> {
  */
 export function AgentRuntime({ state }: { state: AgentConfigState }) {
   const { t } = state;
+  const locale = useLocale();
+  const copy = COPY[locale.startsWith('pt') ? 'pt' : 'en'];
   const [showKey, setShowKey] = useState(false);
   const [handoffQueueReady, setHandoffQueueReady] = useState(false);
   const initialLiveRef = useRef<boolean | null>(null);
@@ -109,16 +143,12 @@ export function AgentRuntime({ state }: { state: AgentConfigState }) {
       }
 
       const warnings: string[] = [];
-      if (knowledgeCount === 0) {
-        warnings.push('não existe nenhuma fonte de conhecimento carregada');
-      }
-      if (!state.handoffAgentId && !specialistHandoffReady) {
-        warnings.push('não existe destinatário ou equipa configurada para transferência humana');
-      }
+      if (knowledgeCount === 0) warnings.push(copy.missingKnowledge);
+      if (!state.handoffAgentId && !specialistHandoffReady) warnings.push(copy.missingHandoff);
 
       if (warnings.length > 0) {
         const confirmed = window.confirm(
-          `Antes de colocar o agente a responder a clientes reais:\n\n• ${warnings.join('\n• ')}\n\nO agente pode ser activado assim, mas recomenda-se corrigir estes pontos e testá-lo primeiro em “Testar agente”.\n\nContinuar e guardar?`,
+          `${copy.confirmationIntro}\n\n• ${warnings.join('\n• ')}\n\n${copy.confirmationOutro}\n\n${copy.confirmationAction}`,
         );
         if (!confirmed) return;
       }
@@ -196,7 +226,7 @@ export function AgentRuntime({ state }: { state: AgentConfigState }) {
                 <button
                   type="button"
                   onClick={() => setShowKey((s) => !s)}
-                  aria-label={showKey ? 'Ocultar chave' : 'Mostrar chave'}
+                  aria-label={showKey ? copy.hideKey : copy.showKey}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
                   {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -248,11 +278,9 @@ export function AgentRuntime({ state }: { state: AgentConfigState }) {
       <Card>
         <CardHeader>
           <CardTitle as="h3" className="flex items-center gap-2 text-base">
-            <Cpu className="h-4 w-4 text-primary" /> Execução
+            <Cpu className="h-4 w-4 text-primary" /> {copy.execution}
           </CardTitle>
-          <CardDescription>
-            Estado, temporização e o limite de tokens de saída (fixo, ver docs) por resposta.
-          </CardDescription>
+          <CardDescription>{copy.executionDesc}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
@@ -278,9 +306,7 @@ export function AgentRuntime({ state }: { state: AgentConfigState }) {
           {state.isActive && state.autoReplyEnabled && !handoffReady ? (
             <div className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
               <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-              <p>
-                Antes de colocar o agente ao vivo, configure quem deve receber uma transferência humana em Segurança ou numa equipa especialista e faça uma conversa em “Testar agente”.
-              </p>
+              <p>{copy.handoffWarning}</p>
             </div>
           ) : null}
 
@@ -361,7 +387,7 @@ export function AgentRuntime({ state }: { state: AgentConfigState }) {
               <p className="text-xs text-muted-foreground">
                 {t('usdToMznRateDesc')}
                 {state.usdToMznRateUpdatedAt
-                  ? ` ${t('usdToMznRateUpdatedAt', { date: new Date(state.usdToMznRateUpdatedAt).toLocaleString('pt-PT') })}`
+                  ? ` ${t('usdToMznRateUpdatedAt', { date: new Date(state.usdToMznRateUpdatedAt).toLocaleString(copy.dateLocale) })}`
                   : ''}
               </p>
             </div>
