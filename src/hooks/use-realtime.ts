@@ -27,7 +27,7 @@ export function useRealtime({
 }: UseRealtimeOptions) {
   const { accountId } = useAuth();
   const channelRef = useRef<RealtimeChannel | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
+  const [connectedAccountId, setConnectedAccountId] = useState<string | null>(null);
 
   const onMessageRef = useRef(onMessageEvent);
   const onConversationRef = useRef(onConversationEvent);
@@ -37,13 +37,11 @@ export function useRealtime({
   });
 
   useEffect(() => {
-    if (!enabled || !accountId) {
-      setIsConnected(false);
-      return;
-    }
+    if (!enabled || !accountId) return;
 
     const supabase = createClient();
     const accountFilter = `account_id=eq.${accountId}`;
+    let disposed = false;
 
     const channel = supabase
       .channel(`${channelName}:${accountId}`)
@@ -80,26 +78,31 @@ export function useRealtime({
         },
       )
       .subscribe((status) => {
-        setIsConnected(status === "SUBSCRIBED");
+        if (disposed) return;
+        setConnectedAccountId(status === "SUBSCRIBED" ? accountId : null);
       });
 
     channelRef.current = channel;
 
     return () => {
-      supabase.removeChannel(channel);
+      disposed = true;
+      void supabase.removeChannel(channel);
       if (channelRef.current === channel) channelRef.current = null;
-      setIsConnected(false);
     };
   }, [accountId, channelName, enabled]);
 
   const unsubscribe = useCallback(() => {
     if (channelRef.current) {
       const supabase = createClient();
-      supabase.removeChannel(channelRef.current);
+      void supabase.removeChannel(channelRef.current);
       channelRef.current = null;
-      setIsConnected(false);
+      setConnectedAccountId(null);
     }
   }, []);
+
+  const isConnected = Boolean(
+    enabled && accountId && connectedAccountId === accountId,
+  );
 
   return { isConnected, unsubscribe };
 }
