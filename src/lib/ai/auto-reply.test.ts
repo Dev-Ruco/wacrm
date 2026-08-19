@@ -368,12 +368,14 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     }))
   })
 
-  it('stands down when an active message-level automation matches', async () => {
+  it('does not let a silent matching automation preempt the account agent', async () => {
     h.state.autoResponders = [{ id: 'auto-1' }]
     h.triggerMatches.mockReturnValue(true)
     await dispatchInboundToAiReply(ARGS)
-    expect(h.generateReply).not.toHaveBeenCalled()
-    expect(h.engineSendText).not.toHaveBeenCalled()
+    expect(h.generateReply).toHaveBeenCalledOnce()
+    expect(h.engineSendText).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: 'conv-1', text: 'Hello!' }),
+    )
   })
 
   it('hands off with a static notice when the atomic slot claim loses the race', async () => {
